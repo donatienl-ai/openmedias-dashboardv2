@@ -1,0 +1,38 @@
+# Configuration de déploiement Render
+# Render lira ce fichier automatiquement si tu utilises "Blueprint"
+services:
+  - type: web
+    name: openmedias-dashboard
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: AIRCALL_API_ID
+        sync: false
+      - key: AIRCALL_API_TOKEN
+        sync: false
+      - key: CALENDLY_TOKEN
+        sync: false
+      - key: CALENDLY_ORG_URI
+        value: https://api.calendly.com/organizations/CBCBRNXZXMQEI3KG
+      - key: SALESFORCE_CLIENT_ID
+        sync: false
+      - key: SALESFORCE_CLIENT_SECRET
+        sync: false
+      - key: SALESFORCE_USERNAME
+        sync: false
+      - key: SALESFORCE_PASSWORD
+        sync: false
+      - key: SALESFORCE_SECURITY_TOKEN
+        sync: false
+      - key: SALESFORCE_LOGIN_URL
+        value: https://login.salesforce.com
+      - key: GOOGLE_SHEETS_API_KEY
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        value: 1m9KUOvYTfDopks9t0Oz3HtNuE3b3Zboh3AuGnneod4Y
+      - key: GOOGLE_SHEET_TAB
+        value: DATA_RAW
