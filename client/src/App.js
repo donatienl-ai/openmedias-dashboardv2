@@ -1,50 +1,42 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  PieChart, Pie,
+} from 'recharts';
 
-// Formatage nombre type "159 280" (espace comme séparateur de milliers)
+// ---------- helpers ----------
 function fmt(n) {
   return new Intl.NumberFormat('fr-FR').format(Math.round(n || 0));
 }
-
-// Date du jour en français : "lundi 02 juin 2026"
 function todayLabel() {
   return new Date().toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
+    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
   });
 }
-
 function timeLabel(iso) {
   if (!iso) return '';
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
-// ============ LOGIN ============
+// ---------- LOGIN ----------
 function Login({ onSuccess }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const submit = async () => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
-      if (res.ok) {
-        onSuccess(password);
-      } else {
-        setError('Mot de passe incorrect');
-      }
-    } catch (e) {
+      if (res.ok) onSuccess(password);
+      else setError('Mot de passe incorrect');
+    } catch {
       setError('Erreur de connexion au serveur');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
@@ -53,13 +45,9 @@ function Login({ onSuccess }) {
         <div className="login-eyebrow">OpenMedias · Sales Dashboard</div>
         <div className="login-title">Performance<br />Commerciale</div>
         <input
-          className="login-input"
-          type="password"
-          placeholder="Mot de passe"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
-          autoFocus
+          className="login-input" type="password" placeholder="Mot de passe"
+          value={password} onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus
         />
         <button className="login-btn" onClick={submit} disabled={loading}>
           {loading ? 'Connexion…' : 'Accéder au dashboard'}
@@ -70,76 +58,88 @@ function Login({ onSuccess }) {
   );
 }
 
-// ============ TABLEAU DÉTAIL ============
-function DetailTable({ columns, rows, valueKey = 'count', isAmount = false, totalLabel, totalValue, accentClass }) {
+// ---------- petites briques ----------
+function Kpi({ label, value, sub, color, dot, glow }) {
   return (
-    <table className="tbl">
-      <thead>
-        <tr>
-          <th>{columns[0]}</th>
-          <th className="right">{columns[1]}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 ? (
-          <tr>
-            <td colSpan={2} className="empty-row">Aucune donnée aujourd'hui</td>
-          </tr>
-        ) : (
-          rows.map((r, i) => (
-            <tr key={i}>
-              <td>{r.name}</td>
-              <td className="right">
-                <span className={accentClass}>
-                  {isAmount ? `${fmt(r.amount)} €` : r[valueKey]}
-                </span>
-              </td>
-            </tr>
-          ))
-        )}
-        {totalLabel && (
-          <tr className="total-row">
-            <td>{totalLabel}</td>
-            <td className="right"><span className={accentClass}>{totalValue}</span></td>
-          </tr>
-        )}
-      </tbody>
-    </table>
+    <div className={`tile kpi ${glow ? 'glow-blue' : ''} col-2`}>
+      <div className="kpi-top">
+        <span className="tile-dot" style={{ background: dot }} />
+        <span className={`kpi-label ${color}`}>{label}</span>
+      </div>
+      <div className="kpi-num">{value}</div>
+      <div className="kpi-sub">{sub}</div>
+    </div>
   );
 }
 
-// ============ DASHBOARD ============
+function TileHead({ dotClass, title }) {
+  return (
+    <div className="tile-head">
+      <span className={`tile-dot ${dotClass}`} />
+      <span className="tile-title">{title}</span>
+    </div>
+  );
+}
+
+function TopList({ rows, isAmount, color }) {
+  if (!rows || rows.length === 0) return <div className="empty">Aucune donnée</div>;
+  const top = rows.slice(0, 6);
+  return (
+    <div className="toplist">
+      {top.map((r, i) => (
+        <div className="toprow" key={i}>
+          <div className="toprank">{i + 1}</div>
+          <div className="topname">{r.name}</div>
+          <div className={`topval ${color}`}>
+            {isAmount ? `${fmt(r.amount)} €` : r.count}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Tooltip sombre custom pour Recharts
+function DarkTooltip({ active, payload, label, suffix }) {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div style={{
+      background: '#14142C', border: '1px solid #20203E', borderRadius: 8,
+      padding: '8px 12px', fontSize: 12, color: '#fff',
+    }}>
+      <div style={{ color: '#8B8BB0', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontWeight: 700 }}>
+        {fmt(payload[0].value)}{suffix || ''}
+      </div>
+    </div>
+  );
+}
+
+// ---------- DASHBOARD ----------
 function Dashboard({ password, onLogout }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await fetch('/api/dashboard', {
         headers: { 'x-dashboard-password': password },
       });
-      if (res.status === 401) {
-        onLogout();
-        return;
-      }
+      if (res.status === 401) { onLogout(); return; }
       if (!res.ok) throw new Error('Erreur serveur');
-      const json = await res.json();
-      setData(json);
+      setData(await res.json());
     } catch (e) {
       setError(String(e.message || e));
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   }, [password, onLogout]);
 
   useEffect(() => { load(); }, [load]);
 
   if (loading && !data) {
     return (
-      <div className="dash">
+      <div className="shell">
         <div className="loading-wrap">
           <div className="spinner" />
           <div>Chargement des données…</div>
@@ -157,230 +157,189 @@ function Dashboard({ password, onLogout }) {
   const calls = d.calls || { total: 0, detail: [] };
   const sf = d.salesforge || { total: 0, detail: [] };
 
+  // données graphes
+  const caBySales = (rev.detail || []).slice(0, 8).map((r) => ({
+    name: r.name.split(' ')[0], full: r.name, value: r.amount,
+  }));
+  const callsBySales = (calls.detail || []).slice(0, 8).map((r) => ({
+    name: r.name.split(' ')[0], full: r.name, value: r.count,
+  }));
+  const rdvPie = [
+    { name: 'R1 pris', value: rdvB.r1.total, fill: '#FBBF24' },
+    { name: 'R2 pris', value: rdvB.r2.total, fill: '#60A5FA' },
+  ].filter((x) => x.value > 0);
+
   return (
-    <div className="dash">
-      {/* HEADER */}
-      <div className="dash-header">
-        <div className="dash-header-row">
+    <div className="shell">
+      {/* TOPBAR */}
+      <div className="topbar">
+        <div className="topbar-left">
           <div>
-            <div className="dash-eyebrow">OpenMedias · Sales Dashboard</div>
-            <div className="dash-title">Performance Commerciale</div>
-            <div className="dash-date">{todayLabel()}</div>
+            <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
+            <div className="brand-title">Performance Commerciale</div>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <button
-              className={`refresh-btn ${loading ? 'loading' : ''}`}
-              onClick={load}
-              disabled={loading}
-            >
-              <span className="refresh-icon">↻</span>
-              {loading ? 'Actualisation…' : 'Rafraîchir'}
-            </button>
-            {d.generatedAt && <div className="updated-at">MAJ : {timeLabel(d.generatedAt)}</div>}
-          </div>
+          <div className="brand-date">{todayLabel()}</div>
+        </div>
+        <div className="topbar-right">
+          {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
+          <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
+            <span className="refresh-icon">↻</span>
+            {loading ? 'Maj…' : 'Rafraîchir'}
+          </button>
         </div>
       </div>
 
-      {/* RANGÉE 1 - Activité */}
-      <div className="kpi-zone">
-        <div className="kpi-zone-label">Activité du jour</div>
-        <div className="kpi-grid">
-          <div className="kpi-card">
-            <div className="kpi-label c-blue">Calls</div>
-            <div className="kpi-value">{calls.total}</div>
-            <div className="kpi-sub">passés</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label c-green">R1</div>
-            <div className="kpi-value">{rdvT.r1.total}</div>
-            <div className="kpi-sub">échanges</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label c-bluer2">R2</div>
-            <div className="kpi-value">{rdvT.r2.total}</div>
-            <div className="kpi-sub">retours</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label c-amber">R1 Pris</div>
-            <div className="kpi-value">{rdvB.r1.total}</div>
-            <div className="kpi-sub">bookés</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label c-amber">R2 Pris</div>
-            <div className="kpi-value">{rdvB.r2.total}</div>
-            <div className="kpi-sub">bookés</div>
-          </div>
-        </div>
-      </div>
-
-      {/* RANGÉE 2 - Résultats */}
-      <div className="kpi-zone">
-        <div className="kpi-zone-label">Résultats du jour</div>
-        <div className="kpi-grid two">
-          <div className="kpi-card big">
-            <div className="kpi-label c-orange">Propals</div>
-            <div className="kpi-value">{propals.total}</div>
-            <div className="kpi-sub">envoyées aujourd'hui</div>
-          </div>
-          <div className="kpi-card big accent">
-            <div className="kpi-label c-violet">Signatures</div>
-            <div className="kpi-value">{sig.total}</div>
-            <div className="kpi-sub">du jour</div>
-          </div>
-        </div>
-      </div>
-
-      {/* BIG CA */}
-      <div className="ca-zone">
-        <div className="ca-card">
-          <div>
-            <div className="ca-card-label">💰 CA réalisé · ce mois</div>
-            <div className="ca-card-sub">Cumul des deals signés depuis le 1er du mois</div>
-          </div>
-          <div className="ca-card-value">{fmt(rev.totalAmount)} €</div>
-        </div>
-      </div>
-
-      {/* ERREURS PARTIELLES */}
+      {/* erreurs partielles */}
       {(error || d.errors) && (
-        <div className="section" style={{ paddingBottom: 0 }}>
-          {error && <div className="err-banner"><strong>Erreur :</strong> {error}</div>}
-          {d.errors &&
-            Object.entries(d.errors).map(([k, v]) => (
-              <div className="err-banner" key={k}>
-                <strong>{k} :</strong> {v}
-              </div>
-            ))}
+        <div style={{ marginBottom: 12 }}>
+          {error && <div className="err-pill"><strong>Erreur :</strong> {error}</div>}
+          {d.errors && Object.entries(d.errors).map(([k, v]) => (
+            <div className="err-pill" key={k}><strong>{k}</strong> — {v}</div>
+          ))}
         </div>
       )}
 
-      {/* CALLS */}
-      <div className="section">
-        <span className="badge badge-blue">📞 Calls passés</span>
-        <DetailTable
-          columns={['Commercial', 'Calls']}
-          rows={calls.detail}
-          accentClass="c-blue"
-          totalLabel="Total équipe"
-          totalValue={calls.total}
-        />
-      </div>
+      {/* GRID */}
+      <div className="grid">
+        {/* Rangée KPIs : 5 KPIs (col-2 chacun = 10) + hero CA pas ici */}
+        <Kpi label="Calls" value={calls.total} sub="passés aujourd'hui" color="c-blue" dot="#5B57FF" />
+        <Kpi label="R1 jour" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E" />
+        <Kpi label="R2 jour" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#60A5FA" />
+        <Kpi label="Propals" value={propals.total} sub="envoyées" color="c-orange" dot="#F97316" />
+        <Kpi label="Signatures" value={sig.total} sub="du jour" color="c-violet" dot="#A78BFA" glow />
 
-      {/* R1 / R2 DU JOUR */}
-      <div className="section">
-        <div className="section-cols">
-          <div>
-            <span className="badge badge-green">🟢 R1 — Échanges du jour</span>
-            <DetailTable columns={['Commercial', 'RDV']} rows={rdvT.r1.detail} accentClass="c-green" />
-          </div>
-          <div>
-            <span className="badge badge-bluer2">🔵 R2 — Retours du jour</span>
-            <DetailTable columns={['Commercial', 'RDV']} rows={rdvT.r2.detail} accentClass="c-bluer2" />
+        {/* Hero CA (col-2 pour compléter la ligne de 12) */}
+        <div className="tile hero-ca col-2">
+          <div className="lbl">CA mois</div>
+          <div className="val">{fmt(rev.totalAmount)}€</div>
+          <div className="sub">cumul signé</div>
+        </div>
+
+        {/* Rangée 2 : R1/R2 pris (KPIs) + graphe CA */}
+        <Kpi label="R1 pris" value={rdvB.r1.total} sub="bookés aujourd'hui" color="c-amber" dot="#FBBF24" />
+        <Kpi label="R2 pris" value={rdvB.r2.total} sub="bookés aujourd'hui" color="c-amber" dot="#FBBF24" />
+
+        {/* Graphe CA par sales */}
+        <div className="tile col-8">
+          <TileHead dotClass="bg-blue" title="CA du mois par commercial" />
+          <div className="chart-box" style={{ height: 220 }}>
+            {caBySales.length === 0 ? (
+              <div className="empty">Aucune donnée</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={caBySales} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+                  <XAxis dataKey="name" tick={{ fill: '#8B8BB0', fontSize: 11 }} axisLine={{ stroke: '#20203E' }} tickLine={false} />
+                  <YAxis tick={{ fill: '#5A5A80', fontSize: 10 }} axisLine={false} tickLine={false} width={50}
+                    tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                  <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(91,87,255,0.08)' }} />
+                  <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                    {caBySales.map((e, i) => (
+                      <Cell key={i} fill={i === 0 ? '#5B57FF' : '#3F3BFB'} fillOpacity={i === 0 ? 1 : 0.55} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
-      </div>
 
-      {/* R1 / R2 PRIS */}
-      <div className="section">
-        <div className="section-cols">
-          <div>
-            <span className="badge badge-amber">📅 R1 pris aujourd'hui</span>
-            <DetailTable columns={['Commercial', 'Bookés']} rows={rdvB.r1.detail} accentClass="c-amber" />
-          </div>
-          <div>
-            <span className="badge badge-amber">📅 R2 pris aujourd'hui</span>
-            <DetailTable columns={['Commercial', 'Bookés']} rows={rdvB.r2.detail} accentClass="c-amber" />
+        {/* Rangée 3 : graphe calls + donut RDV pris + top signatures */}
+        <div className="tile col-5">
+          <TileHead dotClass="bg-blue" title="Calls par commercial" />
+          <div className="chart-box" style={{ height: 200 }}>
+            {callsBySales.length === 0 ? (
+              <div className="empty">Aucun call aujourd'hui</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={callsBySales} layout="vertical" margin={{ top: 0, right: 12, left: 8, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fill: '#5A5A80', fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: '#8B8BB0', fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+                  <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(91,87,255,0.08)' }} />
+                  <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="#5B57FF" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
-      </div>
 
-      {/* PROPALS */}
-      <div className="section">
-        <span className="badge badge-orange">📤 Propals envoyées aujourd'hui</span>
-        <DetailTable
-          columns={['Commercial', 'Propals']}
-          rows={propals.detail}
-          accentClass="c-orange"
-          totalLabel="Total équipe"
-          totalValue={propals.total}
-        />
-      </div>
-
-      {/* SIGNATURES */}
-      <div className="section">
-        <span className="badge badge-blue">✅ Signatures du jour</span>
-        {sig.detail.length === 0 ? (
-          <div className="sig-empty">Aucune signature aujourd'hui</div>
-        ) : (
-          <div className="sig-card">
-            {sig.detail.map((s, i) => (
-              <div className="sig-line" key={i}>
-                <span className="name">{s.name}</span>
-                <span className="val">{s.count} signature(s) · {fmt(s.amount)} €</span>
-              </div>
-            ))}
+        <div className="tile col-3">
+          <TileHead dotClass="bg-amber" title="RDV pris — répartition" />
+          <div className="chart-box" style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {rdvPie.length === 0 ? (
+              <div className="empty">Aucun RDV pris</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={rdvPie} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                    innerRadius={45} outerRadius={75} paddingAngle={3} stroke="none">
+                    {rdvPie.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                  </Pie>
+                  <Tooltip content={<DarkTooltip />} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
-        )}
-      </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 16, marginTop: 4 }}>
+            <span style={{ fontSize: 11, color: '#8B8BB0' }}><span style={{ color: '#FBBF24' }}>●</span> R1 {rdvB.r1.total}</span>
+            <span style={{ fontSize: 11, color: '#8B8BB0' }}><span style={{ color: '#60A5FA' }}>●</span> R2 {rdvB.r2.total}</span>
+          </div>
+        </div>
 
-      {/* CA MOIS DÉTAIL */}
-      <div className="section">
-        <span className="badge badge-blue">💰 CA du mois — détail par sales</span>
-        <DetailTable
-          columns={['Commercial', 'CA']}
-          rows={rev.detail}
-          isAmount
-          accentClass="c-blue"
-          totalLabel="Total équipe"
-          totalValue={`${fmt(rev.totalAmount)} €`}
-        />
-      </div>
+        <div className="tile col-4">
+          <TileHead dotClass="bg-violet" title="Signatures du jour" />
+          {sig.detail.length === 0 ? (
+            <div className="empty">Aucune signature aujourd'hui</div>
+          ) : (
+            <div>
+              {sig.detail.map((s, i) => (
+                <div className="sig-row" key={i}>
+                  <span className="sig-name">{s.name}</span>
+                  <span className="sig-val">{fmt(s.amount)} €</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-      {/* SALESFORGE */}
-      <div className="section">
-        <span className="badge badge-bluer2">📧 RDV via SalesForge — cumul</span>
-        <DetailTable
-          columns={['Commercial', 'RDV']}
-          rows={sf.detail}
-          accentClass="c-bluer2"
-          totalLabel="Total SalesForge"
-          totalValue={sf.total}
-        />
+        {/* Rangée 4 : top propals + top R1 pris + top R2 pris + salesforge */}
+        <div className="tile col-3">
+          <TileHead dotClass="bg-orange" title="Propals par sales" />
+          <TopList rows={propals.detail} color="c-orange" />
+        </div>
+        <div className="tile col-3">
+          <TileHead dotClass="bg-amber" title="R1 pris par sales" />
+          <TopList rows={rdvB.r1.detail} color="c-amber" />
+        </div>
+        <div className="tile col-3">
+          <TileHead dotClass="bg-amber" title="R2 pris par sales" />
+          <TopList rows={rdvB.r2.detail} color="c-amber" />
+        </div>
+        <div className="tile col-3">
+          <TileHead dotClass="bg-bluer2" title="SalesForge — cumul" />
+          <TopList rows={sf.detail} color="c-bluer2" />
+        </div>
       </div>
 
       {/* FOOTER */}
-      <div className="dash-footer">
-        <div>
-          <div className="footer-brand">OPENMEDIAS</div>
-          <div className="footer-sub">
-            Dashboard temps réel · Aircall + Calendly + Salesforce<br />
-            OpenMedias Growth · {new Date().getFullYear()}
-          </div>
-        </div>
-        <div className="footer-tag">Live</div>
+      <div className="foot">
+        <span className="foot-brand">OPENMEDIAS</span>
+        <span className="foot-sub">Live · Aircall + Calendly + Salesforce · {new Date().getFullYear()}</span>
       </div>
     </div>
   );
 }
 
-// ============ APP ROOT ============
+// ---------- ROOT ----------
 export default function App() {
   const [password, setPassword] = useState(null);
 
-  // On retient le mot de passe en sessionStorage pour ne pas le redemander à chaque reload
   useEffect(() => {
     const saved = sessionStorage.getItem('om_pw');
     if (saved) setPassword(saved);
   }, []);
 
-  const handleSuccess = (pw) => {
-    sessionStorage.setItem('om_pw', pw);
-    setPassword(pw);
-  };
-  const handleLogout = () => {
-    sessionStorage.removeItem('om_pw');
-    setPassword(null);
-  };
+  const handleSuccess = (pw) => { sessionStorage.setItem('om_pw', pw); setPassword(pw); };
+  const handleLogout = () => { sessionStorage.removeItem('om_pw'); setPassword(null); };
 
   if (!password) return <Login onSuccess={handleSuccess} />;
   return <Dashboard password={password} onLogout={handleLogout} />;
