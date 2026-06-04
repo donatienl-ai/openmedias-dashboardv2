@@ -302,7 +302,7 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
 }
 
 // ---------- DASHBOARD ----------
-function Dashboard({ password, onLogout }) {
+function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -353,6 +353,16 @@ function Dashboard({ password, onLogout }) {
   const d = data || {};
   const rangeLabel = d.range?.label || "Aujourd'hui";
   const isToday = (d.range?.preset || 'today') === 'today';
+
+  // Couleurs de graphes adaptées au thème (les charts Recharts ne lisent pas les CSS vars)
+  const isLight = theme === 'light';
+  const ct = {
+    axis: isLight ? '#E3E3EE' : '#20203E',
+    tick: isLight ? '#7A7A9D' : '#8B8BB0',
+    tickFaint: isLight ? '#9A9AB8' : '#5A5A80',
+    tickBold: isLight ? '#3A3A5C' : '#C5C5D8',
+    labelStrong: isLight ? '#16162B' : '#FFFFFF',
+  };
 
   // ===== FILTRAGE ÉQUIPE / SALES =====
   // allowed = Set des noms autorisés, ou null = pas de filtre
@@ -451,6 +461,9 @@ function Dashboard({ password, onLogout }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
+            <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
             {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
             <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
               <span className="refresh-icon">↻</span>
@@ -498,8 +511,8 @@ function Dashboard({ password, onLogout }) {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={caBySales} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                  <XAxis dataKey="name" tick={{ fill: '#8B8BB0', fontSize: 11 }} axisLine={{ stroke: '#20203E' }} tickLine={false} />
-                  <YAxis tick={{ fill: '#5A5A80', fontSize: 10 }} axisLine={false} tickLine={false} width={50}
+                  <XAxis dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
+                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
                     tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
                   <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(91,87,255,0.08)' }} />
                   <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={90}>
@@ -538,11 +551,11 @@ function Dashboard({ password, onLogout }) {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={callsBySales.slice(0, 10)} layout="vertical" margin={{ top: 0, right: 36, left: 8, bottom: 0 }}>
-                  <XAxis type="number" tick={{ fill: '#5A5A80', fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fill: '#8B8BB0', fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+                  <XAxis type="number" tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                   <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(91,87,255,0.08)' }} />
                   <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="#5B57FF"
-                    label={{ position: 'right', fill: '#8B8BB0', fontSize: 11, fontWeight: 700 }} />
+                    label={{ position: 'right', fill: ct.tick, fontSize: 11, fontWeight: 700 }} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -558,11 +571,11 @@ function Dashboard({ password, onLogout }) {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={rdvPie} margin={{ top: 24, right: 8, left: 8, bottom: 4 }} barCategoryGap="30%">
-                  <XAxis dataKey="name" tick={{ fill: '#C5C5D8', fontSize: 13, fontWeight: 700 }} axisLine={{ stroke: '#20203E' }} tickLine={false} />
-                  <YAxis tick={{ fill: '#5A5A80', fontSize: 10 }} axisLine={false} tickLine={false} width={32} allowDecimals={false} />
+                  <XAxis dataKey="name" tick={{ fill: ct.tickBold, fontSize: 13, fontWeight: 700 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
+                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={32} allowDecimals={false} />
                   <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
                   <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={70}
-                    label={{ position: 'top', fill: '#FFFFFF', fontSize: 16, fontWeight: 800 }}>
+                    label={{ position: 'top', fill: ct.labelStrong, fontSize: 16, fontWeight: 800 }}>
                     {rdvPie.map((e, i) => <Cell key={i} fill={e.fill} />)}
                   </Bar>
                 </BarChart>
@@ -615,15 +628,24 @@ function Dashboard({ password, onLogout }) {
 // ---------- ROOT ----------
 export default function App() {
   const [password, setPassword] = useState(null);
+  const [theme, setTheme] = useState(() => localStorage.getItem('om_theme') || 'dark');
 
   useEffect(() => {
     const saved = sessionStorage.getItem('om_pw');
     if (saved) setPassword(saved);
   }, []);
 
+  // Applique le thème sur <html> et mémorise la préférence
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('om_theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
   const handleSuccess = (pw) => { sessionStorage.setItem('om_pw', pw); setPassword(pw); };
   const handleLogout = () => { sessionStorage.removeItem('om_pw'); setPassword(null); };
 
   if (!password) return <Login onSuccess={handleSuccess} />;
-  return <Dashboard password={password} onLogout={handleLogout} />;
+  return <Dashboard password={password} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
 }

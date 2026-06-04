@@ -544,3 +544,56 @@ body {
   .topbar-right { flex-wrap: wrap; }
   .topbar-divider { display: none; }
 }
+
+/* ==========================================
+   LIGHT MODE
+   Le dark reste le défaut (:root).
+   [data-theme="light"] surcharge les variables.
+   ========================================== */
+[data-theme="light"] {
+  --bg: #F2F2F7;
+  --panel: #FFFFFF;
+  --panel-2: #F5F5FA;
+  --border: #E3E3EE;
+  --border-soft: #EDEDF4;
+  --text: #16162B;
+  --text-soft: #5F5F8C;
+  --text-muted: #9494B3;
+  /* Accents recalibrés pour la lisibilité sur fond clair */
+  --green: #16A34A;
+  --bluer2: #2563EB;
+  --violet: #7C3AED;
+  --amber: #D97706;
+}
+
+/* Ajustements fins du light */
+[data-theme="light"] body { background-color: var(--bg); }
+[data-theme="light"] .login-error { color: #DC2626; }
+[data-theme="light"] .err-pill { color: #B91C1C; background: #FEF2F2; border-color: #FECACA; }
+[data-theme="light"] .tile { box-shadow: 0 1px 2px rgba(22, 22, 60, 0.04); }
+[data-theme="light"] .clickable:hover { box-shadow: 0 12px 28px rgba(22, 22, 60, 0.12); }
+[data-theme="light"] .login-card { box-shadow: 0 30px 80px rgba(22, 22, 60, 0.18); }
+[data-theme="light"] .modal { box-shadow: 0 40px 100px rgba(22, 22, 60, 0.25); }
+[data-theme="light"] .period-menu { box-shadow: 0 20px 60px rgba(22, 22, 60, 0.16); }
+[data-theme="light"] .kpi.glow-blue {
+  background: linear-gradient(160deg, rgba(63, 59, 251, 0.08), var(--panel) 60%);
+  border-color: rgba(63, 59, 251, 0.25);
+}
+[data-theme="light"] .toprank { color: var(--text-soft); }
+[data-theme="light"] .period-field input { color-scheme: light; }
+
+/* --- Bouton de bascule de thème --- */
+.theme-btn {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; width: 38px; height: 38px;
+  font-size: 16px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.theme-btn:hover { border-color: var(--om-blue-light); background: var(--panel-2); }
+.theme-btn:active { transform: scale(0.94); }
+
+/* Transition douce entre thèmes */
+body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
