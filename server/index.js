@@ -17,6 +17,9 @@ import {
 } from './salesforce.js';
 import { resolveRange } from './dateRange.js';
 import { getBdc } from './docusign.js';
+import { getRawUsers } from './aircall.js';
+import { getRawHosts } from './calendly.js';
+import { SALES } from './roster.js';
 
 dotenv.config();
 
@@ -50,6 +53,32 @@ app.post('/api/login', (req, res) => {
 });
 
 // --- Route principale : agrège toutes les sources sur une plage de dates ---
+// ---------- DEBUG : noms bruts des sources (diagnostic matching) ----------
+// Auth : header x-dashboard-password OU ?pw= (pratique navigateur).
+// Usage : /api/debug/names?preset=this_week&pw=LE_MOT_DE_PASSE
+app.get('/api/debug/names', async (req, res) => {
+  const pw = req.headers['x-dashboard-password'] || req.query.pw;
+  if (pw !== PASSWORD) return res.status(401).json({ error: 'Mot de passe invalide' });
+  try {
+    const r = resolveRange(req.query.preset || 'this_week', req.query.start, req.query.end);
+    const [aircall, calendly] = await Promise.allSettled([
+      getRawUsers(r),
+      getRawHosts(r),
+    ]);
+    const rosterNames = SALES.map((s) => s.display);
+    const annotate = (rows) =>
+      rows.map((x) => ({ ...x, matched: rosterNames.includes(x.matchedTo) }));
+    res.json({
+      range: { label: r.label },
+      aircall: aircall.status === 'fulfilled' ? annotate(aircall.value) : { error: String(aircall.reason?.message || aircall.reason) },
+      calendly: calendly.status === 'fulfilled' ? annotate(calendly.value) : { error: String(calendly.reason?.message || calendly.reason) },
+      hint: 'matched:false = ce nom brut ne correspond à personne du roster → ses données sont perdues du détail.',
+    });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   // Plage de dates : preset (today par défaut) + custom start/end éventuels
   const preset = req.query.preset || 'today';

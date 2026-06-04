@@ -6,7 +6,8 @@
 // dans des formats variés ("Streith Noemie", "Noémie Streith", etc.).
 // On matche sur le NOM DE FAMILLE normalisé (sans accent, minuscule).
 
-// Liste officielle : { display: nom affiché, last: nom de famille pour matching }
+// Liste officielle : { display: nom affiché, last: nom de famille pour matching,
+//                      aliases?: [tokens supplémentaires] si un outil orthographie autrement }
 export const SALES = [
   { display: 'Romy ABDEN', last: 'abden' },
   { display: 'Clauvaine Battery', last: 'battery' },
@@ -58,7 +59,9 @@ function normalize(str) {
 export function matchSale(rawName) {
   const norm = normalize(rawName);
   if (!norm) return null;
-  const found = SALES.find((s) => norm.includes(s.last));
+  const found = SALES.find(
+    (s) => norm.includes(s.last) || (s.aliases || []).some((a) => norm.includes(normalize(a)))
+  );
   return found ? found.display : rawName;
 }
 

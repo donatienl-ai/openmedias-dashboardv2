@@ -170,3 +170,19 @@ export async function getSalesforgeRdv({ start, end }) {
 
   return { total: salesforgeEvents.length, detail: groupByHost(salesforgeEvents) };
 }
+
+/**
+ * DEBUG : liste les noms d'hôtes BRUTS vus dans Calendly (events de la période,
+ * sur start_time), avec volume et résultat du matching roster.
+ */
+export async function getRawHosts({ start, end }) {
+  const events = await fetchEventsByStart(start.toISOString(), end.toISOString());
+  const map = new Map();
+  for (const e of events) {
+    const raw = e.event_memberships?.[0]?.user_name || '(sans hôte)';
+    map.set(raw, (map.get(raw) || 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count, matchedTo: matchSale(name) }))
+    .sort((a, b) => b.count - a.count);
+}

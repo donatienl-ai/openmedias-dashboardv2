@@ -48,7 +48,7 @@ async function fetchWithRetry(url, maxRetries = 4) {
  * - Retry auto sur rate limit
  * - Plafond de sécurité à 50 000 calls (500 pages)
  */
-export async function getCalls({ start, end }) {
+async function fetchAllCalls({ start, end }) {
   const from = toUnix(start);
   const to = toUnix(end);
   let page = 1;
@@ -70,6 +70,11 @@ export async function getCalls({ start, end }) {
     hasMore = Boolean(data.meta?.next_page_link);
     page += 1;
   }
+  return { allCalls, truncated };
+}
+
+export async function getCalls({ start, end }) {
+  const { allCalls, truncated } = await fetchAllCalls({ start, end });
 
   const map = new Map();
   let totalInbound = 0;
@@ -86,4 +91,20 @@ export async function getCalls({ start, end }) {
   const detail = buildFullList(map);
   // `truncated` permet au front d'afficher un indicateur si le total est plafonné
   return { total: allCalls.length, totalInbound, totalOutbound, detail, truncated };
+}
+
+/**
+ * DEBUG : liste les noms d'utilisateurs BRUTS vus dans Aircall sur la période,
+ * avec volume et résultat du matching roster. Sert à diagnostiquer les écarts.
+ */
+export async function getRawUsers({ start, end }) {
+  const { allCalls } = await fetchAllCalls({ start, end });
+  const map = new Map();
+  for (const c of allCalls) {
+    const raw = c.user?.name || '(sans utilisateur)';
+    map.set(raw, (map.get(raw) || 0) + 1);
+  }
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count, matchedTo: matchSale(name) }))
+    .sort((a, b) => b.count - a.count);
 }
