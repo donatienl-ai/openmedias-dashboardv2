@@ -1,58 +1,45 @@
 // ==========================================
 //  CONNECTEUR SALESFORCE
-//  Auth via Username-Password OAuth Flow
+//  Auth via OAuth Client Credentials Flow
 // ==========================================
 import fetch from 'node-fetch';
+import { matchSale, buildFullList } from './roster.js';
+import { toSoqlDate, toSoqlDateTime } from './dateRange.js';
 
 let cachedAuth = null;
 let cachedAuthExpiry = 0;
 
-/**
- * Authentifie auprès de Salesforce et renvoie { access_token, instance_url }.
- * Met en cache le token pendant 1h pour éviter de se reconnecter à chaque appel.
- */
 async function getAuth() {
   const now = Date.now();
-  if (cachedAuth && now < cachedAuthExpiry) {
-    return cachedAuth;
-  }
+  if (cachedAuth && now < cachedAuthExpiry) return cachedAuth;
 
-  const loginUrl = process.env.SALESFORCE_LOGIN_URL || 'https://login.salesforce.com';
+  // Client Credentials Flow : exige le My Domain (PAS login.salesforce.com).
+  const domain = process.env.SALESFORCE_DOMAIN_URL || 'https://openmedias.my.salesforce.com';
   const params = new URLSearchParams({
-    grant_type: 'password',
+    grant_type: 'client_credentials',
     client_id: process.env.SALESFORCE_CLIENT_ID,
     client_secret: process.env.SALESFORCE_CLIENT_SECRET,
-    username: process.env.SALESFORCE_USERNAME,
-    // Salesforce exige password + security token concaténés
-    password: (process.env.SALESFORCE_PASSWORD || '') + (process.env.SALESFORCE_SECURITY_TOKEN || ''),
   });
 
-  const res = await fetch(`${loginUrl}/services/oauth2/token`, {
+  const res = await fetch(`${domain}/services/oauth2/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params,
   });
-
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Salesforce auth failed (${res.status}): ${text}`);
   }
-
   const data = await res.json();
   cachedAuth = { accessToken: data.access_token, instanceUrl: data.instance_url };
-  cachedAuthExpiry = now + 60 * 60 * 1000; // 1h
+  cachedAuthExpiry = now + 60 * 60 * 1000;
   return cachedAuth;
 }
 
-/**
- * Exécute une requête SOQL et renvoie le tableau de records.
- */
 async function query(soql) {
   const { accessToken, instanceUrl } = await getAuth();
   const url = `${instanceUrl}/services/data/v59.0/query?q=${encodeURIComponent(soql)}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Salesforce query failed (${res.status}): ${text}`);
@@ -61,48 +48,57 @@ async function query(soql) {
   return data.records || [];
 }
 
-/**
- * Regroupe des records par nom de propriétaire, en sommant un champ optionnel.
- */
-function groupByOwner(records, sumField) {
+function groupRecords(records, sumField) {
   const map = new Map();
   for (const r of records) {
-    const owner = r.Owner?.Name || 'Inconnu';
-    if (!map.has(owner)) map.set(owner, { name: owner, count: 0, amount: 0 });
+    const owner = matchSale(r.Owner?.Name) || 'Inconnu';
+    if (!map.has(owner)) map.set(owner, { count: 0, amount: 0 });
     const entry = map.get(owner);
     entry.count += 1;
     if (sumField && typeof r[sumField] === 'number') entry.amount += r[sumField];
   }
-  return Array.from(map.values()).sort((a, b) => b.amount - a.amount || b.count - a.count);
+  return map;
 }
 
-// --- Signatures du jour (Opportunity Closed Won aujourd'hui) ---
-export async function getSignaturesToday() {
+function onlyActive(map, withAmount) {
+  return Array.from(map.entries())
+    .map(([name, e]) => (withAmount ? { name, count: e.count, amount: e.amount } : { name, count: e.count }))
+    .sort((a, b) => (withAmount ? b.amount - a.amount : b.count - a.count));
+}
+
+// --- Signatures sur la période (Opportunity Closed Won, CloseDate dans la plage) ---
+export async function getSignatures({ start, end }) {
+  const s = toSoqlDate(start);
+  const e = toSoqlDate(end);
   const records = await query(
-    `SELECT Id, Name, Amount, Owner.Name FROM Opportunity WHERE IsWon = true AND CloseDate = TODAY`
+    `SELECT Id, Name, Amount, Owner.Name FROM Opportunity WHERE IsWon = true AND CloseDate >= ${s} AND CloseDate <= ${e}`
   );
-  const detail = groupByOwner(records, 'Amount');
+  const detail = onlyActive(groupRecords(records, 'Amount'), true);
   const total = records.length;
-  const totalAmount = records.reduce((s, r) => s + (r.Amount || 0), 0);
+  const totalAmount = records.reduce((sum, r) => sum + (r.Amount || 0), 0);
   return { total, totalAmount, detail };
 }
 
-// --- CA du mois (Opportunity Closed Won ce mois) ---
-export async function getRevenueThisMonth() {
+// --- CA sur la période (Opportunity Closed Won, CloseDate dans la plage) ---
+export async function getRevenue({ start, end }) {
+  const s = toSoqlDate(start);
+  const e = toSoqlDate(end);
   const records = await query(
-    `SELECT Id, Name, Amount, Owner.Name FROM Opportunity WHERE IsWon = true AND CloseDate = THIS_MONTH`
+    `SELECT Id, Name, Amount, Owner.Name FROM Opportunity WHERE IsWon = true AND CloseDate >= ${s} AND CloseDate <= ${e}`
   );
-  const detail = groupByOwner(records, 'Amount');
-  const totalAmount = records.reduce((s, r) => s + (r.Amount || 0), 0);
+  const detail = buildFullList(groupRecords(records, 'Amount'), true);
+  const totalAmount = records.reduce((sum, r) => sum + (r.Amount || 0), 0);
   return { totalAmount, detail };
 }
 
-// --- Propals envoyées aujourd'hui (Lead Status = Working = "Proposition faite") ---
-export async function getPropalsToday() {
+// --- Propals sur la période (Lead Status=Working, LastModifiedDate dans la plage) ---
+export async function getPropals({ start, end }) {
+  const s = toSoqlDateTime(start);
+  const e = toSoqlDateTime(end);
   const records = await query(
-    `SELECT Id, Name, Owner.Name FROM Lead WHERE Status = 'Working' AND LastModifiedDate = TODAY`
+    `SELECT Id, Name, Owner.Name FROM Lead WHERE Status = 'Working' AND LastModifiedDate >= ${s} AND LastModifiedDate <= ${e}`
   );
-  const detail = groupByOwner(records);
+  const detail = buildFullList(groupRecords(records), false);
   const total = records.length;
   return { total, detail };
 }

@@ -22,14 +22,8 @@ services:
         sync: false
       - key: SALESFORCE_CLIENT_SECRET
         sync: false
-      - key: SALESFORCE_USERNAME
-        sync: false
-      - key: SALESFORCE_PASSWORD
-        sync: false
-      - key: SALESFORCE_SECURITY_TOKEN
-        sync: false
-      - key: SALESFORCE_LOGIN_URL
-        value: https://login.salesforce.com
+      - key: SALESFORCE_DOMAIN_URL
+        value: https://openmedias.my.salesforce.com
       - key: GOOGLE_SHEETS_API_KEY
         sync: false
       - key: GOOGLE_SHEET_ID

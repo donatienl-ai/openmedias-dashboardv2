@@ -8,14 +8,15 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { getCallsToday } from './aircall.js';
-import { getRdvToday, getRdvBookedToday } from './calendly.js';
+import { getCalls } from './aircall.js';
+import { getRdvInRange, getRdvBookedInRange } from './calendly.js';
 import {
-  getSignaturesToday,
-  getRevenueThisMonth,
-  getPropalsToday,
+  getSignatures,
+  getRevenue,
+  getPropals,
 } from './salesforce.js';
 import { getSalesforgeData } from './sheets.js';
+import { resolveRange } from './dateRange.js';
 
 dotenv.config();
 
@@ -48,18 +49,23 @@ app.post('/api/login', (req, res) => {
   return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
 });
 
-// --- Route principale : agrège toutes les sources ---
+// --- Route principale : agrège toutes les sources sur une plage de dates ---
 app.get('/api/dashboard', requireAuth, async (req, res) => {
+  // Plage de dates : preset (today par défaut) + custom start/end éventuels
+  const preset = req.query.preset || 'today';
+  const range = resolveRange(preset, req.query.start, req.query.end);
+  const r = { start: range.start, end: range.end };
+
   // On lance tous les appels en parallèle. Si une source plante,
   // on renvoie quand même les autres avec une erreur partielle.
   const results = await Promise.allSettled([
-    getCallsToday(),          // 0
-    getRdvToday(),            // 1
-    getRdvBookedToday(),      // 2
-    getPropalsToday(),        // 3
-    getSignaturesToday(),     // 4
-    getRevenueThisMonth(),    // 5
-    getSalesforgeData(),      // 6
+    getCalls(r),              // 0
+    getRdvInRange(r),         // 1
+    getRdvBookedInRange(r),   // 2
+    getPropals(r),            // 3
+    getSignatures(r),         // 4
+    getRevenue(r),            // 5
+    getSalesforgeData(),      // 6 (cumul all-time, pas de filtre date)
   ]);
 
   const pick = (i, fallback) =>
@@ -67,8 +73,8 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 
   const errors = {};
   const labels = ['calls', 'rdvToday', 'rdvBooked', 'propals', 'signatures', 'revenue', 'salesforge'];
-  results.forEach((r, i) => {
-    if (r.status === 'rejected') errors[labels[i]] = String(r.reason?.message || r.reason);
+  results.forEach((res2, i) => {
+    if (res2.status === 'rejected') errors[labels[i]] = String(res2.reason?.message || res2.reason);
   });
 
   const rdvToday = pick(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } });
@@ -76,6 +82,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 
   res.json({
     generatedAt: new Date().toISOString(),
+    range: { preset, label: range.label, start: range.start.toISOString(), end: range.end.toISOString() },
     calls: pick(0, { total: 0, detail: [] }),
     rdvToday,
     rdvBooked,

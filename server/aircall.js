@@ -1,62 +1,84 @@
 // ==========================================
 //  CONNECTEUR AIRCALL
 //  Auth via Basic (API ID : API Token)
+//  Pagination robuste : 100/page, retry sur rate limit, plafond 50k
 // ==========================================
 import fetch from 'node-fetch';
+import { matchSale, buildFullList } from './roster.js';
+import { toUnix } from './dateRange.js';
 
 function authHeader() {
   const id = process.env.AIRCALL_API_ID || '';
   const token = process.env.AIRCALL_API_TOKEN || '';
-  const encoded = Buffer.from(`${id}:${token}`).toString('base64');
-  return `Basic ${encoded}`;
+  return `Basic ${Buffer.from(`${id}:${token}`).toString('base64')}`;
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /**
- * Renvoie le timestamp Unix (secondes) du début de la journée locale.
+ * Fait une requête Aircall avec retry automatique sur rate limit (429).
+ * Aircall limite à ~60 req/min ; en cas de 429 on attend et on réessaie.
  */
-function startOfTodayUnix() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return Math.floor(d.getTime() / 1000);
-}
-
-/**
- * Récupère les calls sortants du jour, paginés.
- * Aircall pagine par 50 ; on boucle tant qu'il y a une page suivante.
- */
-export async function getCallsToday() {
-  const from = startOfTodayUnix();
-  let page = 1;
-  const perPage = 50;
-  let allCalls = [];
-  let hasMore = true;
-  let safety = 0;
-
-  while (hasMore && safety < 40) {
-    safety += 1;
-    const url = `https://api.aircall.io/v1/calls?from=${from}&direction=outbound&per_page=${perPage}&page=${page}`;
+async function fetchWithRetry(url, maxRetries = 4) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await fetch(url, { headers: { Authorization: authHeader() } });
+
+    if (res.status === 429) {
+      // Rate limited : on lit le header Retry-After si présent, sinon backoff progressif
+      const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : (attempt + 1) * 2000;
+      await sleep(waitMs);
+      continue; // réessaie
+    }
+
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`Aircall failed (${res.status}): ${text}`);
     }
-    const data = await res.json();
+    return res.json();
+  }
+  throw new Error('Aircall failed: rate limit dépassé après plusieurs tentatives');
+}
+
+/**
+ * Récupère les calls sortants sur la période, paginés.
+ * - 100 calls par page (max Aircall) → 2x moins de requêtes
+ * - Retry auto sur rate limit
+ * - Plafond de sécurité à 50 000 calls (500 pages)
+ */
+export async function getCalls({ start, end }) {
+  const from = toUnix(start);
+  const to = toUnix(end);
+  let page = 1;
+  const perPage = 100; // max autorisé par Aircall
+  const MAX_PAGES = 500; // 500 × 100 = 50 000 calls
+  let allCalls = [];
+  let hasMore = true;
+  let truncated = false;
+
+  while (hasMore) {
+    if (page > MAX_PAGES) {
+      truncated = true; // on a atteint le plafond de 50k
+      break;
+    }
+    const url = `https://api.aircall.io/v1/calls?from=${from}&to=${to}&direction=outbound&per_page=${perPage}&page=${page}`;
+    const data = await fetchWithRetry(url);
     const calls = data.calls || [];
     allCalls = allCalls.concat(calls);
-    // Aircall renvoie meta.next_page_link à null quand c'est fini
     hasMore = Boolean(data.meta?.next_page_link);
     page += 1;
   }
 
-  // Regroupe par utilisateur
   const map = new Map();
   for (const c of allCalls) {
-    const name = c.user?.name || 'Inconnu';
-    map.set(name, (map.get(name) || 0) + 1);
+    const name = matchSale(c.user?.name) || 'Inconnu';
+    const e = map.get(name) || { count: 0 };
+    e.count += 1;
+    map.set(name, e);
   }
-  const detail = Array.from(map.entries())
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count);
-
-  return { total: allCalls.length, detail };
+  const detail = buildFullList(map);
+  // `truncated` permet au front d'afficher un indicateur si le total est plafonné
+  return { total: allCalls.length, detail, truncated };
 }
