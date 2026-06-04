@@ -141,17 +141,23 @@ function groupBySender(envelopes) {
 }
 
 /**
- * BDC envoyés + signés sur la période.
- * - envoyés : enveloppes passées au statut "sent" dans la plage
- * - signés  : enveloppes passées au statut "completed" dans la plage
+ * BDC envoyés + signés + en attente sur la période.
+ * - envoyés    : enveloppes passées au statut "sent" dans la plage
+ * - signés     : enveloppes passées au statut "completed" dans la plage
+ * - en attente : parmi les envoyés de la plage, celles dont le statut ACTUEL
+ *                est encore sent/delivered (= pipeline de relance)
  */
 export async function getBdc({ start, end }) {
   const [sentEnvs, signedEnvs] = await Promise.all([
     listEnvelopes({ start, end }, 'sent'),
     listEnvelopes({ start, end }, 'completed'),
   ]);
+  const pendingEnvs = sentEnvs.filter((e) =>
+    ['sent', 'delivered'].includes(String(e.status || '').toLowerCase())
+  );
   return {
     sent: { total: sentEnvs.length, detail: groupBySender(sentEnvs) },
     signed: { total: signedEnvs.length, detail: groupBySender(signedEnvs) },
+    pending: { total: pendingEnvs.length, detail: groupBySender(pendingEnvs) },
   };
 }

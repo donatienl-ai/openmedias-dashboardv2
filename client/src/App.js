@@ -452,6 +452,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const bdc = {
     sent: fBlock(d.bdc?.sent || { total: 0, detail: [] }),
     signed: fBlock(d.bdc?.signed || { total: 0, detail: [] }),
+    pending: fBlock(d.bdc?.pending || { total: 0, detail: [] }),
   };
 
   // libellé du filtre actif (pour le titre)
@@ -662,8 +663,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <span className="bdc-stat-val c-green">{bdc.signed.total}</span>
               <span className="bdc-stat-label">Signés</span>
             </button>
+            <button className="bdc-stat" onClick={() => openModal('BDC en attente de signature', bdc.pending.detail, false, 'c-amber')}>
+              <span className="bdc-stat-val c-amber">{bdc.pending.total}</span>
+              <span className="bdc-stat-label">En attente</span>
+            </button>
           </div>
-          <TopList rows={bdc.signed.detail} color="c-green" />
+          <TopList rows={bdc.pending.detail} color="c-amber" />
         </div>
 
         {/* ===== RANGÉE CLASSEMENTS ===== */}

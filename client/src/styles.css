@@ -602,12 +602,12 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 
 /* ===== TUILE BDC (DocuSign) ===== */
 .bdc-stats {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
   margin-bottom: 14px;
 }
 .bdc-stat {
   background: var(--panel-2); border: 1px solid var(--border);
-  border-radius: 12px; padding: 14px 10px;
+  border-radius: 12px; padding: 12px 6px;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   cursor: pointer; font-family: var(--font-body);
   transition: border-color 0.15s, transform 0.1s, background 0.15s;
@@ -615,7 +615,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .bdc-stat:hover { border-color: var(--om-blue-light); transform: translateY(-1px); }
 .bdc-stat:active { transform: translateY(0) scale(0.98); }
 .bdc-stat-val {
-  font-family: var(--font-display); font-size: 26px; font-weight: 800;
+  font-family: var(--font-display); font-size: 23px; font-weight: 800;
   line-height: 1; font-variant-numeric: tabular-nums;
 }
 .bdc-stat-label {

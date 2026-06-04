@@ -91,7 +91,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     signatures: pick(4, { total: 0, totalAmount: 0, detail: [] }),
     revenue: pick(5, { totalAmount: 0, detail: [] }),
     salesforge: pick(6, { total: 0, detail: [] }),
-    bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] } }),
+    bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
     errors: Object.keys(errors).length ? errors : null,
   });
 });
