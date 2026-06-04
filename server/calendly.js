@@ -10,25 +10,53 @@ function authHeader() {
 }
 const ORG = () => process.env.CALENDLY_ORG_URI;
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Requête Calendly avec retry automatique sur rate limit (429). */
+async function fetchWithRetry(url, maxRetries = 5) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, { headers: { Authorization: authHeader() } });
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : (attempt + 1) * 2000;
+      await sleep(waitMs);
+      continue;
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Calendly failed (${res.status}): ${text}`);
+    }
+    return res.json();
+  }
+  throw new Error('Calendly failed (429): rate limit dépassé après plusieurs tentatives');
+}
+
+// Cache court des scans d'events : "RDV pris" et "SalesForge" balayent la même
+// fenêtre → on évite de tout re-télécharger deux fois dans la même requête.
+const scanCache = new Map(); // clé: `${min}|${max}` -> { ts, events }
+const SCAN_TTL = 60 * 1000;
+
 /**
  * Récupère les scheduled events dont le START_TIME est dans [minStart, maxStart].
  * Pagine via l'URL next_page fournie par Calendly (ne JAMAIS reconstruire avec le token).
  */
 async function fetchEventsByStart(minStart, maxStart) {
+  const cacheKey = `${minStart}|${maxStart}`;
+  const hit = scanCache.get(cacheKey);
+  if (hit && Date.now() - hit.ts < SCAN_TTL) return hit.events;
+
   let url = `https://api.calendly.com/scheduled_events?organization=${encodeURIComponent(ORG())}&status=active&min_start_time=${encodeURIComponent(minStart)}&max_start_time=${encodeURIComponent(maxStart)}&count=100`;
   let all = [];
   let safety = 0;
-  while (url && safety < 40) {
+  while (url && safety < 150) {
     safety += 1;
-    const res = await fetch(url, { headers: { Authorization: authHeader() } });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Calendly failed (${res.status}): ${text}`);
-    }
-    const data = await res.json();
+    const data = await fetchWithRetry(url);
     all = all.concat(data.collection || []);
     url = data.pagination?.next_page || null;
   }
+  scanCache.set(cacheKey, { ts: Date.now(), events: all });
   return all;
 }
 
@@ -98,29 +126,6 @@ export async function getRdvBookedInRange({ start, end }) {
 //  TRACKING SALESFORGE (UTM via invitees)
 // ==========================================
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/** Requête Calendly avec retry automatique sur rate limit (429). */
-async function fetchWithRetry(url, maxRetries = 4) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch(url, { headers: { Authorization: authHeader() } });
-    if (res.status === 429) {
-      const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
-      const waitMs = retryAfter > 0 ? retryAfter * 1000 : (attempt + 1) * 1500;
-      await sleep(waitMs);
-      continue;
-    }
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Calendly failed (${res.status}): ${text}`);
-    }
-    return res.json();
-  }
-  throw new Error('Calendly rate limit dépassé après plusieurs tentatives');
-}
-
 /**
  * Récupère l'utm_source de l'invitee d'un event (1 appel API par event).
  * Renvoie '' si erreur sur cet event (on ne fait pas planter tout le calcul).
@@ -156,6 +161,14 @@ export async function getSalesforgeRdv({ start, end }) {
     const c = new Date(e.created_at);
     return c >= start && c <= end;
   });
+
+  // Garde-fou : au-delà de ~2500 RDV créés, le scan des invitees (1 appel/RDV)
+  // prendrait plusieurs minutes et exploserait les quotas → on refuse proprement.
+  if (createdInRange.length > 2500) {
+    throw new Error(
+      `période trop large pour le tracking SalesForge (${createdInRange.length} RDV à inspecter). Choisis une période de 3 mois max pour cette tuile.`
+    );
+  }
 
   // Invitees par paquets parallèles de 10
   const BATCH = 10;

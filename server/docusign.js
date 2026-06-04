@@ -114,7 +114,7 @@ async function listEnvelopes({ start, end }, fromToStatus) {
 
   let all = [];
   let safety = 0;
-  while (url && safety < 30) {
+  while (url && safety < 80) {
     safety += 1;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
@@ -123,7 +123,16 @@ async function listEnvelopes({ start, end }, fromToStatus) {
     }
     const data = await res.json();
     all = all.concat(data.envelopes || []);
-    url = data.nextUri ? `${baseUri}/restapi${data.nextUri}` : null;
+    // nextUri peut arriver avec ou sans le préfixe /restapi selon les comptes :
+    // on normalise pour éviter un /restapi/restapi (→ 404 sur les grosses périodes).
+    if (data.nextUri) {
+      const n = data.nextUri;
+      url = n.startsWith('http')
+        ? n
+        : `${baseUri}${n.startsWith('/restapi') ? '' : '/restapi'}${n}`;
+    } else {
+      url = null;
+    }
   }
   return all;
 }

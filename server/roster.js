@@ -38,7 +38,7 @@ export const SALES = [
   { display: 'Quentin PUREN', last: 'puren' },
   { display: 'Fouad Senhadji', last: 'senhadji' },
   { display: 'Rémi Simon', last: 'simon' },
-  { display: 'Noemie Streith', last: 'streith' },
+  { display: 'Noemie Streith', last: 'streith', aliases: ['streight'] },
   { display: 'Valentin Tobni', last: 'tobni' },
 ];
 
