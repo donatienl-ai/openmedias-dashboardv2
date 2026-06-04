@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
 } from 'recharts';
-import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN } from './teams';
+import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN, ACCOUNTS } from './teams';
 
 // ---------- helpers ----------
 function fmt(n) {
@@ -140,10 +140,10 @@ function TileHead({ dotClass, title, clickable }) {
 }
 
 // Top liste compacte (seulement ceux > 0, max 6)
-function TopList({ rows, isAmount, color }) {
+function TopList({ rows, isAmount, color, max = 6 }) {
   const active = (rows || []).filter((r) => (isAmount ? r.amount : r.count) > 0);
   if (active.length === 0) return <div className="empty">Aucune donnée</div>;
-  const top = active.slice(0, 6);
+  const top = active.slice(0, max);
   return (
     <div className="toplist">
       {top.map((r, i) => (
@@ -469,6 +469,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     signed: fBlock(d.bdc?.signed || { total: 0, detail: [] }),
     pending: fBlock(d.bdc?.pending || { total: 0, detail: [] }),
   };
+  // Split propals : sales vs accounts (Lisa, Quentin, David, Paul, Thomas)
+  const isAccount = (name) => ACCOUNTS.includes(name);
+  const propalsSales = {
+    detail: propals.detail.filter((r) => !isAccount(r.name)),
+    total: propals.detail.filter((r) => !isAccount(r.name)).reduce((s, r) => s + (r.count || 0), 0),
+  };
+  const propalsAccounts = {
+    detail: propals.detail.filter((r) => isAccount(r.name)),
+    total: propals.detail.filter((r) => isAccount(r.name)).reduce((s, r) => s + (r.count || 0), 0),
+  };
+
   // Totaux calls entrants/sortants (recalculés si filtre ou masquage actif)
   const callsIn = mustRecalc
     ? calls.detail.reduce((s, r) => s + (r.inbound || 0), 0)
@@ -587,6 +598,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
           clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2')} />
         <Kpi label="Propals" value={propals.total} sub="envoyées" color="c-orange" dot="#F97316"
+          secondary={[
+            { value: propalsSales.total, label: 'sales', dot: '#F97316' },
+            { value: propalsAccounts.total, label: 'comptes', dot: '#FBBF24' },
+          ]}
           clickable onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')} />
         <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow />
         <div className="tile hero-ca col-2">
@@ -726,9 +741,28 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
 
         {/* ===== RANGÉE CLASSEMENTS ===== */}
-        <div className="tile col-3 clickable" onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')}>
-          <TileHead dotClass="bg-orange" title="Propals par sales" clickable />
-          <TopList rows={propals.detail} color="c-orange" />
+        <div className="tile col-3">
+          <TileHead dotClass="bg-orange" title="Propals" />
+          <div
+            className="subsec clickable-zone"
+            onClick={() => openModal('Propals · Sales', propalsSales.detail, false, 'c-orange')}
+          >
+            <div className="subsec-head">
+              <span>Sales</span>
+              <b className="c-orange">{propalsSales.total}</b>
+            </div>
+            <TopList rows={propalsSales.detail} color="c-orange" max={4} />
+          </div>
+          <div
+            className="subsec clickable-zone"
+            onClick={() => openModal('Propals · Comptes', propalsAccounts.detail, false, 'c-amber')}
+          >
+            <div className="subsec-head">
+              <span>Comptes</span>
+              <b className="c-amber">{propalsAccounts.total}</b>
+            </div>
+            <TopList rows={propalsAccounts.detail} color="c-amber" max={5} />
+          </div>
         </div>
         <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')}>
           <TileHead dotClass="bg-amber" title="R1 pris par sales" clickable />

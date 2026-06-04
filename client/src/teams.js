@@ -95,3 +95,12 @@ export const DEFAULT_HIDDEN = [
   'Fouad Senhadji',
   'Rémi Simon',
 ];
+
+/** Account managers (suivi "propals comptes" séparé des sales). */
+export const ACCOUNTS = [
+  'Lisa Neveu',
+  'Quentin PUREN',
+  'David CHEA',
+  'Paul Jouannet',
+  'Thomas Durand',
+];

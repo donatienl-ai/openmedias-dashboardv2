@@ -102,37 +102,38 @@ async function getAuth() {
 
 /**
  * Liste les enveloppes dont le statut est passé à `fromToStatus`
- * (sent | completed) dans la plage. Pagine via nextUri.
+ * (sent | completed) dans la plage.
+ * Pagination MANUELLE via start_position (le format de nextUri varie selon
+ * les comptes et provoquait des 404 sur les grosses périodes).
  */
 async function listEnvelopes({ start, end }, fromToStatus) {
   const { token, baseUri, accountId } = await getAuth();
-  let url =
+  const base =
     `${baseUri}/restapi/v2.1/accounts/${accountId}/envelopes` +
     `?from_date=${encodeURIComponent(start.toISOString())}` +
     `&to_date=${encodeURIComponent(end.toISOString())}` +
     `&from_to_status=${fromToStatus}&count=100`;
 
   let all = [];
+  let startPos = 0;
   let safety = 0;
-  while (url && safety < 80) {
+  while (safety < 100) {
     safety += 1;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${base}&start_position=${startPos}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`DocuSign envelopes failed (${res.status}): ${text}`);
     }
     const data = await res.json();
-    all = all.concat(data.envelopes || []);
-    // nextUri peut arriver avec ou sans le préfixe /restapi selon les comptes :
-    // on normalise pour éviter un /restapi/restapi (→ 404 sur les grosses périodes).
-    if (data.nextUri) {
-      const n = data.nextUri;
-      url = n.startsWith('http')
-        ? n
-        : `${baseUri}${n.startsWith('/restapi') ? '' : '/restapi'}${n}`;
-    } else {
-      url = null;
-    }
+    const batch = data.envelopes || [];
+    all = all.concat(batch);
+
+    const total = parseInt(data.totalSetSize || '0', 10);
+    const endPos = parseInt(data.endPosition || '0', 10);
+    if (batch.length === 0 || endPos + 1 >= total) break;
+    startPos = endPos + 1;
   }
   return all;
 }
