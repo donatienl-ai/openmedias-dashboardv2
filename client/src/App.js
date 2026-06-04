@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
 } from 'recharts';
 import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN } from './teams';
 
@@ -116,9 +116,13 @@ function Kpi({ label, value, sub, color, dot, glow, onClick, clickable, secondar
       <div className="kpi-sub">{sub}</div>
       {secondary && (
         <div className="kpi-secondary">
-          <span className="kpi-sec-dot" style={{ background: secondary.dot }} />
-          <span className="kpi-sec-val">{secondary.value}</span>
-          <span className="kpi-sec-label">{secondary.label}</span>
+          {(Array.isArray(secondary) ? secondary : [secondary]).map((sec, i) => (
+            <span className="kpi-sec-item" key={i}>
+              <span className="kpi-sec-dot" style={{ background: sec.dot }} />
+              <span className="kpi-sec-val">{sec.value}</span>
+              <span className="kpi-sec-label">{sec.label}</span>
+            </span>
+          ))}
         </div>
       )}
     </div>
@@ -163,7 +167,17 @@ function DarkTooltip({ active, payload, label, suffix }) {
       padding: '8px 12px', fontSize: 12, color: '#fff',
     }}>
       <div style={{ color: '#8B8BB0', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontWeight: 700 }}>{fmt(payload[0].value)}{suffix || ''}</div>
+      {payload.length === 1 ? (
+        <div style={{ fontWeight: 700 }}>{fmt(payload[0].value)}{suffix || ''}</div>
+      ) : (
+        payload.map((p, i) => (
+          <div key={i} style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || p.fill, display: 'inline-block' }} />
+            <span style={{ color: '#8295B5', fontWeight: 500 }}>{p.name}</span>
+            {fmt(p.value)}{suffix || ''}
+          </div>
+        ))
+      )}
     </div>
   );
 }
@@ -349,6 +363,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [teamFilter, setTeamFilter] = useState(null);   // id d'équipe ou null
   const [saleFilter, setSaleFilter] = useState(null);   // nom de sale ou null
   const [showSettings, setShowSettings] = useState(false);
+  const [bdcView, setBdcView] = useState('pending'); // 'sent' | 'signed' | 'pending'
   const [hiddenSales, setHiddenSales] = useState(() => {
     // Si l'utilisateur n'a jamais touché aux paramètres sur ce navigateur,
     // on applique le masquage par défaut (hors-équipe sauf Thomas Durand).
@@ -454,6 +469,13 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     signed: fBlock(d.bdc?.signed || { total: 0, detail: [] }),
     pending: fBlock(d.bdc?.pending || { total: 0, detail: [] }),
   };
+  // Totaux calls entrants/sortants (recalculés si filtre ou masquage actif)
+  const callsIn = mustRecalc
+    ? calls.detail.reduce((s, r) => s + (r.inbound || 0), 0)
+    : (calls.totalInbound ?? 0);
+  const callsOut = mustRecalc
+    ? calls.detail.reduce((s, r) => s + (r.outbound || 0), 0)
+    : (calls.totalOutbound ?? 0);
 
   // libellé du filtre actif (pour le titre)
   const filterLabel = saleFilter
@@ -472,7 +494,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   }));
   // Calls : tous les sales avec au moins 1 call (le bloc s'agrandit en conséquence)
   const callsBySales = (calls.detail || []).filter((r) => r.count > 0).map((r) => ({
-    name: r.name.split(' ')[0], value: r.count,
+    name: r.name.split(' ')[0],
+    total: r.count,
+    outbound: r.outbound || 0,
+    inbound: r.inbound || 0,
   }));
   const rdvPie = [
     { name: 'R1 pris', value: rdvB.r1.total, fill: '#FBBF24' },
@@ -550,6 +575,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         {/* ===== BANDE KPI — duo cards (R1/R2 intègrent leurs "pris") ===== */}
         <Kpi label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total}
           sub={calls.truncated ? 'plafonné' : 'passés'} color="c-blue" dot="#3B82F6"
+          secondary={[
+            { value: callsOut, label: 'out', dot: '#2563EB' },
+            { value: callsIn, label: 'in', dot: '#60A5FA' },
+          ]}
           clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue')} />
         <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
           secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
@@ -618,11 +647,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                   <XAxis type="number" tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                   <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
-                  <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="#3B82F6"
-                    label={{ position: 'right', fill: ct.tick, fontSize: 11, fontWeight: 700 }} />
+                  <Bar dataKey="outbound" name="Sortants" stackId="dir" fill="#2563EB" />
+                  <Bar dataKey="inbound" name="Entrants" stackId="dir" fill="#60A5FA" radius={[0, 6, 6, 0]}>
+                    <LabelList dataKey="total" position="right" fill={ct.tick} fontSize={11} fontWeight={700} />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             )}
+          </div>
+          <div className="rdv-legend">
+            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#2563EB' }} />Sortants<b>{callsOut}</b></span>
+            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#60A5FA' }} />Entrants<b>{callsIn}</b></span>
           </div>
           {callsBySales.length > 10 && <div className="see-all">⤢ Voir les {callsBySales.length} commerciaux</div>}
         </div>
@@ -655,20 +690,39 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         <div className="tile col-4">
           <TileHead dotClass="bg-violet" title="BDC · DocuSign" />
           <div className="bdc-stats">
-            <button className="bdc-stat" onClick={() => openModal('BDC envoyés par commercial', bdc.sent.detail, false, 'c-orange')}>
-              <span className="bdc-stat-val c-orange">{bdc.sent.total}</span>
-              <span className="bdc-stat-label">Envoyés</span>
-            </button>
-            <button className="bdc-stat" onClick={() => openModal('BDC signés par commercial', bdc.signed.detail, false, 'c-green')}>
-              <span className="bdc-stat-val c-green">{bdc.signed.total}</span>
-              <span className="bdc-stat-label">Signés</span>
-            </button>
-            <button className="bdc-stat" onClick={() => openModal('BDC en attente de signature', bdc.pending.detail, false, 'c-amber')}>
-              <span className="bdc-stat-val c-amber">{bdc.pending.total}</span>
-              <span className="bdc-stat-label">En attente</span>
-            </button>
+            {[
+              { key: 'sent', label: 'Envoyés', color: 'c-orange', title: 'BDC envoyés par commercial' },
+              { key: 'signed', label: 'Signés', color: 'c-green', title: 'BDC signés par commercial' },
+              { key: 'pending', label: 'En attente', color: 'c-amber', title: 'BDC en attente de signature' },
+            ].map((v) => (
+              <button
+                key={v.key}
+                className={`bdc-stat ${bdcView === v.key ? 'active' : ''}`}
+                onClick={() => setBdcView(v.key)}
+              >
+                <span className={`bdc-stat-val ${v.color}`}>{bdc[v.key].total}</span>
+                <span className="bdc-stat-label">{v.label}</span>
+              </button>
+            ))}
           </div>
-          <TopList rows={bdc.pending.detail} color="c-amber" />
+          {(() => {
+            const meta = {
+              sent: { color: 'c-orange', title: 'BDC envoyés par commercial' },
+              signed: { color: 'c-green', title: 'BDC signés par commercial' },
+              pending: { color: 'c-amber', title: 'BDC en attente de signature' },
+            }[bdcView];
+            return (
+              <>
+                <TopList rows={bdc[bdcView].detail} color={meta.color} />
+                <div
+                  className="see-all linky"
+                  onClick={() => openModal(meta.title, bdc[bdcView].detail, false, meta.color)}
+                >
+                  ⤢ Voir tout
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {/* ===== RANGÉE CLASSEMENTS ===== */}

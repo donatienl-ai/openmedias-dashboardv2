@@ -69,10 +69,11 @@ export function matchSale(rawName) {
  */
 export function buildFullList(dataMap, withAmount = false) {
   const rows = SALES.map((s) => {
-    const entry = dataMap.get(s.display) || { count: 0, amount: 0 };
-    return withAmount
-      ? { name: s.display, count: entry.count, amount: entry.amount }
-      : { name: s.display, count: entry.count };
+    const entry = dataMap.get(s.display) || {};
+    // On propage tous les champs de l'entrée (ex: inbound/outbound pour les calls)
+    const base = { name: s.display, ...entry, count: entry.count || 0 };
+    if (withAmount) base.amount = entry.amount || 0;
+    return base;
   });
   rows.sort((a, b) => {
     const va = withAmount ? a.amount : a.count;

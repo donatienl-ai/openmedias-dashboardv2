@@ -482,10 +482,12 @@ body {
 /* --- KPI : chiffres stables + métrique secondaire --- */
 .kpi-num { font-variant-numeric: tabular-nums; }
 .kpi-secondary {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 12px;
   margin-top: 10px; padding-top: 9px;
   border-top: 1px solid var(--border-soft);
+  flex-wrap: wrap;
 }
+.kpi-sec-item { display: inline-flex; align-items: center; gap: 5px; }
 .kpi-sec-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .kpi-sec-val {
   font-family: var(--font-display); font-size: 15px; font-weight: 800;
@@ -666,3 +668,12 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   color: var(--text-muted); border-radius: 7px; padding: 3px 10px;
   font-size: 11px; font-weight: 700; text-transform: none;
 }
+
+
+/* ===== Onglet BDC actif + lien Voir tout ===== */
+.bdc-stat.active {
+  border-color: var(--om-blue);
+  background: rgba(37, 99, 235, 0.10);
+}
+.see-all.linky { cursor: pointer; transition: color 0.15s; }
+.see-all.linky:hover { color: var(--om-blue-light); }

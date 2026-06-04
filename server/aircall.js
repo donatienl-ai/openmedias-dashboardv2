@@ -43,7 +43,7 @@ async function fetchWithRetry(url, maxRetries = 4) {
 }
 
 /**
- * Récupère les calls sortants sur la période, paginés.
+ * Récupère TOUS les calls (entrants + sortants) sur la période, paginés.
  * - 100 calls par page (max Aircall) → 2x moins de requêtes
  * - Retry auto sur rate limit
  * - Plafond de sécurité à 50 000 calls (500 pages)
@@ -63,7 +63,7 @@ export async function getCalls({ start, end }) {
       truncated = true; // on a atteint le plafond de 50k
       break;
     }
-    const url = `https://api.aircall.io/v1/calls?from=${from}&to=${to}&direction=outbound&per_page=${perPage}&page=${page}`;
+    const url = `https://api.aircall.io/v1/calls?from=${from}&to=${to}&per_page=${perPage}&page=${page}`;
     const data = await fetchWithRetry(url);
     const calls = data.calls || [];
     allCalls = allCalls.concat(calls);
@@ -72,13 +72,18 @@ export async function getCalls({ start, end }) {
   }
 
   const map = new Map();
+  let totalInbound = 0;
+  let totalOutbound = 0;
   for (const c of allCalls) {
+    const isInbound = c.direction === 'inbound';
+    if (isInbound) totalInbound += 1; else totalOutbound += 1;
     const name = matchSale(c.user?.name) || 'Inconnu';
-    const e = map.get(name) || { count: 0 };
+    const e = map.get(name) || { count: 0, inbound: 0, outbound: 0 };
     e.count += 1;
+    if (isInbound) e.inbound += 1; else e.outbound += 1;
     map.set(name, e);
   }
   const detail = buildFullList(map);
   // `truncated` permet au front d'afficher un indicateur si le total est plafonné
-  return { total: allCalls.length, detail, truncated };
+  return { total: allCalls.length, totalInbound, totalOutbound, detail, truncated };
 }
