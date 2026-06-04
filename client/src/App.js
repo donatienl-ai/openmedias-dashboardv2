@@ -100,8 +100,8 @@ function DetailModal({ open, title, rows, isAmount, accent, onClose }) {
   );
 }
 
-// ---------- KPI cliquable ----------
-function Kpi({ label, value, sub, color, dot, glow, onClick, clickable }) {
+// ---------- KPI cliquable (avec métrique secondaire optionnelle) ----------
+function Kpi({ label, value, sub, color, dot, glow, onClick, clickable, secondary }) {
   return (
     <div
       className={`tile kpi ${glow ? 'glow-blue' : ''} col-2 ${clickable ? 'clickable' : ''}`}
@@ -114,6 +114,13 @@ function Kpi({ label, value, sub, color, dot, glow, onClick, clickable }) {
       </div>
       <div className="kpi-num">{value}</div>
       <div className="kpi-sub">{sub}</div>
+      {secondary && (
+        <div className="kpi-secondary">
+          <span className="kpi-sec-dot" style={{ background: secondary.dot }} />
+          <span className="kpi-sec-val">{secondary.value}</span>
+          <span className="kpi-sec-label">{secondary.label}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -346,8 +353,6 @@ function Dashboard({ password, onLogout }) {
   const d = data || {};
   const rangeLabel = d.range?.label || "Aujourd'hui";
   const isToday = (d.range?.preset || 'today') === 'today';
-  // sous-titre court selon la période (ex: "aujourd'hui", "cette semaine"...)
-  const periodSub = isToday ? "aujourd'hui" : rangeLabel.toLowerCase();
 
   // ===== FILTRAGE ÉQUIPE / SALES =====
   // allowed = Set des noms autorisés, ou null = pas de filtre
@@ -409,45 +414,49 @@ function Dashboard({ password, onLogout }) {
       {/* TOPBAR */}
       <div className="topbar">
         <div className="topbar-left">
-          <div>
-            <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
-            <div className="brand-title">Performance Commerciale</div>
-          </div>
-          <div className="brand-date">
-            {todayLabel()}
+          <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
+          <div className="brand-title">Performance Commerciale</div>
+          <div className="context-line">
+            <span>{todayLabel()}</span>
+            {!isToday && <span className="period-chip">{rangeLabel}</span>}
             {filterLabel && <span className="filter-badge">{filterLabel}</span>}
           </div>
         </div>
         <div className="topbar-right">
-          <FilterDropdown
-            icon="👥"
-            label={teamFilter ? (TEAMS.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
-            allLabel="Toutes les équipes"
-            items={TEAMS.map((t) => ({ value: t.id, label: t.label }))}
-            current={teamFilter}
-            onPick={(v) => { setTeamFilter(v); setSaleFilter(null); }}
-          />
-          <FilterDropdown
-            icon="👤"
-            label={saleFilter || 'Sales'}
-            allLabel="Tous les sales"
-            items={(teamFilter
-              ? (TEAMS.find((t) => t.id === teamFilter)?.members || [])
-              : ALL_SALES
-            ).map((s) => ({ value: s, label: s }))}
-            current={saleFilter}
-            onPick={(v) => setSaleFilter(v)}
-          />
-          <PeriodSelector
-            current={d.range?.preset || 'today'}
-            label={rangeLabel}
-            onApply={(p) => setPeriod(p)}
-          />
-          {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
-          <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
-            <span className="refresh-icon">↻</span>
-            {loading ? 'Maj…' : 'Rafraîchir'}
-          </button>
+          <div className="controls-group">
+            <FilterDropdown
+              icon="👥"
+              label={teamFilter ? (TEAMS.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
+              allLabel="Toutes les équipes"
+              items={TEAMS.map((t) => ({ value: t.id, label: t.label }))}
+              current={teamFilter}
+              onPick={(v) => { setTeamFilter(v); setSaleFilter(null); }}
+            />
+            <FilterDropdown
+              icon="👤"
+              label={saleFilter || 'Sales'}
+              allLabel="Tous les sales"
+              items={(teamFilter
+                ? (TEAMS.find((t) => t.id === teamFilter)?.members || [])
+                : ALL_SALES
+              ).map((s) => ({ value: s, label: s }))}
+              current={saleFilter}
+              onPick={(v) => setSaleFilter(v)}
+            />
+            <PeriodSelector
+              current={d.range?.preset || 'today'}
+              label={rangeLabel}
+              onApply={(p) => setPeriod(p)}
+            />
+          </div>
+          <div className="topbar-divider" />
+          <div className="status-cluster">
+            {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
+            <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
+              <span className="refresh-icon">↻</span>
+              {loading ? 'Maj…' : 'Rafraîchir'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -461,31 +470,29 @@ function Dashboard({ password, onLogout }) {
       )}
 
       <div className="grid">
-        {/* Rangée KPIs (cliquables sauf CA) */}
-        <Kpi label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total} sub={calls.truncated ? `plafonné · ${periodSub}` : `passés · ${periodSub}`} color="c-blue" dot="#5B57FF"
+        {/* ===== BANDE KPI — duo cards (R1/R2 intègrent leurs "pris") ===== */}
+        <Kpi label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total}
+          sub={calls.truncated ? 'plafonné' : 'passés'} color="c-blue" dot="#5B57FF"
           clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue')} />
-        <Kpi label="R1" value={rdvT.r1.total} sub={`échanges · ${periodSub}`} color="c-green" dot="#22C55E"
+        <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
+          secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
           clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green')} />
-        <Kpi label="R2" value={rdvT.r2.total} sub={`retours · ${periodSub}`} color="c-bluer2" dot="#60A5FA"
+        <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#60A5FA"
+          secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
           clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2')} />
-        <Kpi label="Propals" value={propals.total} sub={`envoyées · ${periodSub}`} color="c-orange" dot="#F97316"
+        <Kpi label="Propals" value={propals.total} sub="envoyées" color="c-orange" dot="#F97316"
           clickable onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')} />
-        <Kpi label="Signatures" value={sig.total} sub={periodSub} color="c-violet" dot="#A78BFA" glow />
+        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#A78BFA" glow />
         <div className="tile hero-ca col-2">
           <div className="lbl">CA · {isToday ? 'du jour' : 'période'}</div>
           <div className="val">{fmt(rev.totalAmount)}€</div>
           <div className="sub">{isToday ? 'cumul signé' : rangeLabel.toLowerCase()}</div>
         </div>
 
-        {/* Rangée 2 : R1/R2 pris (cliquables) + graphe CA */}
-        <Kpi label="R1 pris" value={rdvB.r1.total} sub={`bookés · ${periodSub}`} color="c-amber" dot="#FBBF24"
-          clickable onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')} />
-        <Kpi label="R2 pris" value={rdvB.r2.total} sub={`bookés · ${periodSub}`} color="c-amber" dot="#FBBF24"
-          clickable onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber')} />
-
+        {/* ===== RANGÉE MONEY — CA + Signatures ===== */}
         <div className="tile col-8 clickable" onClick={() => openModal(`CA · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue')}>
           <TileHead dotClass="bg-blue" title={`CA ${isToday ? 'du jour' : '· ' + rangeLabel} par commercial`} clickable />
-          <div className="chart-box" style={{ height: 220 }}>
+          <div className="chart-box" style={{ height: 250 }}>
             {caBySales.length === 0 ? (
               <div className="empty">Aucune donnée</div>
             ) : (
@@ -506,15 +513,31 @@ function Dashboard({ password, onLogout }) {
           </div>
         </div>
 
-        {/* Rangée 3 */}
+        <div className="tile col-4">
+          <TileHead dotClass="bg-violet" title={isToday ? 'Signatures du jour' : `Signatures · ${rangeLabel}`} />
+          {sig.detail.length === 0 ? (
+            <div className="empty">Aucune signature</div>
+          ) : (
+            <div className="sig-scroll">
+              {sig.detail.map((s, i) => (
+                <div className="sig-row" key={i}>
+                  <span className="sig-name">{s.name}</span>
+                  <span className="sig-val">{fmt(s.amount)} €</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ===== RANGÉE ACTIVITÉ — Calls top 10 + RDV pris + SalesForge ===== */}
         <div className="tile col-5 clickable" onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue')}>
-          <TileHead dotClass="bg-blue" title="Calls par commercial" clickable />
-          <div className="chart-box" style={{ height: Math.max(200, callsBySales.length * 30) }}>
+          <TileHead dotClass="bg-blue" title={`Calls par commercial${callsBySales.length > 10 ? ' · top 10' : ''}`} clickable />
+          <div className="chart-box" style={{ height: Math.max(200, Math.min(callsBySales.length, 10) * 30) }}>
             {callsBySales.length === 0 ? (
               <div className="empty">Aucun call sur la période</div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={callsBySales} layout="vertical" margin={{ top: 0, right: 36, left: 8, bottom: 0 }}>
+                <BarChart data={callsBySales.slice(0, 10)} layout="vertical" margin={{ top: 0, right: 36, left: 8, bottom: 0 }}>
                   <XAxis type="number" tick={{ fill: '#5A5A80', fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="name" tick={{ fill: '#8B8BB0', fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                   <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(91,87,255,0.08)' }} />
@@ -524,6 +547,7 @@ function Dashboard({ password, onLogout }) {
               </ResponsiveContainer>
             )}
           </div>
+          {callsBySales.length > 10 && <div className="see-all">⤢ Voir les {callsBySales.length} commerciaux</div>}
         </div>
 
         <div className="tile col-3">
@@ -551,38 +575,23 @@ function Dashboard({ password, onLogout }) {
           </div>
         </div>
 
-        <div className="tile col-4">
-          <TileHead dotClass="bg-violet" title="Signatures du jour" />
-          {sig.detail.length === 0 ? (
-            <div className="empty">Aucune signature aujourd'hui</div>
-          ) : (
-            <div>
-              {sig.detail.map((s, i) => (
-                <div className="sig-row" key={i}>
-                  <span className="sig-name">{s.name}</span>
-                  <span className="sig-val">{fmt(s.amount)} €</span>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="tile col-4 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2')}>
+          <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
+          <TopList rows={sf.detail} color="c-bluer2" />
         </div>
 
-        {/* Rangée 4 : tops cliquables */}
-        <div className="tile col-3 clickable" onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')}>
+        {/* ===== RANGÉE CLASSEMENTS ===== */}
+        <div className="tile col-4 clickable" onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')}>
           <TileHead dotClass="bg-orange" title="Propals par sales" clickable />
           <TopList rows={propals.detail} color="c-orange" />
         </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')}>
+        <div className="tile col-4 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')}>
           <TileHead dotClass="bg-amber" title="R1 pris par sales" clickable />
           <TopList rows={rdvB.r1.detail} color="c-amber" />
         </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber')}>
+        <div className="tile col-4 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber')}>
           <TileHead dotClass="bg-amber" title="R2 pris par sales" clickable />
           <TopList rows={rdvB.r2.detail} color="c-amber" />
-        </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2')}>
-          <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
-          <TopList rows={sf.detail} color="c-bluer2" />
         </div>
       </div>
 

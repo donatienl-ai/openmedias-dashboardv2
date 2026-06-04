@@ -445,3 +445,102 @@ body {
   border-radius: 7px; padding: 3px 10px;
   font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
 }
+
+/* ==========================================
+   REFONTE DESIGN — Command Center polish
+   ========================================== */
+
+/* --- Header 3 zones --- */
+.topbar { align-items: flex-end; margin-bottom: 22px; }
+.topbar-left { display: block; }
+.context-line {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px; font-size: 13px; color: var(--text-soft);
+  text-transform: capitalize;
+}
+.period-chip {
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 7px; padding: 3px 10px;
+  font-size: 11px; font-weight: 700; text-transform: none;
+}
+.controls-group {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 13px; padding: 4px;
+}
+.controls-group .period-btn {
+  border: none; background: transparent; border-radius: 9px; padding: 8px 12px;
+}
+.controls-group .period-btn:hover { background: var(--panel-2); border: none; }
+.controls-group .period-btn.filter-active { background: rgba(63, 59, 251, 0.16); }
+.topbar-divider {
+  width: 1px; height: 26px; background: var(--border); margin: 0 12px;
+  align-self: center;
+}
+.status-cluster { display: inline-flex; align-items: center; gap: 12px; }
+
+/* --- KPI : chiffres stables + métrique secondaire --- */
+.kpi-num { font-variant-numeric: tabular-nums; }
+.kpi-secondary {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 10px; padding-top: 9px;
+  border-top: 1px solid var(--border-soft);
+}
+.kpi-sec-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.kpi-sec-val {
+  font-family: var(--font-display); font-size: 15px; font-weight: 800;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.kpi-sec-label {
+  font-size: 9px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 1px; font-weight: 700;
+}
+
+/* --- Signatures : liste scrollable, hauteur prévisible --- */
+.sig-scroll { max-height: 250px; overflow-y: auto; padding-right: 4px; }
+.sig-scroll::-webkit-scrollbar { width: 5px; }
+.sig-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* --- "Voir tout" sous le graphe calls --- */
+.see-all {
+  margin-top: 10px; text-align: center;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  color: var(--text-muted); text-transform: uppercase;
+}
+.clickable:hover .see-all { color: var(--om-blue-light); }
+
+/* --- Entrée en cascade des tuiles --- */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .grid .tile { animation: rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .grid .tile:nth-child(1) { animation-delay: 0.02s; }
+  .grid .tile:nth-child(2) { animation-delay: 0.05s; }
+  .grid .tile:nth-child(3) { animation-delay: 0.08s; }
+  .grid .tile:nth-child(4) { animation-delay: 0.11s; }
+  .grid .tile:nth-child(5) { animation-delay: 0.14s; }
+  .grid .tile:nth-child(6) { animation-delay: 0.17s; }
+  .grid .tile:nth-child(7) { animation-delay: 0.22s; }
+  .grid .tile:nth-child(8) { animation-delay: 0.26s; }
+  .grid .tile:nth-child(9) { animation-delay: 0.3s; }
+  .grid .tile:nth-child(10) { animation-delay: 0.34s; }
+  .grid .tile:nth-child(11) { animation-delay: 0.38s; }
+  .grid .tile:nth-child(12) { animation-delay: 0.42s; }
+  .grid .tile:nth-child(n+13) { animation-delay: 0.46s; }
+}
+
+/* --- Hover : élévation subtile --- */
+.clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.clickable:active { transform: translateY(0) scale(0.995); }
+
+/* --- Responsive header --- */
+@media (max-width: 1100px) {
+  .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
+  .topbar-right { flex-wrap: wrap; }
+  .topbar-divider { display: none; }
+}
