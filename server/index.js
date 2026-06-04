@@ -16,6 +16,7 @@ import {
   getPropals,
 } from './salesforce.js';
 import { resolveRange } from './dateRange.js';
+import { getBdc } from './docusign.js';
 
 dotenv.config();
 
@@ -65,13 +66,14 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     getSignatures(r),         // 4
     getRevenue(r),            // 5
     getSalesforgeRdv(r),      // 6 (UTM salesforge via Calendly, suit la période)
+    getBdc(r),                // 7 (BDC envoyés/signés via DocuSign)
   ]);
 
   const pick = (i, fallback) =>
     results[i].status === 'fulfilled' ? results[i].value : fallback;
 
   const errors = {};
-  const labels = ['calls', 'rdvToday', 'rdvBooked', 'propals', 'signatures', 'revenue', 'salesforge'];
+  const labels = ['calls', 'rdvToday', 'rdvBooked', 'propals', 'signatures', 'revenue', 'salesforge', 'bdc'];
   results.forEach((res2, i) => {
     if (res2.status === 'rejected') errors[labels[i]] = String(res2.reason?.message || res2.reason);
   });
@@ -89,6 +91,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     signatures: pick(4, { total: 0, totalAmount: 0, detail: [] }),
     revenue: pick(5, { totalAmount: 0, detail: [] }),
     salesforge: pick(6, { total: 0, detail: [] }),
+    bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] } }),
     errors: Object.keys(errors).length ? errors : null,
   });
 });

@@ -159,7 +159,7 @@ function DarkTooltip({ active, payload, label, suffix }) {
   if (!active || !payload || !payload.length) return null;
   return (
     <div style={{
-      background: '#14142C', border: '1px solid #20203E', borderRadius: 8,
+      background: '#101B30', border: '1px solid #1B2A45', borderRadius: 8,
       padding: '8px 12px', fontSize: 12, color: '#fff',
     }}>
       <div style={{ color: '#8B8BB0', marginBottom: 2 }}>{label}</div>
@@ -357,11 +357,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   // Couleurs de graphes adaptées au thème (les charts Recharts ne lisent pas les CSS vars)
   const isLight = theme === 'light';
   const ct = {
-    axis: isLight ? '#E3E3EE' : '#20203E',
-    tick: isLight ? '#7A7A9D' : '#8B8BB0',
-    tickFaint: isLight ? '#9A9AB8' : '#5A5A80',
-    tickBold: isLight ? '#3A3A5C' : '#C5C5D8',
-    labelStrong: isLight ? '#16162B' : '#FFFFFF',
+    axis: isLight ? '#DEE6F0' : '#1B2A45',
+    tick: isLight ? '#72839F' : '#8295B5',
+    tickFaint: isLight ? '#93A3BD' : '#54678A',
+    tickBold: isLight ? '#33455F' : '#C3D0E3',
+    labelStrong: isLight ? '#101A2E' : '#FFFFFF',
   };
 
   // ===== FILTRAGE ÉQUIPE / SALES =====
@@ -394,6 +394,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const propals = fBlock(d.propals || { total: 0, detail: [] });
   const calls = fBlock(d.calls || { total: 0, detail: [] });
   const sf = fBlock(d.salesforge || { total: 0, detail: [] });
+  const bdc = {
+    sent: fBlock(d.bdc?.sent || { total: 0, detail: [] }),
+    signed: fBlock(d.bdc?.signed || { total: 0, detail: [] }),
+  };
 
   // libellé du filtre actif (pour le titre)
   const filterLabel = saleFilter
@@ -588,23 +592,37 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
         </div>
 
-        <div className="tile col-4 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2')}>
-          <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
-          <TopList rows={sf.detail} color="c-bluer2" />
+        <div className="tile col-4">
+          <TileHead dotClass="bg-violet" title="BDC · DocuSign" />
+          <div className="bdc-stats">
+            <button className="bdc-stat" onClick={() => openModal('BDC envoyés par commercial', bdc.sent.detail, false, 'c-orange')}>
+              <span className="bdc-stat-val c-orange">{bdc.sent.total}</span>
+              <span className="bdc-stat-label">Envoyés</span>
+            </button>
+            <button className="bdc-stat" onClick={() => openModal('BDC signés par commercial', bdc.signed.detail, false, 'c-green')}>
+              <span className="bdc-stat-val c-green">{bdc.signed.total}</span>
+              <span className="bdc-stat-label">Signés</span>
+            </button>
+          </div>
+          <TopList rows={bdc.signed.detail} color="c-green" />
         </div>
 
         {/* ===== RANGÉE CLASSEMENTS ===== */}
-        <div className="tile col-4 clickable" onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')}>
+        <div className="tile col-3 clickable" onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')}>
           <TileHead dotClass="bg-orange" title="Propals par sales" clickable />
           <TopList rows={propals.detail} color="c-orange" />
         </div>
-        <div className="tile col-4 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')}>
+        <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')}>
           <TileHead dotClass="bg-amber" title="R1 pris par sales" clickable />
           <TopList rows={rdvB.r1.detail} color="c-amber" />
         </div>
-        <div className="tile col-4 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber')}>
+        <div className="tile col-3 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber')}>
           <TileHead dotClass="bg-amber" title="R2 pris par sales" clickable />
           <TopList rows={rdvB.r2.detail} color="c-amber" />
+        </div>
+        <div className="tile col-3 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2')}>
+          <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
+          <TopList rows={sf.detail} color="c-bluer2" />
         </div>
       </div>
 

@@ -7,19 +7,19 @@
   --om-blue: #3F3BFB;
   --om-blue-light: #5B57FF;
   --om-blue-lighter: #7B77FF;
-  --bg: #06060F;
-  --panel: #0E0E20;
-  --panel-2: #14142C;
-  --border: #20203E;
-  --border-soft: #1A1A33;
+  --bg: #050A14;
+  --panel: #0B1322;
+  --panel-2: #101B30;
+  --border: #1B2A45;
+  --border-soft: #16223A;
   --green: #22C55E;
   --bluer2: #60A5FA;
   --orange: #F97316;
   --amber: #FBBF24;
   --violet: #A78BFA;
   --text: #FFFFFF;
-  --text-soft: #8B8BB0;
-  --text-muted: #5A5A80;
+  --text-soft: #8295B5;
+  --text-muted: #54678A;
 
   --font-display: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -290,7 +290,7 @@ body {
 /* ===== MODALE ===== */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 100;
-  background: rgba(3, 3, 10, 0.78);
+  background: rgba(2, 6, 15, 0.78);
   backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
@@ -551,14 +551,14 @@ body {
    [data-theme="light"] surcharge les variables.
    ========================================== */
 [data-theme="light"] {
-  --bg: #F2F2F7;
+  --bg: #F1F4F9;
   --panel: #FFFFFF;
-  --panel-2: #F5F5FA;
-  --border: #E3E3EE;
-  --border-soft: #EDEDF4;
-  --text: #16162B;
-  --text-soft: #5F5F8C;
-  --text-muted: #9494B3;
+  --panel-2: #F3F6FB;
+  --border: #DEE6F0;
+  --border-soft: #E8EEF6;
+  --text: #101A2E;
+  --text-soft: #50628A;
+  --text-muted: #8C9CB8;
   /* Accents recalibrés pour la lisibilité sur fond clair */
   --green: #16A34A;
   --bluer2: #2563EB;
@@ -580,6 +580,8 @@ body {
   border-color: rgba(63, 59, 251, 0.25);
 }
 [data-theme="light"] .toprank { color: var(--text-soft); }
+[data-theme="light"] .toprow:nth-child(1) .toprank { color: #fff; }
+[data-theme="light"] .mrow:nth-child(1) .mrow-rank { color: #fff; }
 [data-theme="light"] .period-field input { color-scheme: light; }
 
 /* --- Bouton de bascule de thème --- */
@@ -596,4 +598,27 @@ body {
 /* Transition douce entre thèmes */
 body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+/* ===== TUILE BDC (DocuSign) ===== */
+.bdc-stats {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 14px;
+}
+.bdc-stat {
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  cursor: pointer; font-family: var(--font-body);
+  transition: border-color 0.15s, transform 0.1s, background 0.15s;
+}
+.bdc-stat:hover { border-color: var(--om-blue-light); transform: translateY(-1px); }
+.bdc-stat:active { transform: translateY(0) scale(0.98); }
+.bdc-stat-val {
+  font-family: var(--font-display); font-size: 26px; font-weight: 800;
+  line-height: 1; font-variant-numeric: tabular-nums;
+}
+.bdc-stat-label {
+  font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
+  font-weight: 700; color: var(--text-muted);
 }

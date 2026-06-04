@@ -24,3 +24,13 @@ services:
         sync: false
       - key: SALESFORCE_DOMAIN_URL
         value: https://openmedias.my.salesforce.com
+      - key: DOCUSIGN_INTEGRATION_KEY
+        sync: false
+      - key: DOCUSIGN_USER_ID
+        sync: false
+      - key: DOCUSIGN_ACCOUNT_ID
+        sync: false
+      - key: DOCUSIGN_PRIVATE_KEY
+        sync: false
+      - key: DOCUSIGN_OAUTH_HOST
+        value: account.docusign.com
