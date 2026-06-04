@@ -301,6 +301,44 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
   );
 }
 
+// ---------- PARAMÈTRES ADMIN (sales visibles) ----------
+function SettingsModal({ open, hidden, onToggle, onShowAll, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="modal-title">⚙️ Paramètres · Sales visibles</span>
+          <button className="modal-close" onClick={onClose} aria-label="Fermer">✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="set-hint">
+            Désactive un commercial pour le masquer de tout le dashboard
+            (listes, graphes et totaux recalculés). Réglage mémorisé sur ce navigateur.
+          </div>
+          {hidden.size > 0 && (
+            <button className="set-showall" onClick={onShowAll}>
+              Tout réafficher ({hidden.size} masqué{hidden.size > 1 ? 's' : ''})
+            </button>
+          )}
+          {ALL_SALES.map((s) => (
+            <label className="set-row" key={s}>
+              <span className={`set-name ${hidden.has(s) ? 'off' : ''}`}>{s}</span>
+              <input
+                type="checkbox"
+                className="set-check"
+                checked={!hidden.has(s)}
+                onChange={() => onToggle(s)}
+              />
+              <span className="set-switch" />
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- DASHBOARD ----------
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [data, setData] = useState(null);
@@ -310,6 +348,18 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [period, setPeriod] = useState({ preset: 'today' }); // {preset, start?, end?}
   const [teamFilter, setTeamFilter] = useState(null);   // id d'équipe ou null
   const [saleFilter, setSaleFilter] = useState(null);   // nom de sale ou null
+  const [showSettings, setShowSettings] = useState(false);
+  const [hiddenSales, setHiddenSales] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('om_hidden_sales')) || []; } catch { return []; }
+  });
+
+  // Persiste la liste des sales masqués
+  useEffect(() => {
+    localStorage.setItem('om_hidden_sales', JSON.stringify(hiddenSales));
+  }, [hiddenSales]);
+
+  const toggleHidden = (name) =>
+    setHiddenSales((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -334,7 +384,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   // Fermeture modale sur Echap
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') setModal(null); };
+    const onKey = (e) => { if (e.key === 'Escape') { setModal(null); setShowSettings(false); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -364,19 +414,19 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     labelStrong: isLight ? '#101A2E' : '#FFFFFF',
   };
 
-  // ===== FILTRAGE ÉQUIPE / SALES =====
+  // ===== FILTRAGE ÉQUIPE / SALES + masqués (paramètres) =====
   // allowed = Set des noms autorisés, ou null = pas de filtre
   const allowed = allowedNames(teamFilter, saleFilter);
-  const filterRows = (rows) => {
-    if (!allowed) return rows || [];
-    return (rows || []).filter((r) => allowed.has(r.name));
-  };
+  const hidden = new Set(hiddenSales);
+  const keepRow = (r) => (!allowed || allowed.has(r.name)) && !hidden.has(r.name);
+  const filterRows = (rows) => (rows || []).filter(keepRow);
+  const mustRecalc = !!allowed || hidden.size > 0;
   // Recalcule un bloc {total, detail} après filtre
   const fBlock = (block, sumAmount = false) => {
     const detail = filterRows(block?.detail);
-    const total = allowed ? detail.reduce((s, r) => s + (r.count || 0), 0) : (block?.total ?? 0);
+    const total = mustRecalc ? detail.reduce((s, r) => s + (r.count || 0), 0) : (block?.total ?? 0);
     const totalAmount = sumAmount
-      ? (allowed ? detail.reduce((s, r) => s + (r.amount || 0), 0) : (block?.totalAmount ?? 0))
+      ? (mustRecalc ? detail.reduce((s, r) => s + (r.amount || 0), 0) : (block?.totalAmount ?? 0))
       : undefined;
     return { ...block, detail, total, ...(sumAmount ? { totalAmount } : {}) };
   };
@@ -420,7 +470,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   }));
   const rdvPie = [
     { name: 'R1 pris', value: rdvB.r1.total, fill: '#FBBF24' },
-    { name: 'R2 pris', value: rdvB.r2.total, fill: '#60A5FA' },
+    { name: 'R2 pris', value: rdvB.r2.total, fill: '#22D3EE' },
   ].filter((x) => x.value > 0);
 
   return (
@@ -434,6 +484,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             <span>{todayLabel()}</span>
             {!isToday && <span className="period-chip">{rangeLabel}</span>}
             {filterLabel && <span className="filter-badge">{filterLabel}</span>}
+            {hidden.size > 0 && <span className="hidden-chip">{hidden.size} masqué{hidden.size > 1 ? 's' : ''}</span>}
           </div>
         </div>
         <div className="topbar-right">
@@ -453,7 +504,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               items={(teamFilter
                 ? (TEAMS.find((t) => t.id === teamFilter)?.members || [])
                 : ALL_SALES
-              ).map((s) => ({ value: s, label: s }))}
+              ).filter((s) => !hidden.has(s)).map((s) => ({ value: s, label: s }))}
               current={saleFilter}
               onPick={(v) => setSaleFilter(v)}
             />
@@ -465,6 +516,9 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
+            <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
+              ⚙️
+            </button>
             <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
@@ -489,17 +543,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       <div className="grid">
         {/* ===== BANDE KPI — duo cards (R1/R2 intègrent leurs "pris") ===== */}
         <Kpi label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total}
-          sub={calls.truncated ? 'plafonné' : 'passés'} color="c-blue" dot="#5B57FF"
+          sub={calls.truncated ? 'plafonné' : 'passés'} color="c-blue" dot="#3B82F6"
           clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue')} />
         <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
           secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
           clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green')} />
-        <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#60A5FA"
+        <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#22D3EE"
           secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
           clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2')} />
         <Kpi label="Propals" value={propals.total} sub="envoyées" color="c-orange" dot="#F97316"
           clickable onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')} />
-        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#A78BFA" glow />
+        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow />
         <div className="tile hero-ca col-2">
           <div className="lbl">CA · {isToday ? 'du jour' : 'période'}</div>
           <div className="val">{fmt(rev.totalAmount)}€</div>
@@ -518,10 +572,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                   <XAxis dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
                   <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
                     tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                  <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(91,87,255,0.08)' }} />
+                  <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
                   <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={90}>
                     {caBySales.map((e, i) => (
-                      <Cell key={i} fill={i === 0 ? '#5B57FF' : '#3F3BFB'} fillOpacity={i === 0 ? 1 : 0.55} />
+                      <Cell key={i} fill={i === 0 ? '#3B82F6' : '#2563EB'} fillOpacity={i === 0 ? 1 : 0.55} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -557,8 +611,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                 <BarChart data={callsBySales.slice(0, 10)} layout="vertical" margin={{ top: 0, right: 36, left: 8, bottom: 0 }}>
                   <XAxis type="number" tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
-                  <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(91,87,255,0.08)' }} />
-                  <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="#5B57FF"
+                  <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
+                  <Bar dataKey="value" radius={[0, 6, 6, 0]} fill="#3B82F6"
                     label={{ position: 'right', fill: ct.tick, fontSize: 11, fontWeight: 700 }} />
                 </BarChart>
               </ResponsiveContainer>
@@ -588,7 +642,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="rdv-legend">
             <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#FBBF24' }} />R1 pris<b>{rdvB.r1.total}</b></span>
-            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#60A5FA' }} />R2 pris<b>{rdvB.r2.total}</b></span>
+            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#22D3EE' }} />R2 pris<b>{rdvB.r2.total}</b></span>
           </div>
         </div>
 
@@ -630,6 +684,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         <span className="foot-brand">OPENMEDIAS</span>
         <span className="foot-sub">Live · Aircall + Calendly + Salesforce · {new Date().getFullYear()}</span>
       </div>
+
+      <SettingsModal
+        open={showSettings}
+        hidden={hidden}
+        onToggle={toggleHidden}
+        onShowAll={() => setHiddenSales([])}
+        onClose={() => setShowSettings(false)}
+      />
 
       <DetailModal
         open={!!modal}

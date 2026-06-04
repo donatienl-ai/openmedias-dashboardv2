@@ -24,6 +24,7 @@ export const SALES = [
   { display: 'Thaivin Jousselin', last: 'jousselin' },
   { display: 'Moni Kek', last: 'kek' },
   { display: 'Adrien Lassus', last: 'lassus' },
+  { display: 'Donatien LEFEBURE', last: 'lefebure' },
   { display: 'Louna LORION', last: 'lorion' },
   { display: 'Mickael MARCIANO', last: 'marciano' },
   { display: 'Yanis Mehal', last: 'mehal' },

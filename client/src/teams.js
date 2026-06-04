@@ -44,6 +44,7 @@ export const ALL_SALES = [
   'Thaivin Jousselin',
   'Moni Kek',
   'Adrien Lassus',
+  'Donatien LEFEBURE',
   'Louna LORION',
   'Mickael MARCIANO',
   'Yanis Mehal',
