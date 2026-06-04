@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
-import { TEAMS, ALL_SALES, allowedNames } from './teams';
+import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN } from './teams';
 
 // ---------- helpers ----------
 function fmt(n) {
@@ -350,7 +350,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [saleFilter, setSaleFilter] = useState(null);   // nom de sale ou null
   const [showSettings, setShowSettings] = useState(false);
   const [hiddenSales, setHiddenSales] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('om_hidden_sales')) || []; } catch { return []; }
+    // Si l'utilisateur n'a jamais touché aux paramètres sur ce navigateur,
+    // on applique le masquage par défaut (hors-équipe sauf Thomas Durand).
+    try {
+      const saved = localStorage.getItem('om_hidden_sales');
+      return saved !== null ? JSON.parse(saved) : DEFAULT_HIDDEN;
+    } catch { return DEFAULT_HIDDEN; }
   });
 
   // Persiste la liste des sales masqués

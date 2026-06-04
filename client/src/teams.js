@@ -75,3 +75,23 @@ export function allowedNames(teamId, saleName) {
   }
   return null; // pas de filtre
 }
+
+/**
+ * Sales masqués PAR DÉFAUT (hors équipe, sauf Thomas Durand qui reste visible).
+ * Appliqué uniquement au premier chargement (navigateur sans réglage sauvegardé) ;
+ * modifiable ensuite via ⚙️ Paramètres.
+ */
+export const DEFAULT_HIDDEN = [
+  'Romy ABDEN',
+  'Clauvaine Battery',
+  'Tim Cattiaux',
+  'Louis Hubert',
+  'Thomas Jallais',
+  'Thaivin Jousselin',
+  'Donatien LEFEBURE',
+  'Yanis Mehal',
+  'François Millet',
+  'Theo Molina',
+  'Fouad Senhadji',
+  'Rémi Simon',
+];
