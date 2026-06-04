@@ -93,3 +93,80 @@ export async function getRdvBookedInRange({ start, end }) {
     r2: { total: r2.length, detail: groupByHost(r2) },
   };
 }
+
+// ==========================================
+//  TRACKING SALESFORGE (UTM via invitees)
+// ==========================================
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Requête Calendly avec retry automatique sur rate limit (429). */
+async function fetchWithRetry(url, maxRetries = 4) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, { headers: { Authorization: authHeader() } });
+    if (res.status === 429) {
+      const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : (attempt + 1) * 1500;
+      await sleep(waitMs);
+      continue;
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Calendly failed (${res.status}): ${text}`);
+    }
+    return res.json();
+  }
+  throw new Error('Calendly rate limit dépassé après plusieurs tentatives');
+}
+
+/**
+ * Récupère l'utm_source de l'invitee d'un event (1 appel API par event).
+ * Renvoie '' si erreur sur cet event (on ne fait pas planter tout le calcul).
+ */
+async function getInviteeUtmSource(event) {
+  try {
+    const data = await fetchWithRetry(`${event.uri}/invitees?count=1`);
+    const invitee = data.collection?.[0];
+    return (invitee?.tracking?.utm_source || '').toLowerCase().trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * RDV générés par SalesForge sur la période :
+ * = events CRÉÉS dans la plage (created_at, comme "R1/R2 pris")
+ *   dont l'invitee a utm_source = "salesforge".
+ *
+ * Coût : 1 appel invitee par event créé dans la plage.
+ * On parallélise par paquets de 10 pour limiter le temps total,
+ * avec retry automatique si Calendly rate-limite.
+ */
+export async function getSalesforgeRdv({ start, end }) {
+  const scanStart = new Date(start);
+  scanStart.setDate(scanStart.getDate() - 7);
+  const scanEnd = new Date(start);
+  scanEnd.setDate(scanEnd.getDate() + 365);
+
+  const events = await fetchEventsByStart(scanStart.toISOString(), scanEnd.toISOString());
+  const createdInRange = events.filter((e) => {
+    if (!e.created_at) return false;
+    const c = new Date(e.created_at);
+    return c >= start && c <= end;
+  });
+
+  // Invitees par paquets parallèles de 10
+  const BATCH = 10;
+  const salesforgeEvents = [];
+  for (let i = 0; i < createdInRange.length; i += BATCH) {
+    const batch = createdInRange.slice(i, i + BATCH);
+    const sources = await Promise.all(batch.map(getInviteeUtmSource));
+    sources.forEach((src, j) => {
+      if (src === 'salesforge') salesforgeEvents.push(batch[j]);
+    });
+  }
+
+  return { total: salesforgeEvents.length, detail: groupByHost(salesforgeEvents) };
+}

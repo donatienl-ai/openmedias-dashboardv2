@@ -9,13 +9,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { getCalls } from './aircall.js';
-import { getRdvInRange, getRdvBookedInRange } from './calendly.js';
+import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv } from './calendly.js';
 import {
   getSignatures,
   getRevenue,
   getPropals,
 } from './salesforce.js';
-import { getSalesforgeData } from './sheets.js';
 import { resolveRange } from './dateRange.js';
 
 dotenv.config();
@@ -65,7 +64,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     getPropals(r),            // 3
     getSignatures(r),         // 4
     getRevenue(r),            // 5
-    getSalesforgeData(),      // 6 (cumul all-time, pas de filtre date)
+    getSalesforgeRdv(r),      // 6 (UTM salesforge via Calendly, suit la période)
   ]);
 
   const pick = (i, fallback) =>

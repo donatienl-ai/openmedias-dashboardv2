@@ -24,9 +24,3 @@ services:
         sync: false
       - key: SALESFORCE_DOMAIN_URL
         value: https://openmedias.my.salesforce.com
-      - key: GOOGLE_SHEETS_API_KEY
-        sync: false
-      - key: GOOGLE_SHEET_ID
-        value: 1m9KUOvYTfDopks9t0Oz3HtNuE3b3Zboh3AuGnneod4Y
-      - key: GOOGLE_SHEET_TAB
-        value: DATA_RAW

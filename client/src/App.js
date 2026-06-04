@@ -580,8 +580,8 @@ function Dashboard({ password, onLogout }) {
           <TileHead dotClass="bg-amber" title="R2 pris par sales" clickable />
           <TopList rows={rdvB.r2.detail} color="c-amber" />
         </div>
-        <div className="tile col-3">
-          <TileHead dotClass="bg-bluer2" title="SalesForge — cumul" />
+        <div className="tile col-3 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2')}>
+          <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
           <TopList rows={sf.detail} color="c-bluer2" />
         </div>
       </div>
