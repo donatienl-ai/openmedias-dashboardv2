@@ -23,6 +23,7 @@ import { SALES } from './roster.js';
 import { sendEmail, getMessageStatus } from './mailer.js';
 import { buildReportHtml } from './reportHtml.js';
 import { getSettings, updateSettings } from './settings.js';
+import { startScheduler, getSchedulerState } from './scheduler.js';
 
 dotenv.config();
 
@@ -187,7 +188,12 @@ app.get('/api/send-report', async (req, res) => {
 
 // ---------- CONSOLE ADMIN (réglages + test, protégés par le mot de passe) ----------
 app.get('/api/admin/settings', requireAuth, (req, res) => {
-  res.json(getSettings());
+  res.json({ ...getSettings(), scheduler: getSchedulerState() });
+});
+
+// Endpoint léger pour le pinger (UptimeRobot) : maintient le service éveillé
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, at: new Date().toISOString() });
 });
 
 app.post('/api/admin/settings', requireAuth, (req, res) => {
@@ -227,6 +233,14 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
+// Planificateur de l'envoi automatique (réglé via la console admin)
+startScheduler(async () => {
+  const s = getSettings();
+  const to = parseRecipients(s.reportTo);
+  if (to.length === 0) throw new Error('Aucun destinataire configuré');
+  return sendReportNow({ to, theme: s.reportTheme, preset: s.reportPreset });
+}, getSettings);
+
 app.listen(PORT, () => {
   console.log(`OpenMedias Dashboard en écoute sur le port ${PORT}`);
 });

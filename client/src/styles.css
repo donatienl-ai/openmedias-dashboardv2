@@ -730,3 +730,21 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 }
 .adm-status.ok { background: rgba(34, 197, 94, 0.12); color: #16A34A; border: 1px solid rgba(34, 197, 94, 0.3); }
 .adm-status.ko { background: rgba(239, 68, 68, 0.10); color: #DC2626; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+/* ===== Console admin : planification ===== */
+.adm-time { max-width: 140px; display: block; }
+.adm-days { display: flex; gap: 6px; }
+.adm-day {
+  width: 36px; height: 36px; border-radius: 9px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text-soft); font-size: 12px; font-weight: 700;
+  cursor: pointer; font-family: var(--font-body);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.adm-day.active {
+  background: var(--om-blue); border-color: var(--om-blue); color: #fff;
+}
+.adm-sched {
+  margin-top: 10px; font-size: 11px; color: var(--text-muted);
+}
+.adm-sched .ko { color: #DC2626; }

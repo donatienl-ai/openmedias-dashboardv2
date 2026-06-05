@@ -46,3 +46,11 @@ services:
         value: donatien.l@openmedias.fr
       - key: REPORT_KEY
         sync: false
+      - key: REPORT_AUTO
+        value: "false"
+      - key: REPORT_TIME
+        value: "08:00"
+      - key: REPORT_DAYS
+        value: "1,2,3,4,5"
+      - key: REPORT_PRESET
+        value: today

@@ -319,6 +319,10 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
 function AdminConsole({ open, password, onClose, period, rangeLabel }) {
   const [theme, setTheme] = useState('light');
   const [cronPreset, setCronPreset] = useState('today');
+  const [auto, setAuto] = useState(false);
+  const [time, setTime] = useState('08:00');
+  const [days, setDays] = useState([1, 2, 3, 4, 5]);
+  const [sched, setSched] = useState(null);
   const [to, setTo] = useState('');
   const [status, setStatus] = useState(null); // {ok, msg}
   const [busy, setBusy] = useState(false);
@@ -329,11 +333,22 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
     setStatus(null);
     fetch('/api/admin/settings', { headers: { 'x-dashboard-password': password } })
       .then((r) => r.json())
-      .then((s) => { setTheme(s.reportTheme || 'light'); setTo(s.reportTo || ''); setCronPreset(s.reportPreset || 'today'); })
+      .then((s) => {
+        setTheme(s.reportTheme || 'light'); setTo(s.reportTo || '');
+        setCronPreset(s.reportPreset || 'today');
+        setAuto(!!s.reportAuto); setTime(s.reportTime || '08:00');
+        setDays(Array.isArray(s.reportDays) ? s.reportDays : [1, 2, 3, 4, 5]);
+        setSched(s.scheduler || null);
+      })
       .catch(() => {});
   }, [open, password]);
 
   if (!open) return null;
+
+  const payload = () => ({
+    reportTheme: theme, reportTo: to, reportPreset: cronPreset,
+    reportAuto: auto, reportTime: time, reportDays: days,
+  });
 
   const save = async () => {
     setBusy(true); setStatus(null);
@@ -341,7 +356,7 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
       const r = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
-        body: JSON.stringify({ reportTheme: theme, reportTo: to, reportPreset: cronPreset }),
+        body: JSON.stringify(payload()),
       });
       if (!r.ok) throw new Error('Sauvegarde refusée');
       const saved = await r.json();
@@ -359,9 +374,9 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
       await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
-        body: JSON.stringify({ reportTheme: theme, reportTo: to, reportPreset: cronPreset }),
+        body: JSON.stringify(payload()),
       });
-      localStorage.setItem('om_admin_settings', JSON.stringify({ reportTheme: theme, reportTo: to, reportPreset: cronPreset }));
+      localStorage.setItem('om_admin_settings', JSON.stringify(payload()));
       // Le test suit la période actuellement sélectionnée sur le dashboard
       const r = await fetch('/api/admin/send-test', {
         method: 'POST',
@@ -399,7 +414,34 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
             <button className={`adm-theme ${theme === 'dark' ? 'active' : ''}`} onClick={() => setTheme('dark')}>🌙 Sombre</button>
           </div>
 
-          <div className="adm-label">Période du reporting automatique (cron)</div>
+          <label className="set-row" style={{ marginTop: 4 }}>
+            <span className="set-name">Envoi automatique du reporting</span>
+            <input type="checkbox" className="set-check" checked={auto} onChange={() => setAuto((v) => !v)} />
+            <span className="set-switch" />
+          </label>
+
+          <div className="adm-label">Heure d'envoi (Europe/Paris)</div>
+          <input
+            type="time"
+            className="adm-input adm-time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+          />
+
+          <div className="adm-label">Jours d'envoi</div>
+          <div className="adm-days">
+            {[['L', 1], ['M', 2], ['M', 3], ['J', 4], ['V', 5], ['S', 6], ['D', 0]].map(([lbl, val], idx) => (
+              <button
+                key={idx}
+                className={`adm-day ${days.includes(val) ? 'active' : ''}`}
+                onClick={() => setDays((d) => (d.includes(val) ? d.filter((x) => x !== val) : [...d, val]))}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          <div className="adm-label">Période du reporting automatique</div>
           <div className="adm-themes">
             <button className={`adm-theme ${cronPreset === 'today' ? 'active' : ''}`} onClick={() => setCronPreset('today')}>Aujourd'hui</button>
             <button className={`adm-theme ${cronPreset === 'yesterday' ? 'active' : ''}`} onClick={() => setCronPreset('yesterday')}>Hier</button>
@@ -421,6 +463,12 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
             </button>
           </div>
           {status && <div className={`adm-status ${status.ok ? 'ok' : 'ko'}`}>{status.msg}</div>}
+          {sched && (sched.lastAutoSendAt || sched.lastAutoError) && (
+            <div className="adm-sched">
+              {sched.lastAutoSendAt && <>Dernier envoi auto : {new Date(sched.lastAutoSendAt).toLocaleString('fr-FR')}</>}
+              {sched.lastAutoError && <span className="ko"> · Dernière erreur : {sched.lastAutoError}</span>}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -920,7 +968,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
       <div className="foot">
         <span className="foot-brand">OPENMEDIAS</span>
-        <span className="foot-sub">Live · Le robot trop rigolo · {new Date().getFullYear()}</span>
+        <span className="foot-sub">Live · Le robot trop rigolo 🤖 · {new Date().getFullYear()}</span>
       </div>
 
       <AdminConsole
