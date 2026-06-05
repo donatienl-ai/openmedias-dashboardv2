@@ -48,13 +48,36 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// --- Journal des connexions (mémoire volatile, 200 derniers événements) ---
+const loginLog = [];
+function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  return (fwd ? String(fwd).split(',')[0] : req.socket?.remoteAddress || '').trim() || 'inconnue';
+}
+function recordLogin(req, ok) {
+  loginLog.push({
+    at: new Date().toISOString(),
+    ok,
+    ip: clientIp(req),
+    ua: String(req.headers['user-agent'] || '').slice(0, 200),
+  });
+  if (loginLog.length > 200) loginLog.shift();
+}
+
 // --- Route de vérification du mot de passe (pour le login) ---
 app.post('/api/login', (req, res) => {
   const { password } = req.body || {};
   if (password === PASSWORD) {
+    recordLogin(req, true);
     return res.json({ ok: true });
   }
+  recordLogin(req, false);
   return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+});
+
+// --- Console admin : journal des connexions ---
+app.get('/api/admin/logins', requireAuth, (req, res) => {
+  res.json({ events: [...loginLog].reverse() });
 });
 
 // --- Route principale : agrège toutes les sources sur une plage de dates ---

@@ -323,7 +323,23 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
   const [time, setTime] = useState('08:00');
   const [days, setDays] = useState([1, 2, 3, 4, 5]);
   const [sched, setSched] = useState(null);
+  const [logins, setLogins] = useState([]);
   const [to, setTo] = useState('');
+
+  // Rend le user-agent lisible ("Chrome · Windows")
+  const uaShort = (ua) => {
+    const browser = /Edg\//.test(ua) ? 'Edge'
+      : /OPR\//.test(ua) ? 'Opera'
+      : /Chrome\//.test(ua) ? 'Chrome'
+      : /Safari\//.test(ua) && /Version\//.test(ua) ? 'Safari'
+      : /Firefox\//.test(ua) ? 'Firefox' : 'Navigateur';
+    const os = /Windows/.test(ua) ? 'Windows'
+      : /Mac OS X/.test(ua) ? 'macOS'
+      : /iPhone|iPad/.test(ua) ? 'iOS'
+      : /Android/.test(ua) ? 'Android'
+      : /Linux/.test(ua) ? 'Linux' : '';
+    return os ? `${browser} · ${os}` : browser;
+  };
   const [status, setStatus] = useState(null); // {ok, msg}
   const [busy, setBusy] = useState(false);
 
@@ -340,6 +356,10 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
         setDays(Array.isArray(s.reportDays) ? s.reportDays : [1, 2, 3, 4, 5]);
         setSched(s.scheduler || null);
       })
+      .catch(() => {});
+    fetch('/api/admin/logins', { headers: { 'x-dashboard-password': password } })
+      .then((r) => r.json())
+      .then((d) => setLogins(d.events || []))
       .catch(() => {});
   }, [open, password]);
 
@@ -467,6 +487,24 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
             <div className="adm-sched">
               {sched.lastAutoSendAt && <>Dernier envoi auto : {new Date(sched.lastAutoSendAt).toLocaleString('fr-FR')}</>}
               {sched.lastAutoError && <span className="ko"> · Dernière erreur : {sched.lastAutoError}</span>}
+            </div>
+          )}
+
+          <div className="adm-label" style={{ marginTop: 18 }}>
+            Connexions récentes {logins.length > 0 && `(${logins.length})`}
+          </div>
+          {logins.length === 0 ? (
+            <div className="adm-sched">Aucune connexion enregistrée depuis le dernier redémarrage.</div>
+          ) : (
+            <div className="adm-log">
+              {logins.slice(0, 25).map((l, idx) => (
+                <div className="adm-log-row" key={idx}>
+                  <span className={`adm-log-dot ${l.ok ? 'ok' : 'ko'}`} title={l.ok ? 'Connexion réussie' : 'Mot de passe incorrect'} />
+                  <span className="adm-log-time">{new Date(l.at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="adm-log-ua">{uaShort(l.ua)}</span>
+                  <span className="adm-log-ip">{l.ip}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -976,7 +1014,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
       <div className="foot">
         <span className="foot-brand">OPENMEDIAS</span>
-        <span className="foot-sub">Live · Le robot trop rigolo 🤖 · {new Date().getFullYear()}</span>
+        <span className="foot-sub">Live · Le gros robot trop rigolo 🤖 · {new Date().getFullYear()}</span>
       </div>
 
       <AdminConsole
