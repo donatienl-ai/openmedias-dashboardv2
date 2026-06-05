@@ -34,3 +34,15 @@ services:
         sync: false
       - key: DOCUSIGN_OAUTH_HOST
         value: account.docusign.com
+      - key: MAILJET_API_KEY
+        sync: false
+      - key: MAILJET_SECRET_KEY
+        sync: false
+      - key: REPORT_FROM_EMAIL
+        value: donatien.l@openmedias.fr
+      - key: REPORT_FROM_NAME
+        value: OpenMedias Reporting
+      - key: REPORT_TO
+        value: donatien.l@openmedias.fr
+      - key: REPORT_KEY
+        sync: false

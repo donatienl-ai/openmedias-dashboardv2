@@ -315,6 +315,105 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
   );
 }
 
+// ---------- CONSOLE ADMIN CACHÉE (Ctrl+Shift+A) ----------
+function AdminConsole({ open, password, onClose }) {
+  const [theme, setTheme] = useState('light');
+  const [to, setTo] = useState('');
+  const [status, setStatus] = useState(null); // {ok, msg}
+  const [busy, setBusy] = useState(false);
+
+  // Charge les réglages serveur à l'ouverture
+  useEffect(() => {
+    if (!open) return;
+    setStatus(null);
+    fetch('/api/admin/settings', { headers: { 'x-dashboard-password': password } })
+      .then((r) => r.json())
+      .then((s) => { setTheme(s.reportTheme || 'light'); setTo(s.reportTo || ''); })
+      .catch(() => {});
+  }, [open, password]);
+
+  if (!open) return null;
+
+  const save = async () => {
+    setBusy(true); setStatus(null);
+    try {
+      const r = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        body: JSON.stringify({ reportTheme: theme, reportTo: to }),
+      });
+      if (!r.ok) throw new Error('Sauvegarde refusée');
+      const saved = await r.json();
+      localStorage.setItem('om_admin_settings', JSON.stringify(saved));
+      setStatus({ ok: true, msg: 'Réglages sauvegardés ✓' });
+    } catch (e) {
+      setStatus({ ok: false, msg: String(e.message || e) });
+    } finally { setBusy(false); }
+  };
+
+  const sendTest = async () => {
+    setBusy(true); setStatus({ ok: true, msg: 'Génération + envoi en cours… (10-30s)' });
+    try {
+      // On sauvegarde d'abord pour tester les réglages affichés
+      await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        body: JSON.stringify({ reportTheme: theme, reportTo: to }),
+      });
+      localStorage.setItem('om_admin_settings', JSON.stringify({ reportTheme: theme, reportTo: to }));
+      const r = await fetch('/api/admin/send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        body: JSON.stringify({}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.sent) throw new Error(d.error || 'Échec de l\'envoi');
+      setStatus({ ok: true, msg: `Reporting envoyé à ${d.to.join(', ')} ✓` });
+    } catch (e) {
+      setStatus({ ok: false, msg: String(e.message || e) });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="modal-title">🛠 Console admin</span>
+          <button className="modal-close" onClick={onClose} aria-label="Fermer">✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="set-hint">
+            Console cachée (Ctrl/Cmd + Maj + A). Réglages du reporting email envoyé par le dashboard.
+          </div>
+
+          <div className="adm-label">Thème de l'email</div>
+          <div className="adm-themes">
+            <button className={`adm-theme ${theme === 'light' ? 'active' : ''}`} onClick={() => setTheme('light')}>☀️ Clair</button>
+            <button className={`adm-theme ${theme === 'dark' ? 'active' : ''}`} onClick={() => setTheme('dark')}>🌙 Sombre</button>
+          </div>
+
+          <div className="adm-label">Destinataires (séparés par des virgules)</div>
+          <textarea
+            className="adm-input"
+            rows={2}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="prenom@openmedias.fr, autre@openmedias.fr"
+          />
+
+          <div className="adm-actions">
+            <button className="adm-btn ghost" onClick={save} disabled={busy}>Sauvegarder</button>
+            <button className="adm-btn primary" onClick={sendTest} disabled={busy}>
+              {busy ? 'Envoi…' : '📬 Envoyer un test maintenant'}
+            </button>
+          </div>
+          {status && <div className={`adm-status ${status.ok ? 'ok' : 'ko'}`}>{status.msg}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- PARAMÈTRES ADMIN (sales visibles) ----------
 function SettingsModal({ open, hidden, onToggle, onShowAll, onClose }) {
   if (!open) return null;
@@ -364,6 +463,34 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [saleFilter, setSaleFilter] = useState(null);   // nom de sale ou null
   const [showSettings, setShowSettings] = useState(false);
   const [bdcView, setBdcView] = useState('pending'); // 'sent' | 'signed' | 'pending'
+  const [showAdmin, setShowAdmin] = useState(false);
+
+  // Console admin cachée : Ctrl/Cmd + Maj + A
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        setShowAdmin((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Resynchronise les réglages admin sauvegardés vers le serveur
+  // (la mémoire serveur est volatile sur Render free)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('om_admin_settings');
+      if (saved) {
+        fetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+          body: saved,
+        }).catch(() => {});
+      }
+    } catch { /* noop */ }
+  }, [password]);
   const [hiddenSales, setHiddenSales] = useState(() => {
     // Si l'utilisateur n'a jamais touché aux paramètres sur ce navigateur,
     // on applique le masquage par défaut (hors-équipe sauf Thomas Durand).
@@ -782,6 +909,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         <span className="foot-brand">OPENMEDIAS</span>
         <span className="foot-sub">Live · Aircall + Calendly + Salesforce · {new Date().getFullYear()}</span>
       </div>
+
+      <AdminConsole
+        open={showAdmin}
+        password={password}
+        onClose={() => setShowAdmin(false)}
+      />
 
       <SettingsModal
         open={showSettings}

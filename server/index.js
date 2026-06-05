@@ -20,6 +20,9 @@ import { getBdc } from './docusign.js';
 import { getRawUsers } from './aircall.js';
 import { getRawHosts } from './calendly.js';
 import { SALES } from './roster.js';
+import { sendEmail } from './mailer.js';
+import { buildReportHtml } from './reportHtml.js';
+import { getSettings, updateSettings } from './settings.js';
 
 dotenv.config();
 
@@ -79,10 +82,9 @@ app.get('/api/debug/names', async (req, res) => {
   }
 });
 
-app.get('/api/dashboard', requireAuth, async (req, res) => {
-  // Plage de dates : preset (today par défaut) + custom start/end éventuels
-  const preset = req.query.preset || 'today';
-  const range = resolveRange(preset, req.query.start, req.query.end);
+// Agrège toutes les sources pour une plage donnée.
+// Utilisé par la route /api/dashboard ET par le reporting email.
+async function collectData(preset, range) {
   const r = { start: range.start, end: range.end };
 
   // On lance tous les appels en parallèle. Si une source plante,
@@ -110,7 +112,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   const rdvToday = pick(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } });
   const rdvBooked = pick(2, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } });
 
-  res.json({
+  return {
     generatedAt: new Date().toISOString(),
     range: { preset, label: range.label, start: range.start.toISOString(), end: range.end.toISOString() },
     calls: pick(0, { total: 0, detail: [] }),
@@ -122,7 +124,80 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     salesforge: pick(6, { total: 0, detail: [] }),
     bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
     errors: Object.keys(errors).length ? errors : null,
-  });
+  };
+}
+
+app.get('/api/dashboard', requireAuth, async (req, res) => {
+  const preset = req.query.preset || 'today';
+  const range = resolveRange(preset, req.query.start, req.query.end);
+  res.json(await collectData(preset, range));
+});
+
+// ---------- REPORTING EMAIL (remplace Make à terme) ----------
+// Génère le reporting du jour et l'envoie aux destinataires.
+async function sendReportNow({ to, theme }) {
+  const today = resolveRange('today');
+  const month = resolveRange('this_month');
+  const data = await collectData('today', today);
+  // CA du mois (cumul depuis le 1er)
+  let monthRevenue = { totalAmount: 0, detail: [] };
+  try { monthRevenue = await getRevenue({ start: month.start, end: month.end }); } catch (e) { /* section vide si KO */ }
+
+  const html = buildReportHtml({ data, monthRevenue, monthLabel: month.label, theme });
+  const subject = `📊 Reporting commercial — ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`;
+  await sendEmail({ to, subject, html });
+  return { to, theme, errors: data.errors };
+}
+
+function parseRecipients(str) {
+  return String(str || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+// Déclenchement (cron) : GET /api/send-report?key=REPORT_KEY[&sync=1][&to=...][&theme=light|dark]
+// Par défaut répond immédiatement (202) et envoie en arrière-plan,
+// pour que n'importe quel cron externe fonctionne malgré le réveil Render.
+app.get('/api/send-report', async (req, res) => {
+  const expected = process.env.REPORT_KEY;
+  if (!expected || req.query.key !== expected) {
+    return res.status(401).json({ error: 'Clé invalide' });
+  }
+  const s = getSettings();
+  const to = parseRecipients(req.query.to || s.reportTo);
+  const theme = req.query.theme === 'dark' ? 'dark' : req.query.theme === 'light' ? 'light' : s.reportTheme;
+  if (to.length === 0) return res.status(400).json({ error: 'Aucun destinataire (réglages admin / REPORT_TO)' });
+
+  if (req.query.sync === '1') {
+    try {
+      const out = await sendReportNow({ to, theme });
+      res.json({ sent: true, ...out });
+    } catch (e) {
+      res.status(500).json({ sent: false, error: String(e.message || e) });
+    }
+  } else {
+    res.status(202).json({ accepted: true, to, theme });
+    sendReportNow({ to, theme }).catch((e) => console.error('send-report failed:', e));
+  }
+});
+
+// ---------- CONSOLE ADMIN (réglages + test, protégés par le mot de passe) ----------
+app.get('/api/admin/settings', requireAuth, (req, res) => {
+  res.json(getSettings());
+});
+
+app.post('/api/admin/settings', requireAuth, (req, res) => {
+  res.json(updateSettings(req.body || {}));
+});
+
+app.post('/api/admin/send-test', requireAuth, async (req, res) => {
+  try {
+    const s = getSettings();
+    const to = parseRecipients((req.body && req.body.to) || s.reportTo);
+    if (to.length === 0) return res.status(400).json({ error: 'Aucun destinataire configuré' });
+    const out = await sendReportNow({ to, theme: s.reportTheme });
+    res.json({ sent: true, ...out });
+  } catch (e) {
+    res.status(500).json({ sent: false, error: String(e.message || e) });
+  }
 });
 
 // --- Sert le build React en production ---

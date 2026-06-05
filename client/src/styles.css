@@ -689,3 +689,44 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .subsec-head b { font-size: 14px; letter-spacing: 0; font-family: var(--font-display); }
 .clickable-zone { cursor: pointer; border-radius: 10px; transition: background 0.15s; }
 .clickable-zone:hover { background: var(--panel-2); }
+
+/* ===== CONSOLE ADMIN CACHÉE ===== */
+.adm-label {
+  font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+  font-weight: 700; color: var(--text-muted); margin: 14px 0 8px;
+}
+.adm-themes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.adm-theme {
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 10px;
+  font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-body);
+  transition: border-color 0.15s, background 0.15s;
+}
+.adm-theme.active { border-color: var(--om-blue); background: rgba(37, 99, 235, 0.10); }
+.adm-input {
+  width: 100%; box-sizing: border-box;
+  background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 10px; padding: 10px 12px;
+  font-size: 13px; font-family: var(--font-body); resize: vertical;
+}
+.adm-input:focus { outline: none; border-color: var(--om-blue); }
+.adm-actions { display: flex; gap: 8px; margin-top: 14px; }
+.adm-btn {
+  flex: 1; border-radius: 10px; padding: 11px; font-size: 13px;
+  font-weight: 700; cursor: pointer; font-family: var(--font-body);
+  transition: opacity 0.15s, transform 0.1s;
+}
+.adm-btn:disabled { opacity: 0.55; cursor: default; }
+.adm-btn:active { transform: scale(0.98); }
+.adm-btn.ghost {
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+}
+.adm-btn.primary {
+  background: var(--om-blue); border: 1px solid var(--om-blue); color: #fff;
+}
+.adm-status {
+  margin-top: 12px; border-radius: 10px; padding: 10px 12px;
+  font-size: 12px; font-weight: 600;
+}
+.adm-status.ok { background: rgba(34, 197, 94, 0.12); color: #16A34A; border: 1px solid rgba(34, 197, 94, 0.3); }
+.adm-status.ko { background: rgba(239, 68, 68, 0.10); color: #DC2626; border: 1px solid rgba(239, 68, 68, 0.3); }
