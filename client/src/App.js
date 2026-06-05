@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
 } from 'recharts';
-import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN } from './teams';
+import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN, MANAGERS } from './teams';
 
 // ---------- helpers ----------
 function fmt(n) {
@@ -522,6 +522,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [period, setPeriod] = useState({ preset: 'today' }); // {preset, start?, end?}
   const [teamFilter, setTeamFilter] = useState(null);   // id d'équipe ou null
   const [saleFilter, setSaleFilter] = useState(null);   // nom de sale ou null
+  const [roleFilter, setRoleFilter] = useState(null);   // 'managers' | 'sales' | null
   const [showSettings, setShowSettings] = useState(false);
   const [bdcView, setBdcView] = useState('pending'); // 'sent' | 'signed' | 'pending'
   const [showAdmin, setShowAdmin] = useState(false);
@@ -626,9 +627,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   // allowed = Set des noms autorisés, ou null = pas de filtre
   const allowed = allowedNames(teamFilter, saleFilter);
   const hidden = new Set(hiddenSales);
-  const keepRow = (r) => (!allowed || allowed.has(r.name)) && !hidden.has(r.name);
+  const isManager = (name) => MANAGERS.includes(name);
+  const roleOk = (name) => !roleFilter || (roleFilter === 'managers' ? isManager(name) : !isManager(name));
+  const keepRow = (r) => (!allowed || allowed.has(r.name)) && !hidden.has(r.name) && roleOk(r.name);
   const filterRows = (rows) => (rows || []).filter(keepRow);
-  const mustRecalc = !!allowed || hidden.size > 0;
+  const mustRecalc = !!allowed || hidden.size > 0 || !!roleFilter;
   // Recalcule un bloc {total, detail} après filtre
   const fBlock = (block, sumAmount = false) => {
     const detail = filterRows(block?.detail);
@@ -669,11 +672,13 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     : (calls.totalOutbound ?? 0);
 
   // libellé du filtre actif (pour le titre)
-  const filterLabel = saleFilter
+  const roleLabel = roleFilter === 'managers' ? 'Managers' : roleFilter === 'sales' ? 'Sales' : null;
+  const baseLabel = saleFilter
     ? saleFilter
     : teamFilter
       ? (TEAMS.find((t) => t.id === teamFilter)?.label || '')
       : null;
+  const filterLabel = [baseLabel, roleLabel].filter(Boolean).join(' · ') || null;
 
   // ouvre une modale
   const openModal = (title, rows, isAmount, accent) =>
@@ -712,6 +717,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         <div className="topbar-right">
           <div className="controls-group">
             <FilterDropdown
+              icon="👔"
+              label={roleLabel || 'Rôle'}
+              allLabel="Tous les rôles"
+              items={[
+                { value: 'managers', label: 'Managers' },
+                { value: 'sales', label: 'Sales' },
+              ]}
+              current={roleFilter}
+              onPick={(v) => { setRoleFilter(v); setSaleFilter(null); }}
+            />
+            <FilterDropdown
               icon="👥"
               label={teamFilter ? (TEAMS.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
               allLabel="Toutes les équipes"
@@ -726,7 +742,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               items={(teamFilter
                 ? (TEAMS.find((t) => t.id === teamFilter)?.members || [])
                 : ALL_SALES
-              ).filter((s) => !hidden.has(s)).map((s) => ({ value: s, label: s }))}
+              ).filter((s) => !hidden.has(s) && roleOk(s)).map((s) => ({ value: s, label: s }))}
               current={saleFilter}
               onPick={(v) => setSaleFilter(v)}
             />

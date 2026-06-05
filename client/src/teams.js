@@ -96,8 +96,8 @@ export const DEFAULT_HIDDEN = [
   'Rémi Simon',
 ];
 
-/** Account managers (suivi "propals comptes" séparé des sales). */
-export const ACCOUNTS = [
+/** Managers (filtre Rôle : Managers vs Sales). */
+export const MANAGERS = [
   'Lisa Neveu',
   'Quentin PUREN',
   'David CHEA',
