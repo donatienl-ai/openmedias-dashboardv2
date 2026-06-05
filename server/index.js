@@ -20,7 +20,7 @@ import { getBdc } from './docusign.js';
 import { getRawUsers } from './aircall.js';
 import { getRawHosts } from './calendly.js';
 import { SALES } from './roster.js';
-import { sendEmail } from './mailer.js';
+import { sendEmail, getMessageStatus } from './mailer.js';
 import { buildReportHtml } from './reportHtml.js';
 import { getSettings, updateSettings } from './settings.js';
 
@@ -134,19 +134,23 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 });
 
 // ---------- REPORTING EMAIL (remplace Make à terme) ----------
-// Génère le reporting du jour et l'envoie aux destinataires.
-async function sendReportNow({ to, theme }) {
-  const today = resolveRange('today');
+// Génère le reporting sur la période demandée et l'envoie aux destinataires.
+async function sendReportNow({ to, theme, preset = 'today', start, end }) {
+  const range = resolveRange(preset, start, end);
   const month = resolveRange('this_month');
-  const data = await collectData('today', today);
-  // CA du mois (cumul depuis le 1er)
+  const data = await collectData(preset, range);
+  // CA du mois (cumul depuis le 1er, indépendant de la période du rapport)
   let monthRevenue = { totalAmount: 0, detail: [] };
   try { monthRevenue = await getRevenue({ start: month.start, end: month.end }); } catch (e) { /* section vide si KO */ }
 
-  const html = buildReportHtml({ data, monthRevenue, monthLabel: month.label, theme });
-  const subject = `📊 Reporting commercial — ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`;
-  await sendEmail({ to, subject, html });
-  return { to, theme, errors: data.errors };
+  const html = buildReportHtml({ data, monthRevenue, monthLabel: month.label, theme, preset, range });
+  const sameDay = range.start.toDateString() === new Date(range.end.getTime() - 1).toDateString();
+  const subjectLabel = sameDay
+    ? range.start.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : range.label;
+  const subject = `📊 Reporting commercial — ${subjectLabel}`;
+  const sent = await sendEmail({ to, subject, html });
+  return { to, theme, preset, rangeLabel: range.label, errors: data.errors, messageId: sent.messageId };
 }
 
 function parseRecipients(str) {
@@ -164,18 +168,20 @@ app.get('/api/send-report', async (req, res) => {
   const s = getSettings();
   const to = parseRecipients(req.query.to || s.reportTo);
   const theme = req.query.theme === 'dark' ? 'dark' : req.query.theme === 'light' ? 'light' : s.reportTheme;
+  const preset = req.query.preset || s.reportPreset;
   if (to.length === 0) return res.status(400).json({ error: 'Aucun destinataire (réglages admin / REPORT_TO)' });
 
   if (req.query.sync === '1') {
     try {
-      const out = await sendReportNow({ to, theme });
+      const out = await sendReportNow({ to, theme, preset, start: req.query.start, end: req.query.end });
       res.json({ sent: true, ...out });
     } catch (e) {
       res.status(500).json({ sent: false, error: String(e.message || e) });
     }
   } else {
-    res.status(202).json({ accepted: true, to, theme });
-    sendReportNow({ to, theme }).catch((e) => console.error('send-report failed:', e));
+    res.status(202).json({ accepted: true, to, theme, preset });
+    sendReportNow({ to, theme, preset, start: req.query.start, end: req.query.end })
+      .catch((e) => console.error('send-report failed:', e));
   }
 });
 
@@ -193,8 +199,21 @@ app.post('/api/admin/send-test', requireAuth, async (req, res) => {
     const s = getSettings();
     const to = parseRecipients((req.body && req.body.to) || s.reportTo);
     if (to.length === 0) return res.status(400).json({ error: 'Aucun destinataire configuré' });
-    const out = await sendReportNow({ to, theme: s.reportTheme });
-    res.json({ sent: true, ...out });
+    const b = req.body || {};
+    const out = await sendReportNow({
+      to,
+      theme: s.reportTheme,
+      preset: b.preset || 'today',
+      start: b.start,
+      end: b.end,
+    });
+    // Diagnostic : quelle clé le serveur utilise + statut réel du message chez Mailjet
+    const keyPrefix = (process.env.MAILJET_API_KEY || '').slice(0, 8);
+    let mailjetStatus = null;
+    if (out.messageId) {
+      try { mailjetStatus = await getMessageStatus(out.messageId); } catch { mailjetStatus = 'lookup KO'; }
+    }
+    res.json({ sent: true, ...out, keyPrefix, mailjetStatus });
   } catch (e) {
     res.status(500).json({ sent: false, error: String(e.message || e) });
   }

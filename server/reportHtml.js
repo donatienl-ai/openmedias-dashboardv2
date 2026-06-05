@@ -139,8 +139,11 @@ function miniList({ emoji, title, color, bg, rows, valueFn, emptyText }) {
 
 // ---------- le template ----------
 
-export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light' }) {
+export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light', preset = 'today', range = null }) {
   const dark = theme === 'dark';
+  const isToday = preset === 'today';
+  // Texte de période pour les libellés ("du jour" / "hier" / label de plage)
+  const periodTxt = isToday ? 'du jour' : (range?.label || 'période').toLowerCase();
   // Palette du hero/des cartes sombres selon le thème
   const P = dark
     ? {
@@ -160,9 +163,18 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
         footBg: C.white, footTitle: C.text, footSub: C.muted,
       };
 
-  const dateLabel = new Date().toLocaleDateString('fr-FR', {
-    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
-  });
+  // Date affichée : si la plage couvre un seul jour, on affiche CE jour ;
+  // sinon le label de la plage (ex: "25/05/2026 → 04/06/2026").
+  let dateLabel;
+  if (range?.start && range?.end) {
+    const endIncl = new Date(new Date(range.end).getTime() - 1);
+    const sameDay = new Date(range.start).toDateString() === endIncl.toDateString();
+    dateLabel = sameDay
+      ? new Date(range.start).toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+      : range.label;
+  } else {
+    dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+  }
 
   const calls = filt(data.calls);
   const callsIn = calls.detail.reduce((s, r) => s + (r.inbound || 0), 0);
@@ -191,7 +203,7 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
         <div style="font-size:26px;font-weight:800;color:${P.title};font-family:${FONT};padding:4px 0 2px;">Performance Commerciale</div>
         <div style="font-size:12px;color:${P.dateTxt};font-family:${FONT};text-transform:capitalize;">${dateLabel}</div>
 
-        <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.zoneLbl};text-transform:uppercase;font-family:${FONT};padding:18px 0 6px;">Activité du jour</div>
+        <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.zoneLbl};text-transform:uppercase;font-family:${FONT};padding:18px 0 6px;">Activité ${periodTxt}</div>
         <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
           ${kpiChipP(P, 'Calls', calls.truncated ? `${fmt(calls.total)}+` : calls.total, `${callsOut} out · ${callsIn} in`, P.accBlue)}
           ${kpiChipP(P, 'R1', r1.total, 'échanges', P.accGreen)}
@@ -200,7 +212,7 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
           ${kpiChipP(P, 'R2 pris', r2p.total, 'bookés', P.accAmber)}
         </tr></table>
 
-        <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.zoneLbl};text-transform:uppercase;font-family:${FONT};padding:14px 0 6px;">Résultats du jour</div>
+        <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.zoneLbl};text-transform:uppercase;font-family:${FONT};padding:14px 0 6px;">Résultats ${periodTxt}</div>
         <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
           <td width="50%" style="padding:3px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
@@ -216,7 +228,7 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
               <td style="background-color:${P.chipBg};border:1px solid ${C.blue};border-radius:10px;padding:14px 12px;text-align:center;">
                 <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.accBlue};text-transform:uppercase;font-family:${FONT};">Signatures</div>
                 <div style="font-size:26px;font-weight:800;color:${P.chipVal};font-family:${FONT};padding:2px 0;">${sig.total}</div>
-                <div style="font-size:9px;color:${P.chipSub};font-family:${FONT};">du jour</div>
+                <div style="font-size:9px;color:${P.chipSub};font-family:${FONT};">${isToday ? 'du jour' : periodTxt}</div>
               </td>
             </tr></table>
           </td>
@@ -239,11 +251,11 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
 
   // ---- SECTIONS ----
   const callsSection = listSection({
-    emoji: '📞', title: 'Calls passés', color: C.blue, bg: '#EFF6FF',
+    emoji: '📞', title: `Calls passés ${isToday ? '' : '· ' + (range?.label || '')}`.trim(), color: C.blue, bg: '#EFF6FF',
     rows: active(calls.detail),
     valueFn: (r) => `<span style="color:${C.muted};font-weight:500;">${r.outbound || 0} out · ${r.inbound || 0} in&nbsp;&nbsp;</span>${r.count}`,
     totalLabel: 'Total équipe', totalValue: calls.total,
-    emptyText: 'Aucun call aujourd\u2019hui', head: ['Commercial', 'Calls'],
+    emptyText: 'Aucun call sur la période', head: ['Commercial', 'Calls'],
   });
 
   const rdvSection = twoColSection(
@@ -262,10 +274,10 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
   );
 
   // Signatures : carte navy, lignes blanches
-  let sigInner = sectionLabel('✍️', 'Signatures du jour', C.blue, '#EFF6FF');
+  let sigInner = sectionLabel('✍️', `Signatures ${periodTxt}`, C.blue, '#EFF6FF');
   const sigRows = active(sig.detail, true);
   if (sigRows.length === 0) {
-    sigInner += emptyBox('Aucune signature aujourd\u2019hui');
+    sigInner += emptyBox('Aucune signature sur la période');
   } else {
     sigInner += `<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td style="background-color:${P.sigBg};border-radius:12px;padding:6px 18px;">
@@ -311,11 +323,11 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
   });
 
   const sfSection = listSection({
-    emoji: '📧', title: 'RDV via SalesForge — jour', color: C.cyan, bg: '#ECFEFF',
+    emoji: '📧', title: `RDV via SalesForge — ${isToday ? 'jour' : periodTxt}`, color: C.cyan, bg: '#ECFEFF',
     rows: active(sf.detail),
     valueFn: (r) => r.count,
     totalLabel: 'Total SalesForge', totalValue: sf.total,
-    emptyText: 'Aucun RDV SalesForge aujourd\u2019hui', head: ['Commercial', 'RDV'],
+    emptyText: 'Aucun RDV SalesForge sur la période', head: ['Commercial', 'RDV'],
   });
 
   const footer = `<tr><td style="padding:4px 0 0;">

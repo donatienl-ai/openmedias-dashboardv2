@@ -44,5 +44,20 @@ export async function sendEmail({ to, subject, html }) {
   if (status !== 'success') {
     throw new Error(`Mailjet status: ${JSON.stringify(data.Messages?.[0] || data)}`);
   }
-  return data;
+  return {
+    messageId: data.Messages?.[0]?.To?.[0]?.MessageID || null,
+    raw: data,
+  };
+}
+
+/** Interroge Mailjet sur le statut réel d'un message (sent/queued/blocked...). */
+export async function getMessageStatus(messageId) {
+  const apiKey = process.env.MAILJET_API_KEY;
+  const secret = process.env.MAILJET_SECRET_KEY;
+  const auth = Buffer.from(`${apiKey}:${secret}`).toString('base64');
+  const res = await fetch(`https://api.mailjet.com/v3/REST/message/${messageId}`, {
+    headers: { Authorization: `Basic ${auth}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  return data?.Data?.[0]?.Status || `inconnu (${res.status})`;
 }

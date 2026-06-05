@@ -316,8 +316,9 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
 }
 
 // ---------- CONSOLE ADMIN CACHÉE (Ctrl+Shift+A) ----------
-function AdminConsole({ open, password, onClose }) {
+function AdminConsole({ open, password, onClose, period, rangeLabel }) {
   const [theme, setTheme] = useState('light');
+  const [cronPreset, setCronPreset] = useState('today');
   const [to, setTo] = useState('');
   const [status, setStatus] = useState(null); // {ok, msg}
   const [busy, setBusy] = useState(false);
@@ -328,7 +329,7 @@ function AdminConsole({ open, password, onClose }) {
     setStatus(null);
     fetch('/api/admin/settings', { headers: { 'x-dashboard-password': password } })
       .then((r) => r.json())
-      .then((s) => { setTheme(s.reportTheme || 'light'); setTo(s.reportTo || ''); })
+      .then((s) => { setTheme(s.reportTheme || 'light'); setTo(s.reportTo || ''); setCronPreset(s.reportPreset || 'today'); })
       .catch(() => {});
   }, [open, password]);
 
@@ -340,7 +341,7 @@ function AdminConsole({ open, password, onClose }) {
       const r = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
-        body: JSON.stringify({ reportTheme: theme, reportTo: to }),
+        body: JSON.stringify({ reportTheme: theme, reportTo: to, reportPreset: cronPreset }),
       });
       if (!r.ok) throw new Error('Sauvegarde refusée');
       const saved = await r.json();
@@ -358,17 +359,23 @@ function AdminConsole({ open, password, onClose }) {
       await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
-        body: JSON.stringify({ reportTheme: theme, reportTo: to }),
+        body: JSON.stringify({ reportTheme: theme, reportTo: to, reportPreset: cronPreset }),
       });
-      localStorage.setItem('om_admin_settings', JSON.stringify({ reportTheme: theme, reportTo: to }));
+      localStorage.setItem('om_admin_settings', JSON.stringify({ reportTheme: theme, reportTo: to, reportPreset: cronPreset }));
+      // Le test suit la période actuellement sélectionnée sur le dashboard
       const r = await fetch('/api/admin/send-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ preset: period?.preset || 'today', start: period?.start, end: period?.end }),
       });
       const d = await r.json();
       if (!r.ok || !d.sent) throw new Error(d.error || 'Échec de l\'envoi');
-      setStatus({ ok: true, msg: `Reporting envoyé à ${d.to.join(', ')} ✓` });
+      const extra = [
+        d.messageId ? `ID ${d.messageId}` : null,
+        d.mailjetStatus ? `statut Mailjet: ${d.mailjetStatus}` : null,
+        d.keyPrefix ? `clé ${d.keyPrefix}…` : null,
+      ].filter(Boolean).join(' · ');
+      setStatus({ ok: true, msg: `Reporting envoyé à ${d.to.join(', ')} ✓${extra ? ` (${extra})` : ''}` });
     } catch (e) {
       setStatus({ ok: false, msg: String(e.message || e) });
     } finally { setBusy(false); }
@@ -392,6 +399,12 @@ function AdminConsole({ open, password, onClose }) {
             <button className={`adm-theme ${theme === 'dark' ? 'active' : ''}`} onClick={() => setTheme('dark')}>🌙 Sombre</button>
           </div>
 
+          <div className="adm-label">Période du reporting automatique (cron)</div>
+          <div className="adm-themes">
+            <button className={`adm-theme ${cronPreset === 'today' ? 'active' : ''}`} onClick={() => setCronPreset('today')}>Aujourd'hui</button>
+            <button className={`adm-theme ${cronPreset === 'yesterday' ? 'active' : ''}`} onClick={() => setCronPreset('yesterday')}>Hier</button>
+          </div>
+
           <div className="adm-label">Destinataires (séparés par des virgules)</div>
           <textarea
             className="adm-input"
@@ -404,7 +417,7 @@ function AdminConsole({ open, password, onClose }) {
           <div className="adm-actions">
             <button className="adm-btn ghost" onClick={save} disabled={busy}>Sauvegarder</button>
             <button className="adm-btn primary" onClick={sendTest} disabled={busy}>
-              {busy ? 'Envoi…' : '📬 Envoyer un test maintenant'}
+              {busy ? 'Envoi…' : `📬 Envoyer un test (${rangeLabel || "Aujourd'hui"})`}
             </button>
           </div>
           {status && <div className={`adm-status ${status.ok ? 'ok' : 'ko'}`}>{status.msg}</div>}
@@ -914,6 +927,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         open={showAdmin}
         password={password}
         onClose={() => setShowAdmin(false)}
+        period={period}
+        rangeLabel={rangeLabel}
       />
 
       <SettingsModal
