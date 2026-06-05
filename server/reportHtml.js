@@ -24,9 +24,6 @@ const C = {
   amber: '#D97706',
 };
 
-// Account managers (même liste que le front)
-const ACCOUNTS = ['Lisa Neveu', 'Quentin PUREN', 'David CHEA', 'Paul Jouannet', 'Thomas Durand'];
-
 // Masqués par défaut dans le reporting (aligné sur le défaut du dashboard)
 const HIDDEN = new Set([
   'Romy ABDEN', 'Clauvaine Battery', 'Tim Cattiaux', 'Louis Hubert',
@@ -184,10 +181,8 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
   const r1p = filt(data.rdvBooked?.r1);
   const r2p = filt(data.rdvBooked?.r2);
   const propals = filt(data.propals);
-  const propalsSales = propals.detail.filter((r) => !ACCOUNTS.includes(r.name));
-  const propalsAccounts = propals.detail.filter((r) => ACCOUNTS.includes(r.name));
-  const pSalesTotal = propalsSales.reduce((s, r) => s + (r.count || 0), 0);
-  const pAccountsTotal = propalsAccounts.reduce((s, r) => s + (r.count || 0), 0);
+  const propalsComptes = filt(data.propalsComptes);
+  const propalsTotal = propals.total + propalsComptes.total;
   const sig = filt(data.signatures, true);
   const sf = filt(data.salesforge);
   const bdcSent = filt(data.bdc?.sent);
@@ -218,8 +213,8 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
             <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
               <td style="background-color:${P.chipBg};border:1px solid ${P.chipBorder};border-radius:10px;padding:14px 12px;text-align:center;">
                 <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.accOrange};text-transform:uppercase;font-family:${FONT};">Propals</div>
-                <div style="font-size:26px;font-weight:800;color:${P.chipVal};font-family:${FONT};padding:2px 0;">${propals.total}</div>
-                <div style="font-size:9px;color:${P.chipSub};font-family:${FONT};">${pSalesTotal} sales · ${pAccountsTotal} comptes</div>
+                <div style="font-size:26px;font-weight:800;color:${P.chipVal};font-family:${FONT};padding:2px 0;">${propalsTotal}</div>
+                <div style="font-size:9px;color:${P.chipSub};font-family:${FONT};">${propals.total} pistes · ${propalsComptes.total} comptes</div>
               </td>
             </tr></table>
           </td>
@@ -269,8 +264,8 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
   );
 
   const propalsSection = twoColSection(
-    miniList({ emoji: '📄', title: `Propals Sales · ${pSalesTotal}`, color: C.orange, bg: '#FFF7ED', rows: active(propalsSales), valueFn: (r) => r.count, emptyText: 'Aucune propal sales' }),
-    miniList({ emoji: '🏢', title: `Propals Comptes · ${pAccountsTotal}`, color: C.amber, bg: '#FFFBEB', rows: active(propalsAccounts), valueFn: (r) => r.count, emptyText: 'Aucune propal comptes' })
+    miniList({ emoji: '📄', title: `Propals Pistes · ${propals.total}`, color: C.orange, bg: '#FFF7ED', rows: active(propals.detail), valueFn: (r) => r.count, emptyText: 'Aucune propal piste' }),
+    miniList({ emoji: '🏢', title: `Propositions Comptes · ${propalsComptes.total}`, color: C.amber, bg: '#FFFBEB', rows: active(propalsComptes.detail), valueFn: (r) => r.count, emptyText: 'Aucune proposition compte' })
   );
 
   // Signatures : carte navy, lignes blanches

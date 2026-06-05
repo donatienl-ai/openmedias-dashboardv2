@@ -102,3 +102,56 @@ export async function getPropals({ start, end }) {
   const total = records.length;
   return { total, detail };
 }
+
+// ==========================================
+//  PROPOSITIONS SUR COMPTES
+//  Statut "Proposition envoyée" sur l'objet Account.
+//  Le nom API du champ statut est auto-découvert
+//  (ou forcé via SF_ACCOUNT_STATUS_FIELD).
+// ==========================================
+
+const PROPOSITION_VALUE = 'Proposition envoyée';
+let cachedStatusField = null;
+
+/** Trouve le champ picklist de Account qui contient la valeur "Proposition envoyée". */
+async function getAccountStatusField() {
+  if (process.env.SF_ACCOUNT_STATUS_FIELD) return process.env.SF_ACCOUNT_STATUS_FIELD;
+  if (cachedStatusField) return cachedStatusField;
+
+  const { accessToken, instanceUrl } = await getAuth();
+  const res = await fetch(`${instanceUrl}/services/data/v59.0/sobjects/Account/describe`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Salesforce describe Account failed (${res.status}): ${text}`);
+  }
+  const data = await res.json();
+  const field = (data.fields || []).find(
+    (f) => f.type === 'picklist' &&
+      (f.picklistValues || []).some((v) => (v.label === PROPOSITION_VALUE || v.value === PROPOSITION_VALUE))
+  );
+  if (!field) {
+    throw new Error(
+      `champ statut introuvable sur Account (aucune picklist avec la valeur "${PROPOSITION_VALUE}"). Forcer via SF_ACCOUNT_STATUS_FIELD si besoin.`
+    );
+  }
+  cachedStatusField = field.name;
+  console.log(`Salesforce: champ statut Account découvert → ${field.name}`);
+  return cachedStatusField;
+}
+
+/**
+ * Comptes au statut "Proposition envoyée" modifiés dans la plage,
+ * groupés par propriétaire (même convention que les propals pistes).
+ */
+export async function getPropalsComptes({ start, end }) {
+  const fieldName = await getAccountStatusField();
+  const s = toSoqlDateTime(start);
+  const e = toSoqlDateTime(end);
+  const records = await query(
+    `SELECT Id, Name, Owner.Name FROM Account WHERE ${fieldName} = '${PROPOSITION_VALUE.replace("'", "\\'")}' AND LastModifiedDate >= ${s} AND LastModifiedDate <= ${e}`
+  );
+  const detail = buildFullList(groupRecords(records), false);
+  return { total: records.length, detail };
+}

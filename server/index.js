@@ -14,6 +14,7 @@ import {
   getSignatures,
   getRevenue,
   getPropals,
+  getPropalsComptes,
 } from './salesforce.js';
 import { resolveRange } from './dateRange.js';
 import { getBdc } from './docusign.js';
@@ -99,13 +100,14 @@ async function collectData(preset, range) {
     getRevenue(r),            // 5
     getSalesforgeRdv(r),      // 6 (UTM salesforge via Calendly, suit la période)
     getBdc(r),                // 7 (BDC envoyés/signés via DocuSign)
+    getPropalsComptes(r),     // 8 (propositions sur Comptes, Salesforce)
   ]);
 
   const pick = (i, fallback) =>
     results[i].status === 'fulfilled' ? results[i].value : fallback;
 
   const errors = {};
-  const labels = ['calls', 'rdvToday', 'rdvBooked', 'propals', 'signatures', 'revenue', 'salesforge', 'bdc'];
+  const labels = ['calls', 'rdvToday', 'rdvBooked', 'propals', 'signatures', 'revenue', 'salesforge', 'bdc', 'propalsComptes'];
   results.forEach((res2, i) => {
     if (res2.status === 'rejected') errors[labels[i]] = String(res2.reason?.message || res2.reason);
   });
@@ -124,6 +126,7 @@ async function collectData(preset, range) {
     revenue: pick(5, { totalAmount: 0, detail: [] }),
     salesforge: pick(6, { total: 0, detail: [] }),
     bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
+    propalsComptes: pick(8, { total: 0, detail: [] }),
     errors: Object.keys(errors).length ? errors : null,
   };
 }

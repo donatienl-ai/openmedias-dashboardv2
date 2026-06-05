@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
 } from 'recharts';
-import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN, ACCOUNTS } from './teams';
+import { TEAMS, ALL_SALES, allowedNames, DEFAULT_HIDDEN } from './teams';
 
 // ---------- helpers ----------
 function fmt(n) {
@@ -657,16 +657,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     signed: fBlock(d.bdc?.signed || { total: 0, detail: [] }),
     pending: fBlock(d.bdc?.pending || { total: 0, detail: [] }),
   };
-  // Split propals : sales vs accounts (Lisa, Quentin, David, Paul, Thomas)
-  const isAccount = (name) => ACCOUNTS.includes(name);
-  const propalsSales = {
-    detail: propals.detail.filter((r) => !isAccount(r.name)),
-    total: propals.detail.filter((r) => !isAccount(r.name)).reduce((s, r) => s + (r.count || 0), 0),
-  };
-  const propalsAccounts = {
-    detail: propals.detail.filter((r) => isAccount(r.name)),
-    total: propals.detail.filter((r) => isAccount(r.name)).reduce((s, r) => s + (r.count || 0), 0),
-  };
+  // Propositions sur Comptes (statut Salesforce "Proposition envoyée")
+  const propalsComptes = fBlock(d.propalsComptes || { total: 0, detail: [] });
 
   // Totaux calls entrants/sortants (recalculés si filtre ou masquage actif)
   const callsIn = mustRecalc
@@ -785,12 +777,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#22D3EE"
           secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
           clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2')} />
-        <Kpi label="Propals" value={propals.total} sub="envoyées" color="c-orange" dot="#F97316"
+        <Kpi label="Propals" value={propals.total + propalsComptes.total} sub="envoyées" color="c-orange" dot="#F97316"
           secondary={[
-            { value: propalsSales.total, label: 'sales', dot: '#F97316' },
-            { value: propalsAccounts.total, label: 'comptes', dot: '#FBBF24' },
+            { value: propals.total, label: 'pistes', dot: '#F97316' },
+            { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
           ]}
-          clickable onClick={() => openModal('Propals par commercial', propals.detail, false, 'c-orange')} />
+          clickable onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange')} />
         <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow />
         <div className="tile hero-ca col-2">
           <div className="lbl">CA · {isToday ? 'du jour' : 'période'}</div>
@@ -933,23 +925,23 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <TileHead dotClass="bg-orange" title="Propals" />
           <div
             className="subsec clickable-zone"
-            onClick={() => openModal('Propals · Sales', propalsSales.detail, false, 'c-orange')}
+            onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange')}
           >
             <div className="subsec-head">
-              <span>Sales</span>
-              <b className="c-orange">{propalsSales.total}</b>
+              <span>Pistes</span>
+              <b className="c-orange">{propals.total}</b>
             </div>
-            <TopList rows={propalsSales.detail} color="c-orange" max={4} />
+            <TopList rows={propals.detail} color="c-orange" max={4} />
           </div>
           <div
             className="subsec clickable-zone"
-            onClick={() => openModal('Propals · Comptes', propalsAccounts.detail, false, 'c-amber')}
+            onClick={() => openModal('Propositions Comptes par commercial', propalsComptes.detail, false, 'c-amber')}
           >
             <div className="subsec-head">
               <span>Comptes</span>
-              <b className="c-amber">{propalsAccounts.total}</b>
+              <b className="c-amber">{propalsComptes.total}</b>
             </div>
-            <TopList rows={propalsAccounts.detail} color="c-amber" max={5} />
+            <TopList rows={propalsComptes.detail} color="c-amber" max={5} />
           </div>
         </div>
         <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')}>
