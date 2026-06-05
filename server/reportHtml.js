@@ -295,7 +295,7 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
   // BDC : 3 chips + liste en attente
   let bdcInner = sectionLabel('📝', 'BDC · DocuSign', C.blue, '#EFF6FF');
   bdcInner += `<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-    ${[['Envoyés', bdcSent.total, C.orange], ['Signés', bdcSigned.total, C.green], ['En attente', bdcPending.total, C.amber]].map(([l, v, col]) => `
+    ${[['Envoyés', bdcSent.total, C.orange], ['En attente', bdcPending.total, C.amber], ['Signés', bdcSigned.total, C.green]].map(([l, v, col]) => `
     <td width="33%" style="padding:3px;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
         <td style="background-color:${C.bg};border:1px solid ${C.cardBorder};border-radius:10px;padding:12px 8px;text-align:center;">

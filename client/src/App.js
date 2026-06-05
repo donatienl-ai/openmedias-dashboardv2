@@ -895,8 +895,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <div className="bdc-stats">
             {[
               { key: 'sent', label: 'Envoyés', color: 'c-orange', title: 'BDC envoyés par commercial' },
-              { key: 'signed', label: 'Signés', color: 'c-green', title: 'BDC signés par commercial' },
               { key: 'pending', label: 'En attente', color: 'c-amber', title: 'BDC en attente de signature' },
+              { key: 'signed', label: 'Signés', color: 'c-green', title: 'BDC signés par commercial' },
             ].map((v) => (
               <button
                 key={v.key}
