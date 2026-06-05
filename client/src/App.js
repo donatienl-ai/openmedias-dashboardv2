@@ -920,7 +920,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
       <div className="foot">
         <span className="foot-brand">OPENMEDIAS</span>
-        <span className="foot-sub">Live · Aircall + Calendly + Salesforce · {new Date().getFullYear()}</span>
+        <span className="foot-sub">Live · Le robot trop rigolo · {new Date().getFullYear()}</span>
       </div>
 
       <AdminConsole
