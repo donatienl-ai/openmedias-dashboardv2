@@ -667,9 +667,25 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     }
   }, [emailTo, password, period, theme]);
 
+  // Ajoute « mon » email aux destinataires en 1 clic. Le mémorise au premier usage.
+  const addMyself = useCallback(() => {
+    let me = '';
+    try { me = localStorage.getItem('om_my_email') || ''; } catch { /* noop */ }
+    if (!me) {
+      const input = window.prompt('Quel est ton email ? (mémorisé uniquement sur ce navigateur)');
+      if (!input || !input.trim()) return;
+      me = input.trim();
+      try { localStorage.setItem('om_my_email', me); } catch { /* noop */ }
+    }
+    const list = emailTo.split(',').map((s) => s.trim()).filter(Boolean);
+    if (list.includes(me)) return; // déjà présent
+    const sep = emailTo.trim() ? ', ' : '';
+    setEmailTo(`${emailTo.replace(/[\s,]*$/, '')}${sep}${me}`);
+  }, [emailTo]);
+
   // Fermeture modale sur Echap
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') { setModal(null); setShowSettings(false); } };
+    const onKey = (e) => { if (e.key === 'Escape') { setModal(null); setShowSettings(false); setShowEmail(false); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -1102,34 +1118,39 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <button className="modal-close" onClick={() => !emailing && setShowEmail(false)} aria-label="Fermer">✕</button>
             </div>
             <div className="modal-body">
-              <div style={{ marginBottom: 12, fontSize: 13, opacity: 0.8 }}>
-                Période : <strong>{rangeLabel}</strong>
+              <div className="adm-label">Période envoyée</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{rangeLabel}</div>
+
+              <div className="adm-label">Destinataires</div>
+              <div className="adm-chips">
+                <button type="button" className="adm-chip" onClick={addMyself} disabled={emailing}>
+                  + Moi-même
+                </button>
               </div>
-              <label style={{ display: 'block', fontSize: 13, marginBottom: 6, opacity: 0.85 }}>
-                Destinataires (séparés par des virgules)
-              </label>
               <textarea
+                className="adm-input"
+                rows={3}
                 value={emailTo}
                 onChange={(e) => setEmailTo(e.target.value)}
-                placeholder="ex : prenom@openmedias.com, autre@…"
-                rows={3}
+                placeholder="prenom@openmedias.com, autre@…"
                 autoFocus
                 disabled={emailing}
-                style={{
-                  width: '100%', padding: 8, fontSize: 13, fontFamily: 'inherit',
-                  borderRadius: 6, border: '1px solid var(--border, rgba(255,255,255,0.18))',
-                  background: 'transparent', color: 'inherit', boxSizing: 'border-box', resize: 'vertical',
-                }}
               />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-                <button className="theme-btn" onClick={() => setShowEmail(false)} disabled={emailing}>
+
+              <div className="adm-actions">
+                <button className="adm-btn ghost" onClick={() => setShowEmail(false)} disabled={emailing}>
                   Annuler
                 </button>
-                <button className="theme-btn" onClick={submitEmail} disabled={emailing || !emailTo.trim()}>
+                <button className="adm-btn primary" onClick={submitEmail} disabled={emailing || !emailTo.trim()}>
                   {emailing ? 'Envoi…' : 'Envoyer'}
                 </button>
               </div>
-              {emailMsg && <div style={{ marginTop: 10, fontSize: 13, opacity: 0.85 }}>{emailMsg}</div>}
+
+              {emailMsg && (
+                <div className={`adm-status ${emailMsg.startsWith('Mail envoyé') ? 'ok' : 'ko'}`}>
+                  {emailMsg}
+                </div>
+              )}
             </div>
           </div>
         </div>
