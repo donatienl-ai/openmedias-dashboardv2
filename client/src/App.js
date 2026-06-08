@@ -634,13 +634,20 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Envoi par mail de la VUE COURANTE (même rendu que le reporting, période actuelle)
+  // Envoi par mail de la VUE COURANTE — passe par une modale pour choisir les
+  // destinataires (évite de spammer la liste du reporting par erreur).
+  const [showEmail, setShowEmail] = useState(false);
   const [emailing, setEmailing] = useState(false);
   const [emailMsg, setEmailMsg] = useState('');
-  const emailCurrentView = useCallback(async () => {
+  const [emailTo, setEmailTo] = useState(() => {
+    try { return localStorage.getItem('om_email_to') || ''; } catch { return ''; }
+  });
+  const submitEmail = useCallback(async () => {
+    const to = emailTo.split(',').map((s) => s.trim()).filter(Boolean);
+    if (to.length === 0) { setEmailMsg('Indique au moins un destinataire.'); return; }
     setEmailing(true); setEmailMsg('');
     try {
-      const body = { preset: period.preset, theme };
+      const body = { to, preset: period.preset, theme };
       if (period.preset === 'custom') { body.start = period.start; body.end = period.end; }
       const r = await fetch('/api/admin/email-view', {
         method: 'POST',
@@ -648,15 +655,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || j.sent === false) throw new Error(j.error || 'Échec de l\u2019envoi');
+      if (!r.ok || j.sent === false) throw new Error(j.error || 'Échec');
+      try { localStorage.setItem('om_email_to', emailTo); } catch { /* noop */ }
       setEmailMsg('Mail envoyé ✓');
+      setShowEmail(false);
     } catch (e) {
       setEmailMsg('Échec : ' + String(e.message || e));
     } finally {
       setEmailing(false);
       setTimeout(() => setEmailMsg(''), 4000);
     }
-  }, [password, period, theme]);
+  }, [emailTo, password, period, theme]);
 
   // Fermeture modale sur Echap
   useEffect(() => {
@@ -844,8 +853,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
               ⚙️
             </button>
-            <button className="theme-btn" onClick={emailCurrentView} disabled={emailing} title="Envoyer cette vue par mail">
-              {emailing ? '…' : '✉️'}
+            <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
+              ✉️
             </button>
             <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
               {theme === 'dark' ? '☀️' : '🌙'}
@@ -1084,6 +1093,47 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         <span className="foot-brand">OPENMEDIAS</span>
         <span className="foot-sub">Live · Le robot trop rigolo 🤖 · {new Date().getFullYear()}</span>
       </div>
+
+      {showEmail && (
+        <div className="modal-overlay" onClick={() => !emailing && setShowEmail(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <span className="modal-title">Envoyer cette vue par mail</span>
+              <button className="modal-close" onClick={() => !emailing && setShowEmail(false)} aria-label="Fermer">✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ marginBottom: 12, fontSize: 13, opacity: 0.8 }}>
+                Période : <strong>{rangeLabel}</strong>
+              </div>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 6, opacity: 0.85 }}>
+                Destinataires (séparés par des virgules)
+              </label>
+              <textarea
+                value={emailTo}
+                onChange={(e) => setEmailTo(e.target.value)}
+                placeholder="ex : prenom@openmedias.com, autre@…"
+                rows={3}
+                autoFocus
+                disabled={emailing}
+                style={{
+                  width: '100%', padding: 8, fontSize: 13, fontFamily: 'inherit',
+                  borderRadius: 6, border: '1px solid var(--border, rgba(255,255,255,0.18))',
+                  background: 'transparent', color: 'inherit', boxSizing: 'border-box', resize: 'vertical',
+                }}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+                <button className="theme-btn" onClick={() => setShowEmail(false)} disabled={emailing}>
+                  Annuler
+                </button>
+                <button className="theme-btn" onClick={submitEmail} disabled={emailing || !emailTo.trim()}>
+                  {emailing ? 'Envoi…' : 'Envoyer'}
+                </button>
+              </div>
+              {emailMsg && <div style={{ marginTop: 10, fontSize: 13, opacity: 0.85 }}>{emailMsg}</div>}
+            </div>
+          </div>
+        </div>
+      )}
 
       <AdminConsole
         open={showAdmin}
