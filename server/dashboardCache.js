@@ -83,15 +83,20 @@ export function createDashboardCache({
     return { ...data, _cache: { hit: false, ageMs: 0 } };
   }
 
-  // Appelée par le scheduler : rafraîchit toutes les périodes chaudes en parallèle.
+  // Appelée par le scheduler : rafraîchit les périodes chaudes l'une APRÈS l'autre.
+  // Séquentiel (pas Promise.all) pour ne pas déclencher une rafale d'appels
+  // concurrents vers les APIs (notamment Aircall et sa limite de débit).
   async function refreshAll() {
-    const results = await Promise.allSettled(
-      warmPresets.map((preset) => {
+    let ok = 0;
+    for (const preset of warmPresets) {
+      try {
         const range = resolveRange(preset);
-        return recompute(preset, range, keyFor(preset, range));
-      })
-    );
-    const ok = results.filter((r) => r.status === 'fulfilled').length;
+        await recompute(preset, range, keyFor(preset, range));
+        ok += 1;
+      } catch {
+        // On continue les autres périodes même si l'une échoue.
+      }
+    }
     return { refreshed: ok, total: warmPresets.length, at: new Date().toISOString() };
   }
 

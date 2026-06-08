@@ -219,7 +219,7 @@ async function computeDashboard(preset, range) {
 const dashboardCache = createDashboardCache({
   compute: computeDashboard,
   resolveRange,
-  warmPresets: ['today', 'this_week', 'this_month'],
+  warmPresets: ['last_month', 'this_month', 'this_week', 'today'],
 });
 
 app.get('/api/dashboard', requireAuth, async (req, res) => {

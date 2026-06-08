@@ -17,18 +17,41 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// --- Throttle GLOBAL Aircall -------------------------------------------------
+// Aircall limite à ~60 req/min PAR CLÉ. Comme le cache peut déclencher plusieurs
+// paginations en même temps (plusieurs périodes + comparatif), on fait passer
+// TOUTES les requêtes Aircall par une file unique, espacées d'au moins
+// MIN_INTERVAL_MS. Ainsi, quel que soit le nombre d'appelants simultanés, on ne
+// dépasse jamais la limite. Réglable via AIRCALL_MIN_INTERVAL_MS.
+const MIN_INTERVAL_MS = parseInt(process.env.AIRCALL_MIN_INTERVAL_MS || '1100', 10); // ~55 req/min
+let chain = Promise.resolve();
+let lastAt = 0;
+
+function schedule(fn) {
+  const run = chain.then(async () => {
+    const wait = Math.max(0, MIN_INTERVAL_MS - (Date.now() - lastAt));
+    if (wait) await sleep(wait);
+    lastAt = Date.now();
+    return fn();
+  });
+  // La file ne doit jamais se rompre, même si une requête échoue.
+  chain = run.then(() => {}, () => {});
+  return run;
+}
+
 /**
- * Fait une requête Aircall avec retry automatique sur rate limit (429).
- * Aircall limite à ~60 req/min ; en cas de 429 on attend et on réessaie.
+ * Fait une requête Aircall via la file throttlée, avec retry sur rate limit (429).
+ * Backoff exponentiel + jitter, et respect du header Retry-After si présent.
  */
-async function fetchWithRetry(url, maxRetries = 4) {
+async function fetchWithRetry(url, maxRetries = 6) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch(url, { headers: { Authorization: authHeader() } });
+    const res = await schedule(() => fetch(url, { headers: { Authorization: authHeader() } }));
 
     if (res.status === 429) {
-      // Rate limited : on lit le header Retry-After si présent, sinon backoff progressif
       const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
-      const waitMs = retryAfter > 0 ? retryAfter * 1000 : (attempt + 1) * 2000;
+      const backoff = Math.min(30000, 1000 * 2 ** attempt); // 1s, 2s, 4s... plafonné à 30s
+      const jitter = Math.floor(Math.random() * 500);
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : backoff + jitter;
       await sleep(waitMs);
       continue; // réessaie
     }
@@ -43,14 +66,10 @@ async function fetchWithRetry(url, maxRetries = 4) {
 }
 
 /**
- * Récupère TOUS les calls (entrants + sortants) sur la période, paginés.
- * - 100 calls par page (max Aircall) → 2x moins de requêtes
- * - Retry auto sur rate limit
- * - Plafond de sécurité à 50 000 calls (500 pages)
+ * Pagine TOUS les calls bruts d'Aircall sur une fenêtre Unix [from, to].
+ * - 100 calls par page (max Aircall), retry auto, plafond 50 000 calls.
  */
-async function fetchAllCalls({ start, end }) {
-  const from = toUnix(start);
-  const to = toUnix(end);
+async function fetchAllCallsRaw(from, to) {
   let page = 1;
   const perPage = 100; // max autorisé par Aircall
   const MAX_PAGES = 500; // 500 × 100 = 50 000 calls
@@ -60,7 +79,7 @@ async function fetchAllCalls({ start, end }) {
 
   while (hasMore) {
     if (page > MAX_PAGES) {
-      truncated = true; // on a atteint le plafond de 50k
+      truncated = true; // plafond de 50k atteint
       break;
     }
     const url = `https://api.aircall.io/v1/calls?from=${from}&to=${to}&per_page=${perPage}&page=${page}`;
@@ -73,24 +92,69 @@ async function fetchAllCalls({ start, end }) {
   return { allCalls, truncated };
 }
 
+// --- Cache des calls BRUTS ---------------------------------------------------
+// On garde en mémoire les calls bruts (version allégée) sur la fenêtre la plus
+// large déjà demandée. Toute sous-période est alors obtenue par simple FILTRAGE,
+// sans rappeler Aircall. Charger « depuis le 1er janvier » puis « le mois
+// précédent » ne refait donc aucun appel : la 2e période est dérivée du cache.
+// Réglable via AIRCALL_CACHE_TTL_MS (défaut 5 min).
+const CALLS_TTL_MS = parseInt(process.env.AIRCALL_CACHE_TTL_MS || '300000', 10);
+let callsCache = { from: 0, to: 0, fetchedAt: 0, calls: [], truncated: false };
+
+function cacheIsFresh() {
+  return callsCache.fetchedAt > 0 && Date.now() - callsCache.fetchedAt < CALLS_TTL_MS;
+}
+
+function cacheCovers(from, to) {
+  return cacheIsFresh() && from >= callsCache.from && to <= callsCache.to;
+}
+
+// Garantit que le cache couvre [from, to] (sinon récupère la fenêtre élargie).
+async function ensureCalls(from, to) {
+  if (cacheCovers(from, to)) return;
+  // Tant que le cache est frais, on ne le rétrécit pas : on élargit la fenêtre
+  // pour englober ce qui était déjà récupéré + la nouvelle demande.
+  const winFrom = cacheIsFresh() ? Math.min(from, callsCache.from) : from;
+  const winTo = cacheIsFresh() ? Math.max(to, callsCache.to) : to;
+  const { allCalls, truncated } = await fetchAllCallsRaw(winFrom, winTo);
+  callsCache = {
+    from: winFrom,
+    to: winTo,
+    fetchedAt: Date.now(),
+    truncated,
+    // On ne stocke que le strict nécessaire (date, sens, commercial).
+    calls: allCalls.map((c) => ({
+      at: c.started_at || 0,
+      inbound: c.direction === 'inbound',
+      user: c.user?.name || null,
+    })),
+  };
+}
+
+function selectCalls(from, to) {
+  return callsCache.calls.filter((c) => c.at >= from && c.at <= to);
+}
+
 export async function getCalls({ start, end }) {
-  const { allCalls, truncated } = await fetchAllCalls({ start, end });
+  const from = toUnix(start);
+  const to = toUnix(end);
+  await ensureCalls(from, to);
+  const calls = selectCalls(from, to);
 
   const map = new Map();
   let totalInbound = 0;
   let totalOutbound = 0;
-  for (const c of allCalls) {
-    const isInbound = c.direction === 'inbound';
-    if (isInbound) totalInbound += 1; else totalOutbound += 1;
-    const name = matchSale(c.user?.name) || 'Inconnu';
+  for (const c of calls) {
+    if (c.inbound) totalInbound += 1; else totalOutbound += 1;
+    const name = matchSale(c.user) || 'Inconnu';
     const e = map.get(name) || { count: 0, inbound: 0, outbound: 0 };
     e.count += 1;
-    if (isInbound) e.inbound += 1; else e.outbound += 1;
+    if (c.inbound) e.inbound += 1; else e.outbound += 1;
     map.set(name, e);
   }
   const detail = buildFullList(map);
-  // `truncated` permet au front d'afficher un indicateur si le total est plafonné
-  return { total: allCalls.length, totalInbound, totalOutbound, detail, truncated };
+  // `truncated` reflète le plafond 50k sur la fenêtre récupérée.
+  return { total: calls.length, totalInbound, totalOutbound, detail, truncated: callsCache.truncated };
 }
 
 /**
@@ -98,10 +162,12 @@ export async function getCalls({ start, end }) {
  * avec volume et résultat du matching roster. Sert à diagnostiquer les écarts.
  */
 export async function getRawUsers({ start, end }) {
-  const { allCalls } = await fetchAllCalls({ start, end });
+  const from = toUnix(start);
+  const to = toUnix(end);
+  await ensureCalls(from, to);
   const map = new Map();
-  for (const c of allCalls) {
-    const raw = c.user?.name || '(sans utilisateur)';
+  for (const c of selectCalls(from, to)) {
+    const raw = c.user || '(sans utilisateur)';
     map.set(raw, (map.get(raw) || 0) + 1);
   }
   return [...map.entries()]
