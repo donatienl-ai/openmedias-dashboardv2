@@ -556,72 +556,6 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose }) {
   );
 }
 
-// ---------- BOUTON ENVELOPPE : s'envoyer le reporting de la vue affichée ----------
-function MailButton({ password, period, rangeLabel }) {
-  const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState(() => localStorage.getItem('om_report_email') || '');
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState(null); // {ok, msg}
-
-  const send = async () => {
-    const to = email.trim();
-    if (!to) { setStatus({ ok: false, msg: 'Saisis une adresse email' }); return; }
-    setBusy(true); setStatus({ ok: true, msg: 'Génération + envoi en cours… (10-30s)' });
-    try {
-      localStorage.setItem('om_report_email', to);
-      const r = await fetch('/api/report/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
-        body: JSON.stringify({
-          to,
-          preset: period?.preset || 'today',
-          start: period?.start,
-          end: period?.end,
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok || !d.sent) throw new Error(d.error || "Échec de l'envoi");
-      setStatus({ ok: true, msg: `Reporting envoyé à ${(d.to || [to]).join(', ')} ✓` });
-    } catch (e) {
-      setStatus({ ok: false, msg: String(e.message || e) });
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <div className="period">
-      <button
-        className="theme-btn"
-        onClick={() => { setStatus(null); setOpen((o) => !o); }}
-        title="M'envoyer ce reporting par email"
-      >
-        ✉️
-      </button>
-      {open && (
-        <>
-          <div className="period-backdrop" onClick={() => setOpen(false)} />
-          <div className="period-menu mail-menu">
-            <div className="mail-title">📊 Recevoir ce reporting</div>
-            <div className="mail-sub">Période affichée : <b>{rangeLabel || "Aujourd'hui"}</b></div>
-            <input
-              className="adm-input"
-              type="email"
-              placeholder="ton.adresse@openmedias.fr"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && !busy && send()}
-              autoFocus
-            />
-            <button className="adm-btn primary mail-send" onClick={send} disabled={busy}>
-              {busy ? 'Envoi…' : '📨 M\'envoyer le mail'}
-            </button>
-            {status && <div className={`adm-status ${status.ok ? 'ok' : 'ko'}`}>{status.msg}</div>}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ---------- DASHBOARD ----------
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [data, setData] = useState(null);
@@ -699,6 +633,30 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   }, [password, onLogout, period]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Envoi par mail de la VUE COURANTE (même rendu que le reporting, période actuelle)
+  const [emailing, setEmailing] = useState(false);
+  const [emailMsg, setEmailMsg] = useState('');
+  const emailCurrentView = useCallback(async () => {
+    setEmailing(true); setEmailMsg('');
+    try {
+      const body = { preset: period.preset, theme };
+      if (period.preset === 'custom') { body.start = period.start; body.end = period.end; }
+      const r = await fetch('/api/admin/email-view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.sent === false) throw new Error(j.error || 'Échec de l\u2019envoi');
+      setEmailMsg('Mail envoyé ✓');
+    } catch (e) {
+      setEmailMsg('Échec : ' + String(e.message || e));
+    } finally {
+      setEmailing(false);
+      setTimeout(() => setEmailMsg(''), 4000);
+    }
+  }, [password, period, theme]);
 
   // Fermeture modale sur Echap
   useEffect(() => {
@@ -883,13 +841,16 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
-            <MailButton password={password} period={period} rangeLabel={rangeLabel} />
             <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
               ⚙️
+            </button>
+            <button className="theme-btn" onClick={emailCurrentView} disabled={emailing} title="Envoyer cette vue par mail">
+              {emailing ? '…' : '✉️'}
             </button>
             <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
+            {emailMsg && <span className="maj">{emailMsg}</span>}
             {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
             <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
               <span className="refresh-icon">↻</span>
@@ -1168,10 +1129,10 @@ export default function App() {
     localStorage.setItem('om_theme', theme);
   }, [theme]);
 
-  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+  const toggleTheme = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), []);
 
-  const handleSuccess = (pw) => { sessionStorage.setItem('om_pw', pw); setPassword(pw); };
-  const handleLogout = () => { sessionStorage.removeItem('om_pw'); setPassword(null); };
+  const handleSuccess = useCallback((pw) => { sessionStorage.setItem('om_pw', pw); setPassword(pw); }, []);
+  const handleLogout = useCallback(() => { sessionStorage.removeItem('om_pw'); setPassword(null); }, []);
 
   if (!password) return <Login onSuccess={handleSuccess} />;
   return <Dashboard password={password} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;

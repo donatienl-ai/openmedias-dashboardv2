@@ -303,6 +303,22 @@ app.post('/api/admin/settings', requireAuth, (req, res) => {
   res.json(updateSettings(req.body || {}));
 });
 
+// Envoie le reporting pour la VUE COURANTE (période + thème transmis par le front),
+// dans le même style que le reporting programmé, aux destinataires configurés.
+app.post('/api/admin/email-view', requireAuth, async (req, res) => {
+  try {
+    const s = getSettings();
+    const to = parseRecipients((req.body && req.body.to) || s.reportTo);
+    if (to.length === 0) return res.status(400).json({ error: 'Aucun destinataire configuré (réglages admin)' });
+    const b = req.body || {};
+    const theme = b.theme === 'dark' ? 'dark' : b.theme === 'light' ? 'light' : s.reportTheme;
+    const out = await sendReportNow({ to, theme, preset: b.preset || 'today', start: b.start, end: b.end });
+    res.json({ sent: true, ...out });
+  } catch (e) {
+    res.status(500).json({ sent: false, error: String(e.message || e) });
+  }
+});
+
 app.post('/api/admin/send-test', requireAuth, async (req, res) => {
   try {
     const s = getSettings();
@@ -359,10 +375,17 @@ const REFRESH_DAYS = parseInt(process.env.AIRCALL_REFRESH_DAYS || '2', 10);
 const recentSince = () => new Date(Date.now() - REFRESH_DAYS * 86400000);
 
 async function warmCycleInitial() {
-  const qStart = previousQuarterStart();
+  // Fenêtre d'amorçage : par défaut depuis le trimestre précédent. Peut être
+  // étendue via AIRCALL_PREWARM_MONTHS (ex. 12 = amorce toute l'année écoulée,
+  // au prix d'un amorçage initial plus long).
+  const PREWARM_MONTHS = parseInt(process.env.AIRCALL_PREWARM_MONTHS || '0', 10);
+  const n = new Date();
+  const qStart = PREWARM_MONTHS > 0
+    ? new Date(n.getFullYear(), n.getMonth() - PREWARM_MONTHS, 1)
+    : previousQuarterStart();
   try {
     const r = await prewarmCalls({ start: qStart, end: new Date() });
-    console.log(`Cache Aircall amorcé depuis ${qStart.toISOString().slice(0, 10)} (${r.count} calls${r.truncated ? ', plafonné 50k' : ''})`);
+    console.log(`Cache Aircall amorcé depuis ${qStart.toISOString().slice(0, 10)} (${r.count} calls${r.truncated ? ', une fenêtre > 10k détectée' : ''})`);
   } catch (e) {
     console.error('Amorçage Aircall KO :', String(e.message || e));
   }

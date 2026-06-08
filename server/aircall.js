@@ -65,29 +65,52 @@ async function fetchWithRetry(url, maxRetries = 6) {
   throw new Error('Aircall failed: rate limit dépassé après plusieurs tentatives');
 }
 
-/**
- * Pagine TOUS les calls bruts d'Aircall sur une fenêtre Unix [from, to].
- * - 100 calls par page (max Aircall), retry auto, plafond 50 000 calls.
- */
-async function fetchAllCallsRaw(from, to) {
-  let page = 1;
-  const perPage = 100; // max autorisé par Aircall
-  const MAX_PAGES = 500; // 500 × 100 = 50 000 calls
-  let allCalls = [];
-  let hasMore = true;
-  let truncated = false;
+// Limites DURES de l'API Aircall (cf. doc) :
+//  - per_page maximum = 50 (au-delà, le décalage de pagination se désynchronise
+//    et on saute des appels) ;
+//  - une requête ne peut JAMAIS renvoyer plus de 10 000 résultats : les pages
+//    au-delà sont inaccessibles, page/per_page ne contournent pas la limite.
+// → On pagine à 50, et on DÉCOUPE la plage en fenêtres assez courtes pour que
+//   chacune reste sous 10 000 calls. Réglable via AIRCALL_CHUNK_DAYS.
+const PER_PAGE = 50;
+const MAX_PAGES_PER_WINDOW = 200; // 200 × 50 = 10 000 (limite dure par requête)
+const CHUNK_DAYS = parseInt(process.env.AIRCALL_CHUNK_DAYS || '7', 10);
 
+// Pagine UNE fenêtre [from, to] (censée contenir < 10 000 calls).
+async function fetchWindow(from, to) {
+  let page = 1;
+  let calls = [];
+  let hasMore = true;
+  let hitCap = false;
   while (hasMore) {
-    if (page > MAX_PAGES) {
-      truncated = true; // plafond de 50k atteint
+    if (page > MAX_PAGES_PER_WINDOW) {
+      hitCap = true; // cette fenêtre dépasse 10k → il faudrait la découper plus fin
       break;
     }
-    const url = `https://api.aircall.io/v1/calls?from=${from}&to=${to}&per_page=${perPage}&page=${page}`;
+    const url = `https://api.aircall.io/v1/calls?from=${from}&to=${to}&per_page=${PER_PAGE}&page=${page}`;
     const data = await fetchWithRetry(url);
-    const calls = data.calls || [];
-    allCalls = allCalls.concat(calls);
-    hasMore = Boolean(data.meta?.next_page_link);
+    const batch = data.calls || [];
+    calls = calls.concat(batch);
+    hasMore = Boolean(data.meta?.next_page_link) && batch.length > 0;
     page += 1;
+  }
+  return { calls, hitCap };
+}
+
+/**
+ * Pagine TOUS les calls bruts d'Aircall sur [from, to] (Unix) en découpant en
+ * fenêtres de CHUNK_DAYS jours, pour contourner la limite de 10 000 résultats
+ * par requête. `truncated` = vrai si une fenêtre a malgré tout dépassé 10k.
+ */
+async function fetchAllCallsRaw(from, to) {
+  let allCalls = [];
+  let truncated = false;
+  const step = CHUNK_DAYS * 86400;
+  for (let winStart = from; winStart <= to; winStart += step) {
+    const winEnd = Math.min(winStart + step - 1, to);
+    const { calls, hitCap } = await fetchWindow(winStart, winEnd);
+    allCalls = allCalls.concat(calls);
+    if (hitCap) truncated = true;
   }
   return { allCalls, truncated };
 }
