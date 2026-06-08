@@ -79,6 +79,18 @@ export function resolveRange(preset, customStart, customEnd) {
 }
 
 /**
+ * Début du trimestre PRÉCÉDENT (objet Date, 00:00:00 le 1er jour).
+ * Sert à amorcer le cache au lancement : on précharge les données depuis
+ * le début du trimestre d'avant jusqu'à maintenant. Couvre donc trimestre
+ * précédent + trimestre en cours.
+ */
+export function previousQuarterStart(now = new Date()) {
+  const q = Math.floor(now.getMonth() / 3); // 0..3 = trimestre en cours
+  // q*3 - 3 = 1er mois du trimestre précédent ; JS gère le passage d'année (mois < 0).
+  return startOfDay(new Date(now.getFullYear(), q * 3 - 3, 1));
+}
+
+/**
  * Plage de comparaison pour les % d'évolution.
  * - today / yesterday : jour ouvré précédent (week-end sauté)
  * - this_week / last_week : semaine précédente, MÊME nombre de jours (span-match)

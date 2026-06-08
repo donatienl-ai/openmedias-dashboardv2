@@ -97,8 +97,11 @@ async function fetchAllCallsRaw(from, to) {
 // large déjà demandée. Toute sous-période est alors obtenue par simple FILTRAGE,
 // sans rappeler Aircall. Charger « depuis le 1er janvier » puis « le mois
 // précédent » ne refait donc aucun appel : la 2e période est dérivée du cache.
-// Réglable via AIRCALL_CACHE_TTL_MS (défaut 5 min).
-const CALLS_TTL_MS = parseInt(process.env.AIRCALL_CACHE_TTL_MS || '300000', 10);
+// Réglable via AIRCALL_CACHE_TTL_MS. C'est le délai au-delà duquel on referait
+// une récupération COMPLÈTE. Comme la fraîcheur est assurée par refreshRecent
+// (queue récente), on peut le garder long (30 min) : ça évite que le cache ne
+// rétrécisse entre deux cycles.
+const CALLS_TTL_MS = parseInt(process.env.AIRCALL_CACHE_TTL_MS || '1800000', 10); // 30 min
 let callsCache = { from: 0, to: 0, fetchedAt: 0, calls: [], truncated: false };
 
 function cacheIsFresh() {
@@ -109,30 +112,84 @@ function cacheCovers(from, to) {
   return cacheIsFresh() && from >= callsCache.from && to <= callsCache.to;
 }
 
+// Single-flight : une seule récupération Aircall à la fois (l'amorçage au
+// lancement et une requête utilisateur simultanée ne fetchent pas en double).
+let inflight = null;
+
 // Garantit que le cache couvre [from, to] (sinon récupère la fenêtre élargie).
 async function ensureCalls(from, to) {
   if (cacheCovers(from, to)) return;
+  if (inflight) {
+    await inflight.catch(() => {});
+    if (cacheCovers(from, to)) return; // une autre récupération a peut-être déjà couvert
+  }
   // Tant que le cache est frais, on ne le rétrécit pas : on élargit la fenêtre
   // pour englober ce qui était déjà récupéré + la nouvelle demande.
   const winFrom = cacheIsFresh() ? Math.min(from, callsCache.from) : from;
   const winTo = cacheIsFresh() ? Math.max(to, callsCache.to) : to;
-  const { allCalls, truncated } = await fetchAllCallsRaw(winFrom, winTo);
-  callsCache = {
-    from: winFrom,
-    to: winTo,
-    fetchedAt: Date.now(),
-    truncated,
-    // On ne stocke que le strict nécessaire (date, sens, commercial).
-    calls: allCalls.map((c) => ({
-      at: c.started_at || 0,
-      inbound: c.direction === 'inbound',
-      user: c.user?.name || null,
-    })),
-  };
+  inflight = (async () => {
+    const { allCalls, truncated } = await fetchAllCallsRaw(winFrom, winTo);
+    callsCache = {
+      from: winFrom,
+      to: winTo,
+      fetchedAt: Date.now(),
+      truncated,
+      // On ne stocke que le strict nécessaire (date, sens, commercial).
+      calls: allCalls.map((c) => ({
+        at: c.started_at || 0,
+        inbound: c.direction === 'inbound',
+        user: c.user?.name || null,
+      })),
+    };
+  })();
+  try {
+    await inflight;
+  } finally {
+    inflight = null;
+  }
 }
 
 function selectCalls(from, to) {
   return callsCache.calls.filter((c) => c.at >= from && c.at <= to);
+}
+
+/**
+ * AMORÇAGE (lancement) : précharge les calls bruts sur une large fenêtre
+ * (typiquement depuis le début du trimestre précédent jusqu'à maintenant).
+ * Toute période incluse sera ensuite servie sans rappeler Aircall.
+ */
+export async function prewarmCalls({ start, end }) {
+  await ensureCalls(toUnix(start), toUnix(end));
+  return { from: callsCache.from, to: callsCache.to, count: callsCache.calls.length, truncated: callsCache.truncated };
+}
+
+/**
+ * RAFRAÎCHISSEMENT INCRÉMENTAL : ne re-récupère que la queue récente [since, now]
+ * et la fusionne dans le cache. L'historique (calls < since), immuable, est
+ * conservé tel quel → on garde la couverture large sans tout repaginer.
+ */
+export async function refreshRecent(since) {
+  const sinceU = toUnix(since);
+  const nowU = Math.floor(Date.now() / 1000);
+  // Si le cache ne remonte pas jusqu'à `since`, on amorce simplement la fenêtre.
+  if (!callsCache.fetchedAt || callsCache.from > sinceU) {
+    await ensureCalls(sinceU, nowU);
+    return;
+  }
+  const { allCalls, truncated } = await fetchAllCallsRaw(sinceU, nowU);
+  const fresh = allCalls.map((c) => ({
+    at: c.started_at || 0,
+    inbound: c.direction === 'inbound',
+    user: c.user?.name || null,
+  }));
+  const kept = callsCache.calls.filter((c) => c.at < sinceU); // historique immuable conservé
+  callsCache = {
+    from: callsCache.from,
+    to: Math.max(callsCache.to, nowU),
+    fetchedAt: Date.now(),
+    truncated: callsCache.truncated || truncated,
+    calls: kept.concat(fresh),
+  };
 }
 
 export async function getCalls({ start, end }) {

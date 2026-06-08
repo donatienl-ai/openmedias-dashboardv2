@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { getCalls } from './aircall.js';
+import { getCalls, prewarmCalls, refreshRecent } from './aircall.js';
 import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv } from './calendly.js';
 import {
   getSignatures,
@@ -16,7 +16,7 @@ import {
   getPropals,
   getPropalsComptes,
 } from './salesforce.js';
-import { resolveRange, comparisonRange } from './dateRange.js';
+import { resolveRange, comparisonRange, previousQuarterStart } from './dateRange.js';
 import { getBdc } from './docusign.js';
 import { getRawUsers } from './aircall.js';
 import { getRawHosts } from './calendly.js';
@@ -348,12 +348,36 @@ app.listen(PORT, () => {
   console.log(`OpenMedias Dashboard en écoute sur le port ${PORT}`);
 });
 
-// Pré-chauffe le cache du dashboard au démarrage, puis le rafraîchit en arrière-plan.
-// Intervalle (4 min) < TTL (5 min) → le cache reste toujours frais, et le navigateur
-// ne tape jamais les APIs en direct : il lit un snapshot déjà prêt (réponse en ms).
-dashboardCache.refreshAll()
-  .then((r) => console.log(`Cache dashboard pré-chauffé : ${r.refreshed}/${r.total} périodes`))
-  .catch((e) => console.error('Pré-chauffe du cache KO :', e));
-setInterval(() => {
-  dashboardCache.refreshAll().catch((e) => console.error('Rafraîchissement du cache KO :', e));
-}, 4 * 60 * 1000);
+// ---- Pré-chauffe au démarrage ----------------------------------------------
+// 1) On amorce le cache des calls bruts depuis le DÉBUT DU TRIMESTRE PRÉCÉDENT
+//    jusqu'à maintenant : toute période incluse (mois dernier, plages custom...)
+//    est ensuite servie sans rappeler Aircall.
+// 2) On pré-calcule ensuite les périodes les plus consultées.
+// Le rafraîchissement périodique ne re-récupère QUE la queue récente (les calls
+// passés sont immuables), ce qui préserve la couverture large à moindre coût.
+const REFRESH_DAYS = parseInt(process.env.AIRCALL_REFRESH_DAYS || '2', 10);
+const recentSince = () => new Date(Date.now() - REFRESH_DAYS * 86400000);
+
+async function warmCycleInitial() {
+  const qStart = previousQuarterStart();
+  try {
+    const r = await prewarmCalls({ start: qStart, end: new Date() });
+    console.log(`Cache Aircall amorcé depuis ${qStart.toISOString().slice(0, 10)} (${r.count} calls${r.truncated ? ', plafonné 50k' : ''})`);
+  } catch (e) {
+    console.error('Amorçage Aircall KO :', String(e.message || e));
+  }
+  const w = await dashboardCache.refreshAll();
+  console.log(`Cache dashboard pré-chauffé : ${w.refreshed}/${w.total} périodes`);
+}
+
+async function warmCyclePeriodic() {
+  try {
+    await refreshRecent(recentSince()); // ne retouche que les derniers jours
+  } catch (e) {
+    console.error('Rafraîchissement Aircall (récent) KO :', String(e.message || e));
+  }
+  await dashboardCache.refreshAll().catch((e) => console.error('Rafraîchissement cache KO :', e));
+}
+
+warmCycleInitial().catch((e) => console.error('Pré-chauffe initiale KO :', e));
+setInterval(() => { warmCyclePeriodic(); }, 4 * 60 * 1000);
