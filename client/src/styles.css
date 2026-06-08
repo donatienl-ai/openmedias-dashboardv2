@@ -731,6 +731,17 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .adm-status.ok { background: rgba(34, 197, 94, 0.12); color: #16A34A; border: 1px solid rgba(34, 197, 94, 0.3); }
 .adm-status.ko { background: rgba(239, 68, 68, 0.10); color: #DC2626; border: 1px solid rgba(239, 68, 68, 0.3); }
 
+/* ===== BOUTON ENVELOPPE : envoi du reporting à la demande ===== */
+.mail-menu { min-width: 290px; padding: 14px; }
+.mail-title {
+  font-family: var(--font-display); font-size: 15px; font-weight: 800;
+  color: var(--text); margin-bottom: 4px;
+}
+.mail-sub { font-size: 12px; color: var(--text-soft); margin-bottom: 12px; }
+.mail-sub b { color: var(--text); }
+.mail-menu .adm-input { margin-bottom: 10px; }
+.mail-send { width: 100%; }
+
 /* ===== Console admin : planification ===== */
 .adm-time { max-width: 140px; display: block; }
 .adm-days { display: flex; gap: 6px; }
