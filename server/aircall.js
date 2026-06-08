@@ -17,35 +17,48 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// --- Throttle GLOBAL Aircall -------------------------------------------------
-// Aircall limite à ~60 req/min PAR CLÉ. Comme le cache peut déclencher plusieurs
-// paginations en même temps (plusieurs périodes + comparatif), on fait passer
-// TOUTES les requêtes Aircall par une file unique, espacées d'au moins
-// MIN_INTERVAL_MS. Ainsi, quel que soit le nombre d'appelants simultanés, on ne
-// dépasse jamais la limite. Réglable via AIRCALL_MIN_INTERVAL_MS.
-const MIN_INTERVAL_MS = parseInt(process.env.AIRCALL_MIN_INTERVAL_MS || '1100', 10); // ~55 req/min
-let chain = Promise.resolve();
+// --- Throttle GLOBAL Aircall avec PRIORITÉS ---------------------------------
+// Aircall limite à ~60 req/min par clé. On fait passer TOUTES les requêtes par
+// une file unique espacée de MIN_INTERVAL_MS, MAIS avec deux niveaux :
+//  - 'high' : requêtes déclenchées par l'utilisateur (ouverture du dashboard)
+//  - 'low'  : préchauffage / rafraîchissement périodique en arrière-plan
+// La file 'high' est servie en priorité : les requêtes utilisateur passent
+// devant les centaines de requêtes du préchauffage. Le dashboard reste donc
+// utilisable pendant l'amorçage initial (qui peut prendre plusieurs minutes
+// pour une grosse fenêtre).
+const MIN_INTERVAL_MS = parseInt(process.env.AIRCALL_MIN_INTERVAL_MS || '1100', 10);
+const queues = { high: [], low: [] };
 let lastAt = 0;
+let pumping = false;
 
-function schedule(fn) {
-  const run = chain.then(async () => {
-    const wait = Math.max(0, MIN_INTERVAL_MS - (Date.now() - lastAt));
-    if (wait) await sleep(wait);
-    lastAt = Date.now();
-    return fn();
+async function pump() {
+  if (pumping) return;
+  pumping = true;
+  try {
+    while (queues.high.length || queues.low.length) {
+      const item = queues.high.shift() || queues.low.shift();
+      const wait = Math.max(0, MIN_INTERVAL_MS - (Date.now() - lastAt));
+      if (wait) await sleep(wait);
+      lastAt = Date.now();
+      try { item.resolve(await item.fn()); } catch (e) { item.reject(e); }
+    }
+  } finally { pumping = false; }
+}
+
+function schedule(fn, priority = 'high') {
+  return new Promise((resolve, reject) => {
+    queues[priority === 'low' ? 'low' : 'high'].push({ fn, resolve, reject });
+    pump();
   });
-  // La file ne doit jamais se rompre, même si une requête échoue.
-  chain = run.then(() => {}, () => {});
-  return run;
 }
 
 /**
  * Fait une requête Aircall via la file throttlée, avec retry sur rate limit (429).
  * Backoff exponentiel + jitter, et respect du header Retry-After si présent.
  */
-async function fetchWithRetry(url, maxRetries = 6) {
+async function fetchWithRetry(url, maxRetries = 6, priority = 'high') {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await schedule(() => fetch(url, { headers: { Authorization: authHeader() } }));
+    const res = await schedule(() => fetch(url, { headers: { Authorization: authHeader() } }), priority);
 
     if (res.status === 429) {
       const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
@@ -77,7 +90,7 @@ const MAX_PAGES_PER_WINDOW = 200; // 200 × 50 = 10 000 (limite dure par requêt
 const CHUNK_DAYS = parseInt(process.env.AIRCALL_CHUNK_DAYS || '7', 10);
 
 // Pagine UNE fenêtre [from, to] (censée contenir < 10 000 calls).
-async function fetchWindow(from, to) {
+async function fetchWindow(from, to, priority = 'high') {
   let page = 1;
   let calls = [];
   let hasMore = true;
@@ -88,7 +101,7 @@ async function fetchWindow(from, to) {
       break;
     }
     const url = `https://api.aircall.io/v1/calls?from=${from}&to=${to}&per_page=${PER_PAGE}&page=${page}`;
-    const data = await fetchWithRetry(url);
+    const data = await fetchWithRetry(url, 6, priority);
     const batch = data.calls || [];
     calls = calls.concat(batch);
     hasMore = Boolean(data.meta?.next_page_link) && batch.length > 0;
@@ -101,14 +114,15 @@ async function fetchWindow(from, to) {
  * Pagine TOUS les calls bruts d'Aircall sur [from, to] (Unix) en découpant en
  * fenêtres de CHUNK_DAYS jours, pour contourner la limite de 10 000 résultats
  * par requête. `truncated` = vrai si une fenêtre a malgré tout dépassé 10k.
+ * `priority` : 'high' (utilisateur) ou 'low' (préchauffage de fond).
  */
-async function fetchAllCallsRaw(from, to) {
+async function fetchAllCallsRaw(from, to, priority = 'high') {
   let allCalls = [];
   let truncated = false;
   const step = CHUNK_DAYS * 86400;
   for (let winStart = from; winStart <= to; winStart += step) {
     const winEnd = Math.min(winStart + step - 1, to);
-    const { calls, hitCap } = await fetchWindow(winStart, winEnd);
+    const { calls, hitCap } = await fetchWindow(winStart, winEnd, priority);
     allCalls = allCalls.concat(calls);
     if (hitCap) truncated = true;
   }
@@ -135,41 +149,51 @@ function cacheCovers(from, to) {
   return cacheIsFresh() && from >= callsCache.from && to <= callsCache.to;
 }
 
-// Single-flight : une seule récupération Aircall à la fois (l'amorçage au
-// lancement et une requête utilisateur simultanée ne fetchent pas en double).
-let inflight = null;
+// Dédoublonnage PAR FENÊTRE : deux appels simultanés sur exactement la même
+// fenêtre ne déclenchent qu'un fetch. Mais une requête utilisateur sur
+// 'today' ne BLOQUE PAS sur un préchauffage trimestriel en cours — elle lance
+// son propre fetch (court) en priorité haute et se voit servie en quelques
+// secondes pendant que le préchauffage continue en fond.
+const inflightByKey = new Map();
 
-// Garantit que le cache couvre [from, to] (sinon récupère la fenêtre élargie).
-async function ensureCalls(from, to) {
+// Garantit que le cache couvre [from, to]. `priority` : 'high' pour l'utilisateur,
+// 'low' pour le préchauffage / rafraîchissement de fond.
+async function ensureCalls(from, to, priority = 'high') {
   if (cacheCovers(from, to)) return;
-  if (inflight) {
-    await inflight.catch(() => {});
-    if (cacheCovers(from, to)) return; // une autre récupération a peut-être déjà couvert
-  }
-  // Tant que le cache est frais, on ne le rétrécit pas : on élargit la fenêtre
-  // pour englober ce qui était déjà récupéré + la nouvelle demande.
+  // Élargissement de la fenêtre tant que le cache est frais (on ne rétrécit pas).
   const winFrom = cacheIsFresh() ? Math.min(from, callsCache.from) : from;
   const winTo = cacheIsFresh() ? Math.max(to, callsCache.to) : to;
-  inflight = (async () => {
-    const { allCalls, truncated } = await fetchAllCallsRaw(winFrom, winTo);
-    callsCache = {
-      from: winFrom,
-      to: winTo,
-      fetchedAt: Date.now(),
-      truncated,
-      // On ne stocke que le strict nécessaire (date, sens, commercial).
-      calls: allCalls.map((c) => ({
-        at: c.started_at || 0,
-        inbound: c.direction === 'inbound',
-        user: c.user?.name || null,
-      })),
-    };
-  })();
-  try {
-    await inflight;
-  } finally {
-    inflight = null;
+  const key = `${winFrom}|${winTo}`;
+  if (inflightByKey.has(key)) {
+    await inflightByKey.get(key).catch(() => {});
+    return;
   }
+  const promise = (async () => {
+    const { allCalls, truncated } = await fetchAllCallsRaw(winFrom, winTo, priority);
+    const fresh = allCalls.map((c) => ({
+      at: c.started_at || 0,
+      inbound: c.direction === 'inbound',
+      user: c.user?.name || null,
+    }));
+    // Fusion sans rétrécir : si un autre fetch a déjà acquis une couverture plus
+    // large pendant que celui-ci tournait, on conserve la fenêtre la plus large
+    // et on remplace seulement les calls compris dans [winFrom, winTo].
+    const existingFresh = cacheIsFresh();
+    const newFrom = existingFresh ? Math.min(winFrom, callsCache.from) : winFrom;
+    const newTo = existingFresh ? Math.max(winTo, callsCache.to) : winTo;
+    const kept = existingFresh
+      ? callsCache.calls.filter((c) => c.at < winFrom || c.at > winTo)
+      : [];
+    callsCache = {
+      from: newFrom,
+      to: newTo,
+      fetchedAt: Date.now(),
+      truncated: (existingFresh ? callsCache.truncated : false) || truncated,
+      calls: kept.concat(fresh),
+    };
+  })().finally(() => inflightByKey.delete(key));
+  inflightByKey.set(key, promise);
+  await promise;
 }
 
 function selectCalls(from, to) {
@@ -180,9 +204,10 @@ function selectCalls(from, to) {
  * AMORÇAGE (lancement) : précharge les calls bruts sur une large fenêtre
  * (typiquement depuis le début du trimestre précédent jusqu'à maintenant).
  * Toute période incluse sera ensuite servie sans rappeler Aircall.
+ * Priorité BASSE : ne bloque pas les requêtes utilisateur.
  */
 export async function prewarmCalls({ start, end }) {
-  await ensureCalls(toUnix(start), toUnix(end));
+  await ensureCalls(toUnix(start), toUnix(end), 'low');
   return { from: callsCache.from, to: callsCache.to, count: callsCache.calls.length, truncated: callsCache.truncated };
 }
 
@@ -190,16 +215,17 @@ export async function prewarmCalls({ start, end }) {
  * RAFRAÎCHISSEMENT INCRÉMENTAL : ne re-récupère que la queue récente [since, now]
  * et la fusionne dans le cache. L'historique (calls < since), immuable, est
  * conservé tel quel → on garde la couverture large sans tout repaginer.
+ * Priorité BASSE également.
  */
 export async function refreshRecent(since) {
   const sinceU = toUnix(since);
   const nowU = Math.floor(Date.now() / 1000);
   // Si le cache ne remonte pas jusqu'à `since`, on amorce simplement la fenêtre.
   if (!callsCache.fetchedAt || callsCache.from > sinceU) {
-    await ensureCalls(sinceU, nowU);
+    await ensureCalls(sinceU, nowU, 'low');
     return;
   }
-  const { allCalls, truncated } = await fetchAllCallsRaw(sinceU, nowU);
+  const { allCalls, truncated } = await fetchAllCallsRaw(sinceU, nowU, 'low');
   const fresh = allCalls.map((c) => ({
     at: c.started_at || 0,
     inbound: c.direction === 'inbound',
