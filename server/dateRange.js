@@ -78,6 +78,50 @@ export function resolveRange(preset, customStart, customEnd) {
   }
 }
 
+/**
+ * Plage de comparaison pour les % d'évolution.
+ * - today / yesterday : jour ouvré précédent (week-end sauté)
+ * - this_week / last_week : semaine précédente, MÊME nombre de jours (span-match)
+ * - this_month : mois précédent jusqu'au même jour (MTD comparable)
+ * - last_month : mois encore avant (complet)
+ * - last_7 / last_30 / custom : fenêtre équivalente juste avant
+ */
+export function comparisonRange(preset, range) {
+  switch (preset) {
+    case 'today':
+    case 'yesterday': {
+      let d = addDays(range.start, -1);
+      while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, -1);
+      return { start: startOfDay(d), end: endOfDay(d) };
+    }
+    case 'this_week':
+    case 'last_week':
+      return { start: startOfDay(addDays(range.start, -7)), end: endOfDay(addDays(range.end, -7)) };
+    case 'this_month': {
+      const y = range.start.getFullYear();
+      const m = range.start.getMonth();
+      const compStart = new Date(y, m - 1, 1);
+      const lastDayPrev = new Date(y, m, 0).getDate();
+      const compEnd = new Date(y, m - 1, Math.min(range.end.getDate(), lastDayPrev));
+      return { start: startOfDay(compStart), end: endOfDay(compEnd) };
+    }
+    case 'last_month': {
+      const y = range.start.getFullYear();
+      const m = range.start.getMonth();
+      const compStart = new Date(y, m - 1, 1);
+      const compEnd = new Date(y, m, 0); // dernier jour du mois avant
+      return { start: startOfDay(compStart), end: endOfDay(compEnd) };
+    }
+    default: {
+      // last_7, last_30, custom : fenêtre de même durée immédiatement avant
+      const ms = range.end.getTime() - range.start.getTime();
+      const compEnd = new Date(range.start.getTime() - 1);
+      const compStart = new Date(range.start.getTime() - 1 - ms);
+      return { start: compStart, end: compEnd };
+    }
+  }
+}
+
 /** Convertit une Date en chaîne SOQL date (YYYY-MM-DD). */
 export function toSoqlDate(d) {
   const y = d.getFullYear();

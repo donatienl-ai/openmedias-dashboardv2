@@ -16,7 +16,7 @@ import {
   getPropals,
   getPropalsComptes,
 } from './salesforce.js';
-import { resolveRange } from './dateRange.js';
+import { resolveRange, comparisonRange } from './dateRange.js';
 import { getBdc } from './docusign.js';
 import { getRawUsers } from './aircall.js';
 import { getRawHosts } from './calendly.js';
@@ -138,6 +138,23 @@ async function collectData(preset, range) {
   const rdvToday = pick(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } });
   const rdvBooked = pick(2, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } });
 
+  const revenue = pick(5, { totalAmount: 0, detail: [] });
+  const signatures = pick(4, { total: 0, totalAmount: 0, detail: [] });
+
+  // Repère "mois en cours" affiché sous CA & Signatures, indépendant de la période.
+  // Si la période sélectionnée EST déjà ce mois, on réutilise (pas de requête en plus).
+  let monthRevenue = revenue;
+  let monthSignatures = signatures;
+  if (preset !== 'this_month') {
+    const m = resolveRange('this_month');
+    const [mr, ms] = await Promise.allSettled([
+      getRevenue({ start: m.start, end: m.end }),
+      getSignatures({ start: m.start, end: m.end }),
+    ]);
+    if (mr.status === 'fulfilled') monthRevenue = mr.value;
+    if (ms.status === 'fulfilled') monthSignatures = ms.value;
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     range: { preset, label: range.label, start: range.start.toISOString(), end: range.end.toISOString() },
@@ -145,8 +162,10 @@ async function collectData(preset, range) {
     rdvToday,
     rdvBooked,
     propals: pick(3, { total: 0, detail: [] }),
-    signatures: pick(4, { total: 0, totalAmount: 0, detail: [] }),
-    revenue: pick(5, { totalAmount: 0, detail: [] }),
+    signatures,
+    revenue,
+    monthRevenue,
+    monthSignatures,
     salesforge: pick(6, { total: 0, detail: [] }),
     bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
     propalsComptes: pick(8, { total: 0, detail: [] }),
@@ -154,10 +173,43 @@ async function collectData(preset, range) {
   };
 }
 
+// Données de comparaison (totaux/détails des 6 KPIs principaux, hors SalesForge)
+async function collectCompareData(range) {
+  const r = { start: range.start, end: range.end };
+  const results = await Promise.allSettled([
+    getCalls(r),            // 0
+    getRdvInRange(r),       // 1 (R1/R2 tenus)
+    getPropals(r),          // 2
+    getPropalsComptes(r),   // 3
+    getSignatures(r),       // 4
+    getRevenue(r),          // 5
+  ]);
+  const v = (idx, fb) => (results[idx].status === 'fulfilled' ? results[idx].value : fb);
+  return {
+    calls: v(0, { total: 0, detail: [] }),
+    rdvToday: v(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } }),
+    propals: v(2, { total: 0, detail: [] }),
+    propalsComptes: v(3, { total: 0, detail: [] }),
+    signatures: v(4, { total: 0, totalAmount: 0, detail: [] }),
+    revenue: v(5, { totalAmount: 0, detail: [] }),
+  };
+}
+
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   const preset = req.query.preset || 'today';
   const range = resolveRange(preset, req.query.start, req.query.end);
-  res.json(await collectData(preset, range));
+
+  // Comparatif désactivé sur les très longues périodes (>70j) pour préserver les quotas
+  const durationDays = (range.end - range.start) / 86400000;
+  const wantCompare = durationDays <= 70;
+  const compRange = wantCompare ? comparisonRange(preset, range) : null;
+
+  const [data, compare] = await Promise.all([
+    collectData(preset, range),
+    compRange ? collectCompareData(compRange).catch(() => null) : Promise.resolve(null),
+  ]);
+
+  res.json({ ...data, compare });
 });
 
 // ---------- REPORTING EMAIL (remplace Make à terme) ----------

@@ -101,7 +101,7 @@ function DetailModal({ open, title, rows, isAmount, accent, onClose }) {
 }
 
 // ---------- KPI cliquable (avec métrique secondaire optionnelle) ----------
-function Kpi({ label, value, sub, color, dot, glow, onClick, clickable, secondary }) {
+function Kpi({ label, value, sub, color, dot, glow, onClick, clickable, secondary, delta }) {
   return (
     <div
       className={`tile kpi ${glow ? 'glow-blue' : ''} col-2 ${clickable ? 'clickable' : ''}`}
@@ -110,6 +110,11 @@ function Kpi({ label, value, sub, color, dot, glow, onClick, clickable, secondar
       <div className="kpi-top">
         <span className="tile-dot" style={{ background: dot }} />
         <span className={`kpi-label ${color}`}>{label}</span>
+        {delta !== null && delta !== undefined && (
+          <span className={`kpi-delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
+            {delta > 0 ? '▲' : delta < 0 ? '▼' : '•'} {Math.abs(delta)}%
+          </span>
+        )}
         {clickable && <span className="kpi-expand">⤢</span>}
       </div>
       <div className="kpi-num">{value}</div>
@@ -701,6 +706,26 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   // Propositions sur Comptes (statut Salesforce "Proposition envoyée")
   const propalsComptes = fBlock(d.propalsComptes || { total: 0, detail: [] });
 
+  // Repère "mois en cours" (sous CA & Signatures), masqué si la période EST déjà ce mois
+  const isThisMonth = (d.range?.preset || 'today') === 'this_month';
+  const monthRev = fBlock(d.monthRevenue || { totalAmount: 0, detail: [] }, true);
+  const monthSig = fBlock(d.monthSignatures || { total: 0, totalAmount: 0, detail: [] }, true);
+
+  // ===== % d'évolution vs période de comparaison (6 KPIs, filtres appliqués) =====
+  const cmp = d.compare || null;
+  const pct = (cur, prev) => (prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null);
+  let dCalls = null, dR1 = null, dR2 = null, dPropals = null, dSig = null, dCA = null;
+  if (cmp) {
+    dCalls = pct(calls.total, fBlock(cmp.calls || { total: 0, detail: [] }).total);
+    dR1 = pct(rdvT.r1.total, fBlock(cmp.rdvToday?.r1 || { total: 0, detail: [] }).total);
+    dR2 = pct(rdvT.r2.total, fBlock(cmp.rdvToday?.r2 || { total: 0, detail: [] }).total);
+    const cmpPropals = fBlock(cmp.propals || { total: 0, detail: [] }).total
+      + fBlock(cmp.propalsComptes || { total: 0, detail: [] }).total;
+    dPropals = pct(propals.total + propalsComptes.total, cmpPropals);
+    dSig = pct(sig.total, fBlock(cmp.signatures || { total: 0, totalAmount: 0, detail: [] }, true).total);
+    dCA = pct(rev.totalAmount, fBlock(cmp.revenue || { totalAmount: 0, detail: [] }, true).totalAmount);
+  }
+
   // Totaux calls entrants/sortants (recalculés si filtre ou masquage actif)
   const callsIn = mustRecalc
     ? calls.detail.reduce((s, r) => s + (r.inbound || 0), 0)
@@ -824,24 +849,39 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             { value: callsOut, label: 'out', dot: '#2563EB' },
             { value: callsIn, label: 'in', dot: '#60A5FA' },
           ]}
+          delta={dCalls}
           clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue')} />
         <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
           secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
+          delta={dR1}
           clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green')} />
         <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#22D3EE"
           secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
+          delta={dR2}
           clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2')} />
         <Kpi label="Propals" value={propals.total + propalsComptes.total} sub="envoyées" color="c-orange" dot="#F97316"
           secondary={[
             { value: propals.total, label: 'pistes', dot: '#F97316' },
             { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
           ]}
+          delta={dPropals}
           clickable onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange')} />
-        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow />
+        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow
+          secondary={!isThisMonth ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
+          delta={dSig} />
         <div className="tile hero-ca col-2">
-          <div className="lbl">CA · {isToday ? 'du jour' : 'période'}</div>
+          <div className="lbl">CA · {isToday ? 'du jour' : 'période'}
+            {dCA !== null && dCA !== undefined && (
+              <span className={`hero-delta ${dCA > 0 ? 'up' : dCA < 0 ? 'down' : 'flat'}`}>
+                {dCA > 0 ? '▲' : dCA < 0 ? '▼' : '•'} {Math.abs(dCA)}%
+              </span>
+            )}
+          </div>
           <div className="val">{fmt(rev.totalAmount)}€</div>
           <div className="sub">{isToday ? 'cumul signé' : rangeLabel.toLowerCase()}</div>
+          {!isThisMonth && (
+            <div className="hero-month"><span className="hero-month-dot" />ce mois · {fmt(monthRev.totalAmount)} €</div>
+          )}
         </div>
 
         {/* ===== RANGÉE MONEY — CA + Signatures ===== */}
@@ -857,7 +897,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                   <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
                     tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
                   <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={90}>
+                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={90} isAnimationActive={false}>
                     {caBySales.map((e, i) => (
                       <Cell key={i} fill={i === 0 ? '#3B82F6' : '#2563EB'} fillOpacity={i === 0 ? 1 : 0.55} />
                     ))}
@@ -896,8 +936,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                   <XAxis type="number" tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
                   <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
-                  <Bar dataKey="outbound" name="Sortants" stackId="dir" fill="#2563EB" />
-                  <Bar dataKey="inbound" name="Entrants" stackId="dir" fill="#60A5FA" radius={[0, 6, 6, 0]}>
+                  <Bar dataKey="outbound" name="Sortants" stackId="dir" fill="#2563EB" isAnimationActive={false} />
+                  <Bar dataKey="inbound" name="Entrants" stackId="dir" fill="#60A5FA" radius={[0, 6, 6, 0]} isAnimationActive={false}>
                     <LabelList dataKey="total" position="right" fill={ct.tick} fontSize={11} fontWeight={700} />
                   </Bar>
                 </BarChart>
@@ -922,7 +962,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                   <XAxis dataKey="name" tick={{ fill: ct.tickBold, fontSize: 13, fontWeight: 700 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
                   <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={32} allowDecimals={false} />
                   <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                  <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={70}
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={70} isAnimationActive={false}
                     label={{ position: 'top', fill: ct.labelStrong, fontSize: 16, fontWeight: 800 }}>
                     {rdvPie.map((e, i) => <Cell key={i} fill={e.fill} />)}
                   </Bar>
@@ -1014,7 +1054,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
       <div className="foot">
         <span className="foot-brand">OPENMEDIAS</span>
-        <span className="foot-sub">Live · Le gros robot trop rigolo 🤖 · {new Date().getFullYear()}</span>
+        <span className="foot-sub">Live · Le robot trop rigolo 🤖 · {new Date().getFullYear()}</span>
       </div>
 
       <AdminConsole
