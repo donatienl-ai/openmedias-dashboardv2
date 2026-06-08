@@ -25,6 +25,7 @@ import { sendEmail, getMessageStatus } from './mailer.js';
 import { buildReportHtml } from './reportHtml.js';
 import { getSettings, updateSettings } from './settings.js';
 import { startScheduler, getSchedulerState } from './scheduler.js';
+import { createDashboardCache } from './dashboardCache.js';
 
 dotenv.config();
 
@@ -195,10 +196,9 @@ async function collectCompareData(range) {
   };
 }
 
-app.get('/api/dashboard', requireAuth, async (req, res) => {
-  const preset = req.query.preset || 'today';
-  const range = resolveRange(preset, req.query.start, req.query.end);
-
+// Construit le payload complet du dashboard (données + comparatif) pour une plage.
+// C'est la fonction "lourde" (appels APIs) que le cache enveloppe.
+async function computeDashboard(preset, range) {
   // Comparatif désactivé sur les très longues périodes (>70j) pour préserver les quotas
   const durationDays = (range.end - range.start) / 86400000;
   const wantCompare = durationDays <= 70;
@@ -209,7 +209,27 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     compRange ? collectCompareData(compRange).catch(() => null) : Promise.resolve(null),
   ]);
 
-  res.json({ ...data, compare });
+  return { ...data, compare };
+}
+
+// Cache mémoire + rafraîchissement en arrière-plan (voir dashboardCache.js).
+// On pré-chauffe les périodes les plus consultées ; les autres (yesterday,
+// last_week, last_30, custom...) sont mises en cache à la première ouverture
+// puis servies instantanément ensuite (stale-while-revalidate).
+const dashboardCache = createDashboardCache({
+  compute: computeDashboard,
+  resolveRange,
+  warmPresets: ['today', 'this_week', 'this_month'],
+});
+
+app.get('/api/dashboard', requireAuth, async (req, res) => {
+  try {
+    const preset = req.query.preset || 'today';
+    const range = resolveRange(preset, req.query.start, req.query.end);
+    res.json(await dashboardCache.get(preset, range));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 // ---------- REPORTING EMAIL (remplace Make à terme) ----------
@@ -274,6 +294,11 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, at: new Date().toISOString() });
 });
 
+// Diagnostic : état du cache du dashboard (âge des snapshots, erreurs éventuelles)
+app.get('/api/admin/cache', requireAuth, (req, res) => {
+  res.json({ entries: dashboardCache.stats() });
+});
+
 app.post('/api/admin/settings', requireAuth, (req, res) => {
   res.json(updateSettings(req.body || {}));
 });
@@ -322,3 +347,13 @@ startScheduler(async () => {
 app.listen(PORT, () => {
   console.log(`OpenMedias Dashboard en écoute sur le port ${PORT}`);
 });
+
+// Pré-chauffe le cache du dashboard au démarrage, puis le rafraîchit en arrière-plan.
+// Intervalle (4 min) < TTL (5 min) → le cache reste toujours frais, et le navigateur
+// ne tape jamais les APIs en direct : il lit un snapshot déjà prêt (réponse en ms).
+dashboardCache.refreshAll()
+  .then((r) => console.log(`Cache dashboard pré-chauffé : ${r.refreshed}/${r.total} périodes`))
+  .catch((e) => console.error('Pré-chauffe du cache KO :', e));
+setInterval(() => {
+  dashboardCache.refreshAll().catch((e) => console.error('Rafraîchissement du cache KO :', e));
+}, 4 * 60 * 1000);
