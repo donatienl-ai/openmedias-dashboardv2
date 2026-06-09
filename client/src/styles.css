@@ -889,11 +889,12 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .tv-hero-sub { font-size: clamp(14px, 1.4vw, 22px); font-weight: 600; color: rgba(255, 255, 255, 0.85); }
 
 /* --- Deux colonnes de classements --- */
-.tv-cols { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: clamp(16px, 2vw, 32px); min-height: 0; }
+.tv-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); gap: clamp(16px, 2vw, 32px); }
 .tv-col {
+  min-height: 0;
   background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
-  padding: clamp(16px, 2vw, 30px); display: flex; flex-direction: column;
-  gap: clamp(10px, 1.4vh, 18px); box-shadow: 0 1px 2px rgba(22, 22, 60, 0.04); overflow: hidden;
+  padding: clamp(14px, 1.6vw, 26px); display: flex; flex-direction: column;
+  gap: clamp(8px, 1vh, 14px); box-shadow: 0 1px 2px rgba(22, 22, 60, 0.04); overflow: hidden;
 }
 .tv-col-head {
   font-family: var(--font-display); font-weight: 800; font-size: clamp(16px, 1.7vw, 28px);
