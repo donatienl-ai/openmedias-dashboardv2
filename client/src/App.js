@@ -557,50 +557,62 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose }) {
 }
 
 // ---------- VUE TV / PROJECTION OPENSPACE (bouton 📺) ----------
-// Vue fixe plein écran pour télé d'openspace : grosses polices lisibles de loin,
-// thème clair forcé, switch manuel Jour / Mois. Affiche le CA global du mois en
-// vedette (toujours le cumul du mois) + deux classements par sales (Calls et
-// R1 pris) qui suivent la période choisie. Aucune interaction requise une fois
-// lancée : on la jette en plein écran et elle se rafraîchit toute seule.
-const TV_REFRESH_MS = 60000; // refresh auto des données
+// Vue fixe plein écran pour télé d'openspace, thème clair forcé. En haut, 4 cards
+// du CA du mois par équipe ; en dessous, 3 colonnes par sales : Calls du jour,
+// R1 pris du jour, et CA du mois assorti d'un statut de signature (🔥 vert si le
+// sales a signé cette semaine ; sinon dégradé « négatif » selon les jours ouvrés
+// écoulés dans la semaine, remis à zéro chaque lundi).
+const TV_REFRESH_MS = 60000;
+
+// Statut de signature de la 3e colonne. 'ok' = a signé cette semaine.
+const SIGN_STATUS = {
+  ok: { emoji: '🔥', cls: 'st-ok' },
+  1: { emoji: '😐', cls: 'st-1' },
+  2: { emoji: '😕', cls: 'st-2' },
+  3: { emoji: '😟', cls: 'st-3' },
+  4: { emoji: '😰', cls: 'st-4' },
+  5: { emoji: '💀', cls: 'st-5' },
+};
 
 function TvView({ password, hiddenSales, onClose }) {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(null); // preset=today (calls/R1 du jour + CA du mois)
+  const [week, setWeek] = useState(null); // preset=this_week (qui a signé cette semaine)
   const [err, setErr] = useState('');
   const [lastFetch, setLastFetch] = useState(null);
   const [now, setNow] = useState(new Date());
   const reqRef = useRef(0);
 
-  // Force le thème clair pendant la vue, restaure l'ancien à la fermeture
+  // Thème clair forcé pendant la vue, restauré à la fermeture
   useEffect(() => {
     const prev = document.documentElement.getAttribute('data-theme') || 'dark';
     document.documentElement.setAttribute('data-theme', 'light');
     return () => { document.documentElement.setAttribute('data-theme', prev); };
   }, []);
 
-  // Fetch d'un preset (ignore les réponses obsolètes via reqRef)
-  const fetchData = useCallback(async (p) => {
+  // Fetch jour + semaine en parallèle (ignore les réponses obsolètes via reqRef)
+  const fetchAll = useCallback(async () => {
     const id = ++reqRef.current;
     try {
-      const res = await fetch(`/api/dashboard?preset=${p}`, {
-        headers: { 'x-dashboard-password': password },
-      });
-      if (!res.ok) throw new Error('Erreur serveur');
-      const json = await res.json();
-      if (id === reqRef.current) { setData(json); setErr(''); setLastFetch(Date.now()); }
+      const [dayRes, weekRes] = await Promise.all([
+        fetch('/api/dashboard?preset=today', { headers: { 'x-dashboard-password': password } }),
+        fetch('/api/dashboard?preset=this_week', { headers: { 'x-dashboard-password': password } }),
+      ]);
+      if (!dayRes.ok) throw new Error('Erreur serveur');
+      const dayJson = await dayRes.json();
+      const weekJson = weekRes.ok ? await weekRes.json() : null;
+      if (id === reqRef.current) {
+        setData(dayJson); setWeek(weekJson); setErr(''); setLastFetch(Date.now());
+      }
     } catch (e) {
       if (id === reqRef.current) setErr(String(e.message || e));
     }
   }, [password]);
 
-  // Fetch initial + refresh auto périodique. On interroge toujours le jour :
-  // calls.detail et rdvBooked.r1.detail sont du jour, et monthRevenue /
-  // monthSignatures (CA & signatures du mois) arrivent dans la même réponse.
   useEffect(() => {
-    fetchData('today');
-    const it = setInterval(() => fetchData('today'), TV_REFRESH_MS);
+    fetchAll();
+    const it = setInterval(fetchAll, TV_REFRESH_MS);
     return () => clearInterval(it);
-  }, [fetchData]);
+  }, [fetchAll]);
 
   // Horloge live + recalcul du "MAJ il y a Xs"
   useEffect(() => {
@@ -628,20 +640,44 @@ function TvView({ password, hiddenSales, onClose }) {
   const keep = (r) => !hide.has(r.name);
   const firstName = (n) => n.split(' ')[0];
 
-  // Classement par nombre (calls, R1 pris), sales masqués retirés
+  // Classements par nombre (calls, R1 pris) — masqués retirés, actifs seulement
   const rankList = (block) => (block?.detail || [])
     .filter((r) => keep(r) && (r.count || 0) > 0)
     .map((r) => ({ name: r.name, count: r.count || 0 }))
     .sort((a, b) => b.count - a.count);
-
   const callsRank = rankList(d.calls);
-  const r1Rank = rankList(d.rdvBooked?.r1); // "R1 pris" = RDV bookés (rdvBooked)
+  const r1Rank = rankList(d.rdvBooked?.r1);
 
-  // CA global du mois — on prend le totalAmount serveur (fiable même quand des
-  // sales sont masqués). monthRevenue suit toujours le mois en cours, même
-  // quand on interroge le jour.
-  const caMonth = d.monthRevenue?.totalAmount ?? d.revenue?.totalAmount ?? 0;
-  const signsMonth = d.monthSignatures?.total ?? d.signatures?.total ?? 0;
+  // CA du mois par sales (buildFullList serveur → tout le roster avec montant)
+  const monthDetail = d.monthRevenue?.detail || [];
+  const caByName = new Map(monthDetail.map((r) => [r.name, r.amount || 0]));
+
+  // 4 cards : CA du mois par équipe (somme des membres)
+  const teamCards = TEAMS.map((t, i) => ({
+    id: t.id,
+    label: t.label,
+    accent: `tc-${i + 1}`,
+    ca: t.members.reduce((s, name) => s + (caByName.get(name) || 0), 0),
+  }));
+
+  // 3e colonne : CA du mois par sales (tous les non masqués, triés desc)
+  const caRows = monthDetail
+    .filter(keep)
+    .map((r) => ({ name: r.name, amount: r.amount || 0 }))
+    .sort((a, b) => b.amount - a.amount);
+
+  // Qui a signé cette semaine (jours ouvrés) — preset this_week, signatures actives.
+  // Repart automatiquement à zéro chaque lundi (la plage this_week redémarre).
+  const weekSigners = new Set((week?.signatures?.detail || []).map((r) => r.name));
+
+  // Jours ouvrés écoulés cette semaine (lun=1 … ven=5 ; week-end = 5) : intensité
+  // du dégradé négatif pour ceux qui n'ont pas encore signé cette semaine.
+  const dow = now.getDay(); // 0=dim … 6=sam
+  const workdaysElapsed = (dow === 0 || dow === 6) ? 5 : dow;
+
+  const statusFor = (name) => (weekSigners.has(name)
+    ? { ...SIGN_STATUS.ok, days: 0 }
+    : { ...SIGN_STATUS[workdaysElapsed], days: workdaysElapsed });
 
   const agoSec = lastFetch ? Math.round((now.getTime() - lastFetch) / 1000) : null;
 
@@ -687,15 +723,44 @@ function TvView({ password, hiddenSales, onClose }) {
 
       {err && <div className="tv-err">Erreur : {err}</div>}
 
-      <div className="tv-hero">
-        <span className="tv-hero-label">CA · Ce mois</span>
-        <span className="tv-hero-val">{fmt(caMonth)} €</span>
-        <span className="tv-hero-sub">{fmt(signsMonth)} deal{signsMonth > 1 ? 's' : ''} signé{signsMonth > 1 ? 's' : ''} ce mois</span>
+      <div className="tv-teamcards">
+        {teamCards.map((tc) => (
+          <div className={`tv-teamcard ${tc.accent}`} key={tc.id}>
+            <span className="tv-tc-label">{tc.label}</span>
+            <span className="tv-tc-val">{fmt(tc.ca)} €</span>
+            <span className="tv-tc-sub">CA du mois</span>
+          </div>
+        ))}
       </div>
 
       <div className="tv-cols">
         {renderRankCol('📞', 'Calls du jour', callsRank, 'acc-blue')}
         {renderRankCol('🤝', 'R1 pris du jour', r1Rank, 'acc-green')}
+        <div className="tv-col">
+          <div className="tv-col-head">💰 CA du mois</div>
+          {caRows.length === 0 ? (
+            <div className="tv-empty">Aucune donnée</div>
+          ) : (
+            <div className="tv-rank-list">
+              {caRows.map((r, i) => {
+                const st = statusFor(r.name);
+                return (
+                  <div className="tv-srow" key={r.name}>
+                    <span className="tv-rrank">{i + 1}</span>
+                    <span className="tv-rname">{firstName(r.name)}</span>
+                    <span className="tv-samount">{fmt(r.amount)} €</span>
+                    <span
+                      className={`tv-badge ${st.cls}`}
+                      title={st.days ? `${st.days} jour(s) ouvré(s) sans signer cette semaine` : 'A signé cette semaine'}
+                    >
+                      {st.emoji}{st.days ? ` ${st.days}j` : ''}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

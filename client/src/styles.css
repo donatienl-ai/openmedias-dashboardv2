@@ -875,21 +875,23 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .tv-err { color: #B91C1C; background: #FEF2F2; border: 1px solid #FECACA; border-radius: 10px; padding: 10px 16px; font-weight: 600; }
 
 /* --- Héro : CA du mois --- */
-.tv-hero {
-  background: linear-gradient(135deg, var(--om-blue), #1D4ED8);
-  border-radius: 24px; padding: clamp(14px, 2vh, 30px) clamp(28px, 4vw, 56px);
-  display: flex; flex-direction: column; gap: clamp(2px, 0.4vh, 8px);
-  box-shadow: 0 20px 50px rgba(37, 99, 235, 0.28); color: #fff;
+/* --- 4 cards : CA du mois par équipe --- */
+.tv-teamcards { display: grid; grid-template-columns: repeat(4, 1fr); gap: clamp(12px, 1.5vw, 22px); }
+.tv-teamcard {
+  background: var(--panel); border: 1px solid var(--border); border-left: 5px solid var(--om-blue);
+  border-radius: 18px; padding: clamp(12px, 1.6vw, 22px) clamp(14px, 1.8vw, 26px);
+  display: flex; flex-direction: column; gap: 2px; box-shadow: 0 1px 2px rgba(22, 22, 60, 0.04);
 }
-.tv-hero-label { font-size: clamp(13px, 1.2vw, 18px); letter-spacing: 3px; font-weight: 700; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
-.tv-hero-val {
-  font-family: var(--font-display); font-weight: 800; line-height: 1; letter-spacing: -2px;
-  font-size: clamp(44px, 6.5vw, 104px); color: #fff; font-variant-numeric: tabular-nums;
-}
-.tv-hero-sub { font-size: clamp(14px, 1.4vw, 22px); font-weight: 600; color: rgba(255, 255, 255, 0.85); }
+.tv-teamcard.tc-1 { border-left-color: var(--om-blue); }
+.tv-teamcard.tc-2 { border-left-color: var(--green); }
+.tv-teamcard.tc-3 { border-left-color: var(--orange); }
+.tv-teamcard.tc-4 { border-left-color: var(--bluer2); }
+.tv-tc-label { font-size: clamp(12px, 1.1vw, 16px); font-weight: 700; color: var(--text-soft); letter-spacing: 0.4px; }
+.tv-tc-val { font-family: var(--font-display); font-weight: 800; font-size: clamp(24px, 3vw, 50px); line-height: 1.05; letter-spacing: -1px; color: var(--text); font-variant-numeric: tabular-nums; }
+.tv-tc-sub { font-size: clamp(9px, 0.8vw, 12px); color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600; }
 
 /* --- Deux colonnes de classements --- */
-.tv-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr); gap: clamp(16px, 2vw, 32px); }
+.tv-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: minmax(0, 1fr); gap: clamp(14px, 1.6vw, 26px); }
 .tv-col {
   min-height: 0;
   background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
@@ -917,4 +919,24 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .tv-rbar.acc-blue { background: linear-gradient(90deg, var(--om-blue-light), var(--om-blue)); }
 .tv-rbar.acc-green { background: linear-gradient(90deg, #4ADE80, var(--green)); }
 .tv-rval { font-family: var(--font-display); font-weight: 800; font-size: clamp(15px, 1.4vw, 24px); color: var(--text); text-align: right; min-width: clamp(38px, 3.5vw, 60px); font-variant-numeric: tabular-nums; }
+
+/* --- 3e colonne : CA du mois par sales + statut de signature --- */
+.tv-srow {
+  flex: 1 1 0; min-height: 0; overflow: hidden;
+  display: grid; grid-template-columns: clamp(24px, 2vw, 38px) 1fr auto auto;
+  align-items: center; gap: clamp(8px, 1vw, 14px);
+}
+.tv-samount { font-family: var(--font-display); font-weight: 800; font-size: clamp(14px, 1.3vw, 22px); color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.tv-badge {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: clamp(3px, 0.4vh, 6px) clamp(7px, 0.7vw, 11px); border-radius: 999px;
+  font-size: clamp(12px, 1.05vw, 16px); font-weight: 800; white-space: nowrap;
+  font-variant-numeric: tabular-nums; min-width: clamp(42px, 3.8vw, 60px);
+}
+.tv-badge.st-ok { background: #DCFCE7; color: #15803D; }
+.tv-badge.st-1  { background: #FEF9C3; color: #A16207; }
+.tv-badge.st-2  { background: #FEF3C7; color: #B45309; }
+.tv-badge.st-3  { background: #FFEDD5; color: #C2410C; }
+.tv-badge.st-4  { background: #FEE2E2; color: #DC2626; }
+.tv-badge.st-5  { background: #FECACA; color: #7F1D1D; }
 .tv-empty { flex: 1; display: flex; align-items: center; justify-content: center; font-size: clamp(16px, 1.8vw, 28px); color: var(--text-muted); font-weight: 600; }
