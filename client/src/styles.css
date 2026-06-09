@@ -817,3 +817,102 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 }
 .adm-chip:hover { border-color: var(--om-blue); color: var(--text); background: rgba(37, 99, 235, 0.06); }
 .adm-chip:active { transform: scale(0.96); }
+
+/* ==========================================
+   MODE TV / PROJECTION OPENSPACE (bouton 📺)
+   Vue fixe, thème clair forcé, switch Jour / Mois.
+   CA du mois en vedette + classements Calls & R1 pris par sales.
+   ========================================== */
+.tv-root {
+  position: fixed; inset: 0; z-index: 4000;
+  background:
+    radial-gradient(1400px 700px at 50% -15%, rgba(37, 99, 235, 0.10), transparent),
+    var(--bg);
+  color: var(--text);
+  padding: clamp(18px, 3vh, 40px) clamp(24px, 4vw, 64px);
+  display: flex; flex-direction: column;
+  gap: clamp(16px, 2.4vh, 32px);
+  overflow: hidden; font-family: var(--font-body);
+}
+
+/* --- Header --- */
+.tv-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; }
+.tv-head-left { display: flex; flex-direction: column; gap: 6px; }
+.tv-eyebrow {
+  font-size: clamp(11px, 1.1vw, 15px); letter-spacing: 3px; font-weight: 700;
+  color: var(--om-blue); text-transform: uppercase;
+}
+.tv-period {
+  font-family: var(--font-display); font-size: clamp(22px, 2.6vw, 40px);
+  font-weight: 800; line-height: 1; letter-spacing: -0.8px; color: var(--text);
+}
+.tv-head-right { display: flex; align-items: center; gap: clamp(10px, 1.2vw, 18px); flex-wrap: wrap; justify-content: flex-end; }
+.tv-clock {
+  font-family: var(--font-display); font-weight: 800;
+  font-size: clamp(20px, 2.4vw, 38px); color: var(--text); font-variant-numeric: tabular-nums;
+}
+.tv-maj {
+  font-size: clamp(11px, 1vw, 14px); color: var(--text-muted); font-weight: 600;
+  min-width: clamp(98px, 7vw, 132px); text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.tv-switch { display: inline-flex; gap: 4px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 4px; }
+.tv-switch-btn {
+  border: none; background: transparent; color: var(--text-soft); font-family: var(--font-body);
+  font-size: clamp(13px, 1.1vw, 17px); font-weight: 700; padding: 8px 18px; border-radius: 9px;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.tv-switch-btn:hover { color: var(--text); }
+.tv-switch-btn.active { background: var(--om-blue); color: #fff; }
+.tv-ctrl {
+  width: clamp(38px, 3vw, 48px); height: clamp(38px, 3vw, 48px);
+  border: 1px solid var(--border); background: var(--panel); border-radius: 12px;
+  font-size: clamp(16px, 1.5vw, 22px); cursor: pointer; color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tv-ctrl:hover { border-color: var(--om-blue-light); background: var(--panel-2); }
+.tv-err { color: #B91C1C; background: #FEF2F2; border: 1px solid #FECACA; border-radius: 10px; padding: 10px 16px; font-weight: 600; }
+
+/* --- Héro : CA du mois --- */
+.tv-hero {
+  background: linear-gradient(135deg, var(--om-blue), #1D4ED8);
+  border-radius: 24px; padding: clamp(20px, 3vh, 44px) clamp(28px, 4vw, 56px);
+  display: flex; flex-direction: column; gap: clamp(4px, 0.6vh, 10px);
+  box-shadow: 0 20px 50px rgba(37, 99, 235, 0.28); color: #fff;
+}
+.tv-hero-label { font-size: clamp(13px, 1.2vw, 18px); letter-spacing: 3px; font-weight: 700; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
+.tv-hero-val {
+  font-family: var(--font-display); font-weight: 800; line-height: 1; letter-spacing: -2px;
+  font-size: clamp(56px, 9vw, 150px); color: #fff; font-variant-numeric: tabular-nums;
+}
+.tv-hero-sub { font-size: clamp(14px, 1.4vw, 22px); font-weight: 600; color: rgba(255, 255, 255, 0.85); }
+
+/* --- Deux colonnes de classements --- */
+.tv-cols { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: clamp(16px, 2vw, 32px); min-height: 0; }
+.tv-col {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 20px;
+  padding: clamp(16px, 2vw, 30px); display: flex; flex-direction: column;
+  gap: clamp(10px, 1.4vh, 18px); box-shadow: 0 1px 2px rgba(22, 22, 60, 0.04); overflow: hidden;
+}
+.tv-col-head {
+  font-family: var(--font-display); font-weight: 800; font-size: clamp(18px, 2vw, 32px);
+  color: var(--text); letter-spacing: -0.5px; text-transform: capitalize;
+}
+.tv-rank-list { display: flex; flex-direction: column; gap: clamp(6px, 1vh, 13px); flex: 1; justify-content: space-evenly; }
+.tv-rrow {
+  display: grid;
+  grid-template-columns: clamp(30px, 2.6vw, 48px) clamp(90px, 9vw, 170px) 1fr auto;
+  align-items: center; gap: clamp(10px, 1.2vw, 18px);
+}
+.tv-rrank { font-family: var(--font-display); font-weight: 800; text-align: center; font-size: clamp(16px, 1.6vw, 26px); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tv-rrow.rank-1 .tv-rrank { color: #D97706; }
+.tv-rrow.rank-2 .tv-rrank { color: #64748B; }
+.tv-rrow.rank-3 .tv-rrank { color: #B45309; }
+.tv-rname { font-weight: 700; font-size: clamp(15px, 1.5vw, 26px); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-rbar-wrap { height: clamp(10px, 1.3vh, 18px); background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+.tv-rbar { display: block; height: 100%; border-radius: 999px; transition: width 0.6s ease; }
+.tv-rbar.acc-blue { background: linear-gradient(90deg, var(--om-blue-light), var(--om-blue)); }
+.tv-rbar.acc-green { background: linear-gradient(90deg, #4ADE80, var(--green)); }
+.tv-rval { font-family: var(--font-display); font-weight: 800; font-size: clamp(16px, 1.7vw, 30px); color: var(--text); text-align: right; min-width: clamp(40px, 4vw, 70px); font-variant-numeric: tabular-nums; }
+.tv-empty { flex: 1; display: flex; align-items: center; justify-content: center; font-size: clamp(16px, 1.8vw, 28px); color: var(--text-muted); font-weight: 600; }

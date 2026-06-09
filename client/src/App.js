@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
 } from 'recharts';
@@ -556,6 +556,151 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose }) {
   );
 }
 
+// ---------- VUE TV / PROJECTION OPENSPACE (bouton 📺) ----------
+// Vue fixe plein écran pour télé d'openspace : grosses polices lisibles de loin,
+// thème clair forcé, switch manuel Jour / Mois. Affiche le CA global du mois en
+// vedette (toujours le cumul du mois) + deux classements par sales (Calls et
+// R1 pris) qui suivent la période choisie. Aucune interaction requise une fois
+// lancée : on la jette en plein écran et elle se rafraîchit toute seule.
+const TV_REFRESH_MS = 60000; // refresh auto des données
+
+function TvView({ password, hiddenSales, onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [lastFetch, setLastFetch] = useState(null);
+  const [now, setNow] = useState(new Date());
+  const reqRef = useRef(0);
+
+  // Force le thème clair pendant la vue, restaure l'ancien à la fermeture
+  useEffect(() => {
+    const prev = document.documentElement.getAttribute('data-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', 'light');
+    return () => { document.documentElement.setAttribute('data-theme', prev); };
+  }, []);
+
+  // Fetch d'un preset (ignore les réponses obsolètes via reqRef)
+  const fetchData = useCallback(async (p) => {
+    const id = ++reqRef.current;
+    try {
+      const res = await fetch(`/api/dashboard?preset=${p}`, {
+        headers: { 'x-dashboard-password': password },
+      });
+      if (!res.ok) throw new Error('Erreur serveur');
+      const json = await res.json();
+      if (id === reqRef.current) { setData(json); setErr(''); setLastFetch(Date.now()); }
+    } catch (e) {
+      if (id === reqRef.current) setErr(String(e.message || e));
+    }
+  }, [password]);
+
+  // Fetch initial + refresh auto périodique. On interroge toujours le jour :
+  // calls.detail et rdvBooked.r1.detail sont du jour, et monthRevenue /
+  // monthSignatures (CA & signatures du mois) arrivent dans la même réponse.
+  useEffect(() => {
+    fetchData('today');
+    const it = setInterval(() => fetchData('today'), TV_REFRESH_MS);
+    return () => clearInterval(it);
+  }, [fetchData]);
+
+  // Horloge live + recalcul du "MAJ il y a Xs"
+  useEffect(() => {
+    const it = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(it);
+  }, []);
+
+  // Échap pour quitter
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const toggleFullscreen = () => {
+    try {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    } catch { /* noop */ }
+  };
+
+  // ===== Données =====
+  const d = data || {};
+  const hide = new Set(hiddenSales || []);
+  const keep = (r) => !hide.has(r.name);
+  const firstName = (n) => n.split(' ')[0];
+
+  // Classement par nombre (calls, R1 pris), sales masqués retirés
+  const rankList = (block) => (block?.detail || [])
+    .filter((r) => keep(r) && (r.count || 0) > 0)
+    .map((r) => ({ name: r.name, count: r.count || 0 }))
+    .sort((a, b) => b.count - a.count);
+
+  const callsRank = rankList(d.calls);
+  const r1Rank = rankList(d.rdvBooked?.r1); // "R1 pris" = RDV bookés (rdvBooked)
+
+  // CA global du mois — on prend le totalAmount serveur (fiable même quand des
+  // sales sont masqués). monthRevenue suit toujours le mois en cours, même
+  // quand on interroge le jour.
+  const caMonth = d.monthRevenue?.totalAmount ?? d.revenue?.totalAmount ?? 0;
+  const signsMonth = d.monthSignatures?.total ?? d.signatures?.total ?? 0;
+
+  const agoSec = lastFetch ? Math.round((now.getTime() - lastFetch) / 1000) : null;
+
+  const renderRankCol = (icon, title, rows, accent) => {
+    const max = Math.max(1, ...rows.map((r) => r.count));
+    return (
+      <div className="tv-col">
+        <div className="tv-col-head">{icon} {title}</div>
+        {rows.length === 0 ? (
+          <div className="tv-empty">Aucune donnée</div>
+        ) : (
+          <div className="tv-rank-list">
+            {rows.map((r, i) => (
+              <div className={`tv-rrow rank-${i + 1}`} key={r.name}>
+                <span className="tv-rrank">{i + 1}</span>
+                <span className="tv-rname">{firstName(r.name)}</span>
+                <span className="tv-rbar-wrap">
+                  <span className={`tv-rbar ${accent}`} style={{ width: `${Math.round((r.count / max) * 100)}%` }} />
+                </span>
+                <span className="tv-rval">{fmt(r.count)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="tv-root">
+      <div className="tv-head">
+        <div className="tv-head-left">
+          <span className="tv-eyebrow">OpenMedias · Performance Commerciale</span>
+          <span className="tv-period">{todayLabel().replace(/^./, (c) => c.toUpperCase())}</span>
+        </div>
+        <div className="tv-head-right">
+          <span className="tv-clock">{now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+          {agoSec !== null && <span className="tv-maj">MAJ il y a {agoSec}s</span>}
+          <button className="tv-ctrl" onClick={toggleFullscreen} title="Plein écran">⛶</button>
+          <button className="tv-ctrl" onClick={onClose} title="Quitter le mode TV">✕</button>
+        </div>
+      </div>
+
+      {err && <div className="tv-err">Erreur : {err}</div>}
+
+      <div className="tv-hero">
+        <span className="tv-hero-label">CA · Ce mois</span>
+        <span className="tv-hero-val">{fmt(caMonth)} €</span>
+        <span className="tv-hero-sub">{fmt(signsMonth)} deal{signsMonth > 1 ? 's' : ''} signé{signsMonth > 1 ? 's' : ''} ce mois</span>
+      </div>
+
+      <div className="tv-cols">
+        {renderRankCol('📞', 'Calls du jour', callsRank, 'acc-blue')}
+        {renderRankCol('🤝', 'R1 pris du jour', r1Rank, 'acc-green')}
+      </div>
+    </div>
+  );
+}
+
 // ---------- DASHBOARD ----------
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [data, setData] = useState(null);
@@ -569,6 +714,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [showSettings, setShowSettings] = useState(false);
   const [bdcView, setBdcView] = useState('pending'); // 'sent' | 'signed' | 'pending'
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showTv, setShowTv] = useState(false);
 
   // Console admin cachée : Ctrl/Cmd + Maj + A
   useEffect(() => {
@@ -866,6 +1012,9 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
+            <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
+              📺
+            </button>
             <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
               ⚙️
             </button>
@@ -1163,6 +1312,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         period={period}
         rangeLabel={rangeLabel}
       />
+
+      {showTv && (
+        <TvView
+          password={password}
+          hiddenSales={hiddenSales}
+          onClose={() => setShowTv(false)}
+        />
+      )}
 
       <SettingsModal
         open={showSettings}
