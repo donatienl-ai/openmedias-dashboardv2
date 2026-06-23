@@ -403,4 +403,4 @@ async function warmCyclePeriodic() {
 }
 
 warmCycleInitial().catch((e) => console.error('Pré-chauffe initiale KO :', e));
-setInterval(() => { warmCyclePeriodic(); }, 4 * 60 * 1000);
+setInterval(() => { warmCyclePeriodic(); }, 15 * 60 * 1000);

@@ -5,7 +5,7 @@
   "main": "server/index.js",
   "type": "module",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node --max-old-space-size=400 server/index.js",
     "dev": "node --watch server/index.js",
     "build": "cd client && npm install && npm run build",
     "postinstall": "cd client && npm install && npm run build"
