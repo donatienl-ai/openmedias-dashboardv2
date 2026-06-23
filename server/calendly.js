@@ -38,11 +38,24 @@ async function fetchWithRetry(url, maxRetries = 5) {
 const scanCache = new Map(); // clé: `${min}|${max}` -> { ts, events }
 const SCAN_TTL = 60 * 1000;
 
+// Purge les entrées expirées. Sans ça, chaque nouvelle fenêtre (les presets
+// relatifs bougent dans le temps) crée une entrée jamais libérée, avec tous les
+// events Calendly en payload -> la RAM monte jusqu'à l'OOM (SIGABRT 134) sur
+// Render puis redémarrage. Ce cache ne sert qu'à dédupliquer dans une même
+// requête, donc on peut purger agressivement.
+function pruneScanCache() {
+  const now = Date.now();
+  for (const [k, v] of scanCache) {
+    if (now - v.ts >= SCAN_TTL) scanCache.delete(k);
+  }
+}
+
 /**
  * Récupère les scheduled events dont le START_TIME est dans [minStart, maxStart].
  * Pagine via l'URL next_page fournie par Calendly (ne JAMAIS reconstruire avec le token).
  */
 async function fetchEventsByStart(minStart, maxStart) {
+  pruneScanCache();
   const cacheKey = `${minStart}|${maxStart}`;
   const hit = scanCache.get(cacheKey);
   if (hit && Date.now() - hit.ts < SCAN_TTL) return hit.events;
