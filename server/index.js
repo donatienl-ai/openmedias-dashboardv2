@@ -178,21 +178,23 @@ async function collectData(preset, range) {
 async function collectCompareData(range) {
   const r = { start: range.start, end: range.end };
   const results = await Promise.allSettled([
-    getCalls(r),            // 0
-    getRdvInRange(r),       // 1 (R1/R2 tenus)
-    getPropals(r),          // 2
-    getPropalsComptes(r),   // 3
-    getSignatures(r),       // 4
-    getRevenue(r),          // 5
+    getCalls(r),               // 0
+    getRdvInRange(r),          // 1 (R1/R2 tenus)
+    getRdvBookedInRange(r),    // 2 (R1/R2 pris)
+    getPropals(r),             // 3
+    getPropalsComptes(r),      // 4
+    getSignatures(r),          // 5
+    getRevenue(r),             // 6
   ]);
   const v = (idx, fb) => (results[idx].status === 'fulfilled' ? results[idx].value : fb);
   return {
     calls: v(0, { total: 0, detail: [] }),
     rdvToday: v(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } }),
-    propals: v(2, { total: 0, detail: [] }),
-    propalsComptes: v(3, { total: 0, detail: [] }),
-    signatures: v(4, { total: 0, totalAmount: 0, detail: [] }),
-    revenue: v(5, { totalAmount: 0, detail: [] }),
+    rdvBooked: v(2, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } }),
+    propals: v(3, { total: 0, detail: [] }),
+    propalsComptes: v(4, { total: 0, detail: [] }),
+    signatures: v(5, { total: 0, totalAmount: 0, detail: [] }),
+    revenue: v(6, { totalAmount: 0, detail: [] }),
   };
 }
 
