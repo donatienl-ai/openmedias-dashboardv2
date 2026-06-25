@@ -338,10 +338,24 @@ body {
 }
 .mrow:nth-child(1) .mrow-rank { background: var(--om-blue); border-color: var(--om-blue-light); color: #fff; }
 .mrow-main { flex: 1; }
-.mrow-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+.mrow-top { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.mrow-val { flex-shrink: 0; }
 .mrow-name { font-size: 13px; color: var(--text); font-weight: 500; }
 .mrow-val { font-size: 14px; font-weight: 800; }
 .mrow-val.zero { color: var(--text-muted); font-weight: 600; }
+.mrow-delta {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.mrow-delta.up   { color: #16A34A; }
+.mrow-delta.down { color: #EF4444; }
+.mrow-delta.flat { color: var(--text-muted); }
+[data-theme="dark"] .mrow-delta.up   { color: #4ADE80; }
+[data-theme="dark"] .mrow-delta.down { color: #F87171; }
 .mrow-bar-bg {
   height: 4px; background: var(--border-soft); border-radius: 3px; overflow: hidden;
 }

@@ -59,9 +59,16 @@ function Login({ onSuccess }) {
 }
 
 // ---------- MODALE détail ----------
-function DetailModal({ open, title, rows, isAmount, accent, onClose }) {
+function DetailModal({ open, title, rows, isAmount, accent, onClose, cmpRows }) {
   if (!open) return null;
   const max = Math.max(1, ...rows.map((r) => (isAmount ? r.amount : r.count)));
+  // Index comparaison par nom pour lookup O(1)
+  const cmpMap = {};
+  if (cmpRows && cmpRows.length) {
+    cmpRows.forEach((r) => { cmpMap[r.name] = isAmount ? (r.amount || 0) : (r.count || 0); });
+  }
+  const hasCmp = Object.keys(cmpMap).length > 0;
+  const pctDelta = (cur, prev) => (prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null);
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -75,7 +82,9 @@ function DetailModal({ open, title, rows, isAmount, accent, onClose }) {
           ) : (
             rows.map((r, i) => {
               const v = isAmount ? r.amount : r.count;
-              const pct = Math.round((v / max) * 100);
+              const barPct = Math.round((v / max) * 100);
+              const prev = hasCmp ? (cmpMap[r.name] ?? null) : null;
+              const delta = prev !== null ? pctDelta(v, prev) : null;
               return (
                 <div className="mrow" key={i}>
                   <div className="mrow-rank">{i + 1}</div>
@@ -85,9 +94,14 @@ function DetailModal({ open, title, rows, isAmount, accent, onClose }) {
                       <span className={`mrow-val ${v === 0 ? 'zero' : accent}`}>
                         {isAmount ? `${fmt(r.amount)} €` : r.count}
                       </span>
+                      {delta !== null && (
+                        <span className={`mrow-delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
+                          {delta > 0 ? '▲' : delta < 0 ? '▼' : '•'}{Math.abs(delta)}%
+                        </span>
+                      )}
                     </div>
                     <div className="mrow-bar-bg">
-                      <div className={`mrow-bar ${accent}-bg`} style={{ width: `${pct}%` }} />
+                      <div className={`mrow-bar ${accent}-bg`} style={{ width: `${barPct}%` }} />
                     </div>
                   </div>
                 </div>
@@ -1004,8 +1018,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const filterLabel = [baseLabel, roleLabel].filter(Boolean).join(' · ') || null;
 
   // ouvre une modale
-  const openModal = (title, rows, isAmount, accent) =>
-    setModal({ title, rows: rows || [], isAmount: !!isAmount, accent: accent || 'c-blue' });
+  const openModal = (title, rows, isAmount, accent, cmpRows) =>
+    setModal({ title, rows: rows || [], isAmount: !!isAmount, accent: accent || 'c-blue', cmpRows: cmpRows || [] });
+  // Helper : récupère le detail filtré d'un bloc de comparaison
+  const cmpDetail = (block) => fBlock(block || { total: 0, detail: [] }).detail;
+  const cmpDetailAmt = (block) => fBlock(block || { totalAmount: 0, detail: [] }, true).detail;
 
   // graphes : seulement sales > 0
   const caBySales = (rev.detail || []).filter((r) => r.amount > 0).slice(0, 8).map((r) => ({
@@ -1117,22 +1134,22 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             { value: callsIn, label: 'in', dot: '#60A5FA' },
           ]}
           delta={dCalls}
-          clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue')} />
+          clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue', cmp ? cmpDetail(cmp.calls) : [])} />
         <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
           secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
           delta={dR1}
-          clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green')} />
+          clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green', cmp ? cmpDetail(cmp.rdvToday?.r1) : [])} />
         <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#22D3EE"
           secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
           delta={dR2}
-          clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2')} />
+          clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.rdvToday?.r2) : [])} />
         <Kpi label="Propals" value={propals.total + propalsComptes.total} sub="envoyées" color="c-orange" dot="#F97316"
           secondary={[
             { value: propals.total, label: 'pistes', dot: '#F97316' },
             { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
           ]}
           delta={dPropals}
-          clickable onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange')} />
+          clickable onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [])} />
         <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow
           secondary={!isThisMonth ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
           delta={dSig} />
@@ -1152,7 +1169,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
 
         {/* ===== RANGÉE MONEY — CA + Signatures ===== */}
-        <div className="tile col-8 clickable" onClick={() => openModal(`CA · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue')}>
+        <div className="tile col-8 clickable" onClick={() => openModal(`CA · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue', cmp ? cmpDetailAmt(cmp.revenue) : [])}>
           <TileHead dotClass="bg-blue" title={`CA ${isToday ? 'du jour' : '· ' + rangeLabel} par commercial`} clickable />
           <div className="chart-box" style={{ height: 250 }}>
             {caBySales.length === 0 ? (
@@ -1192,7 +1209,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
 
         {/* ===== RANGÉE ACTIVITÉ — Calls top 10 + RDV pris + SalesForge ===== */}
-        <div className="tile col-5 clickable" onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue')}>
+        <div className="tile col-5 clickable" onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue', cmp ? cmpDetail(cmp.calls) : [])}>
           <TileHead dotClass="bg-blue" title={`Calls par commercial${callsBySales.length > 10 ? ' · top 10' : ''}`} clickable />
           <div className="chart-box" style={{ height: Math.max(200, Math.min(callsBySales.length, 10) * 30) }}>
             {callsBySales.length === 0 ? (
@@ -1272,7 +1289,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                 <TopList rows={bdc[bdcView].detail} color={meta.color} />
                 <div
                   className="see-all linky"
-                  onClick={() => openModal(meta.title, bdc[bdcView].detail, false, meta.color)}
+                  onClick={() => openModal(meta.title, bdc[bdcView].detail, false, meta.color, cmp && cmp.bdc ? cmpDetail(cmp.bdc[bdcView]) : [])}
                 >
                   ⤢ Voir tout
                 </div>
@@ -1286,7 +1303,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <TileHead dotClass="bg-orange" title="Propals" />
           <div
             className="subsec clickable-zone"
-            onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange')}
+            onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [])}
           >
             <div className="subsec-head">
               <span>Pistes</span>
@@ -1296,7 +1313,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div
             className="subsec clickable-zone"
-            onClick={() => openModal('Propositions Comptes par commercial', propalsComptes.detail, false, 'c-amber')}
+            onClick={() => openModal('Propositions Comptes par commercial', propalsComptes.detail, false, 'c-amber', cmp ? cmpDetail(cmp.propalsComptes) : [])}
           >
             <div className="subsec-head">
               <span>Comptes</span>
@@ -1305,15 +1322,15 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             <TopList rows={propalsComptes.detail} color="c-amber" max={5} />
           </div>
         </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber')}>
+        <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber', cmp ? cmpDetail(cmp.rdvBooked?.r1) : [])}>
           <TileHead dotClass="bg-amber" title="R1 pris par sales" clickable />
           <TopList rows={rdvB.r1.detail} color="c-amber" />
         </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber')}>
+        <div className="tile col-3 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber', cmp ? cmpDetail(cmp.rdvBooked?.r2) : [])}>
           <TileHead dotClass="bg-amber" title="R2 pris par sales" clickable />
           <TopList rows={rdvB.r2.detail} color="c-amber" />
         </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2')}>
+        <div className="tile col-3 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.salesforge) : [])}>
           <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
           <TopList rows={sf.detail} color="c-bluer2" />
         </div>
@@ -1400,6 +1417,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         rows={modal?.rows || []}
         isAmount={modal?.isAmount}
         accent={modal?.accent}
+        cmpRows={modal?.cmpRows || []}
         onClose={() => setModal(null)}
       />
     </div>
