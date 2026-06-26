@@ -780,6 +780,175 @@ function TvView({ password, hiddenSales, onClose }) {
   );
 }
 
+// ---------- HELPER : format date courte ----------
+function fmtDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+// ---------- RATE BADGE (open/click rate coloré) ----------
+function RateBadge({ value, type }) {
+  const getClass = () => {
+    if (type === 'open') {
+      if (value >= 30) return 'nl-rate-hi';
+      if (value >= 15) return 'nl-rate-mid';
+      return 'nl-rate-lo';
+    }
+    if (type === 'click') {
+      if (value >= 5) return 'nl-rate-hi';
+      if (value >= 2) return 'nl-rate-mid';
+      return 'nl-rate-lo';
+    }
+    if (type === 'unsub') {
+      if (value < 0.3) return 'nl-rate-hi';
+      if (value < 0.8) return 'nl-rate-mid';
+      return 'nl-rate-lo';
+    }
+    return '';
+  };
+  return <span className={`nl-rate-badge ${getClass()}`}>{value.toFixed(1)}%</span>;
+}
+
+// ---------- MODAL : liste des campagnes NL EXT ----------
+function NlCampaignsModal({ campaigns, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal nl-modal-wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="modal-title">📧 Newsletters EXT · détail par campagne</span>
+          <button className="modal-close" onClick={onClose} aria-label="Fermer">✕</button>
+        </div>
+        <div className="modal-body">
+          {campaigns.length === 0 ? (
+            <div className="empty">Aucune newsletter EXT sur la période</div>
+          ) : (
+            <div className="nl-camp-list">
+              <div className="nl-camp-header">
+                <span className="nl-camp-date">Date</span>
+                <span className="nl-camp-title-col">Campagne</span>
+                <span className="nl-camp-metric">Envoyés</span>
+                <span className="nl-camp-metric">Ouvertures</span>
+                <span className="nl-camp-metric">Clics</span>
+                <span className="nl-camp-metric">Désinscrits</span>
+              </div>
+              {campaigns.map((c) => (
+                <div className="nl-camp-row" key={c.id}>
+                  <span className="nl-camp-date">{fmtDate(c.sentAt)}</span>
+                  <span className="nl-camp-title-col" title={c.subject || c.title}>{c.title}</span>
+                  <span className="nl-camp-metric nl-sent">{fmt(c.sent)}</span>
+                  <span className="nl-camp-metric">
+                    <RateBadge value={c.openRate} type="open" />
+                    <span className="nl-abs">({fmt(c.opened)})</span>
+                  </span>
+                  <span className="nl-camp-metric">
+                    <RateBadge value={c.clickRate} type="click" />
+                    <span className="nl-abs">({fmt(c.clicked)})</span>
+                  </span>
+                  <span className="nl-camp-metric">
+                    <RateBadge value={c.unsubRate} type="unsub" />
+                    <span className="nl-abs">({fmt(c.unsubscribed)})</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- SECTION NEWSLETTER EXT ----------
+// Widget 1 : KPIs globaux Mailjet (col-5) + widget 2 : RDV NL par manager (col-7)
+function NewsletterSection({ nlData, nlLoading, rangeLabel, onOpenCampaigns }) {
+  const NL_MANAGERS = ['Lisa Neveu', 'Paul Jouannet', 'David CHEA', 'Quentin PUREN'];
+  const MANAGER_COLORS = {
+    'Lisa Neveu': { accent: '#3B82F6', bg: 'rgba(59,130,246,0.12)', label: 'Lisa' },
+    'Paul Jouannet': { accent: '#22C55E', bg: 'rgba(34,197,94,0.12)', label: 'Paul' },
+    'David CHEA': { accent: '#F97316', bg: 'rgba(249,115,22,0.12)', label: 'David' },
+    'Quentin PUREN': { accent: '#FBBF24', bg: 'rgba(251,191,36,0.12)', label: 'Quentin' },
+  };
+
+  const totals = nlData?.newsletters?.totals || {};
+  const campaigns = nlData?.newsletters?.campaigns || [];
+  const nlRdvDetail = nlData?.nlRdv?.detail || [];
+  const nlRdvTotal = nlData?.nlRdv?.total || 0;
+  const campCount = totals.count || 0;
+
+  const rdvMap = {};
+  nlRdvDetail.forEach((r) => { rdvMap[r.name] = r.count; });
+
+  return (
+    <>
+      {/* Widget 1 — KPIs NL globaux */}
+      <div className="tile col-5 clickable nl-kpi-tile" onClick={onOpenCampaigns}>
+        <TileHead dotClass="bg-blue" title={`Newsletters EXT · ${campCount} campagne${campCount > 1 ? 's' : ''} · ${rangeLabel}`} clickable />
+        {nlLoading && !nlData ? (
+          <div className="empty">Chargement…</div>
+        ) : campCount === 0 ? (
+          <div className="empty">Aucune NL EXT sur la période</div>
+        ) : (
+          <div className="nl-kpis">
+            <div className="nl-kpi-card">
+              <div className="nl-kpi-val">{fmt(totals.sent || 0)}</div>
+              <div className="nl-kpi-label">Envoyés</div>
+            </div>
+            <div className="nl-kpi-card accent-open">
+              <div className="nl-kpi-val">{(totals.openRate || 0).toFixed(1)}<span className="nl-pct">%</span></div>
+              <div className="nl-kpi-label">Open rate</div>
+              <div className="nl-kpi-sub">{fmt(totals.opened || 0)} ouvertures</div>
+            </div>
+            <div className="nl-kpi-card accent-click">
+              <div className="nl-kpi-val">{(totals.clickRate || 0).toFixed(1)}<span className="nl-pct">%</span></div>
+              <div className="nl-kpi-label">Click rate</div>
+              <div className="nl-kpi-sub">{fmt(totals.clicked || 0)} clics</div>
+            </div>
+            <div className="nl-kpi-card accent-unsub">
+              <div className="nl-kpi-val">{(totals.unsubRate || 0).toFixed(1)}<span className="nl-pct">%</span></div>
+              <div className="nl-kpi-label">Désinscriptions</div>
+              <div className="nl-kpi-sub">{fmt(totals.unsubscribed || 0)} contacts</div>
+            </div>
+          </div>
+        )}
+        {campCount > 0 && (
+          <div className="nl-see-detail">⤢ Voir le détail par campagne ({campCount})</div>
+        )}
+      </div>
+
+      {/* Widget 2 — RDV pris via NL par manager */}
+      <div className="tile col-7">
+        <TileHead dotClass="bg-green" title={`RDV pris via Newsletter · ${rangeLabel}`} />
+        {nlLoading && !nlData ? (
+          <div className="empty">Chargement…</div>
+        ) : (
+          <div className="nl-rdv-grid">
+            {NL_MANAGERS.map((name) => {
+              const col = MANAGER_COLORS[name];
+              const count = rdvMap[name] || 0;
+              return (
+                <div className="nl-rdv-card" key={name} style={{ '--nl-accent': col.accent, '--nl-bg': col.bg }}>
+                  <div className="nl-rdv-count">{count}</div>
+                  <div className="nl-rdv-name">{col.label}</div>
+                  <div className="nl-rdv-label">RDV NL</div>
+                </div>
+              );
+            })}
+            <div className="nl-rdv-total-card">
+              <div className="nl-rdv-count nl-rdv-total-count">{nlRdvTotal}</div>
+              <div className="nl-rdv-name">Total</div>
+              <div className="nl-rdv-label">tous managers</div>
+            </div>
+          </div>
+        )}
+        {nlData?.errors?.calendly && (
+          <div className="nl-err">⚠ Calendly : {nlData.errors.calendly}</div>
+        )}
+      </div>
+    </>
+  );
+}
+
+
 // ---------- DASHBOARD ----------
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [data, setData] = useState(null);
@@ -794,6 +963,9 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [bdcView, setBdcView] = useState('pending'); // 'sent' | 'signed' | 'pending'
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTv, setShowTv] = useState(false);
+  const [nlData, setNlData] = useState(null);
+  const [nlLoading, setNlLoading] = useState(false);
+  const [nlModal, setNlModal] = useState(null); // 'campaigns' | null
 
   // Console admin cachée : Ctrl/Cmd + Maj + A
   useEffect(() => {
@@ -857,6 +1029,21 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     } finally { setLoading(false); }
   }, [password, onLogout, period]);
 
+  // Fetch newsletter stats (indépendant, non bloquant)
+  const loadNl = useCallback(async () => {
+    setNlLoading(true);
+    try {
+      const qs = new URLSearchParams({ preset: period.preset });
+      if (period.preset === 'custom') { qs.set('start', period.start); qs.set('end', period.end); }
+      const res = await fetch(`/api/newsletter-stats?${qs.toString()}`, {
+        headers: { 'x-dashboard-password': password },
+      });
+      if (res.ok) setNlData(await res.json());
+    } catch { /* silencieux */ } finally { setNlLoading(false); }
+  }, [password, period]);
+
+  useEffect(() => { loadNl(); }, [loadNl]);
+
   useEffect(() => { load(); }, [load]);
 
   // Envoi par mail de la VUE COURANTE — passe par une modale pour choisir les
@@ -910,7 +1097,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   // Fermeture modale sur Echap
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') { setModal(null); setShowSettings(false); setShowEmail(false); } };
+    const onKey = (e) => { if (e.key === 'Escape') { setModal(null); setNlModal(null); setShowSettings(false); setShowEmail(false); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -1334,6 +1521,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
           <TopList rows={sf.detail} color="c-bluer2" />
         </div>
+
+        {/* ===== NEWSLETTERS EXT — stats Mailjet + RDV Calendly ===== */}
+        <NewsletterSection
+          nlData={nlData}
+          nlLoading={nlLoading}
+          rangeLabel={rangeLabel}
+          onOpenCampaigns={() => setNlModal('campaigns')}
+        />
       </div>
 
       <div className="foot">
@@ -1385,6 +1580,13 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             </div>
           </div>
         </div>
+      )}
+
+      {nlModal === 'campaigns' && (
+        <NlCampaignsModal
+          campaigns={(nlData?.newsletters?.campaigns) || []}
+          onClose={() => setNlModal(null)}
+        />
       )}
 
       <AdminConsole

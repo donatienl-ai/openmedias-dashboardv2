@@ -9,7 +9,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { getCalls, prewarmCalls, refreshRecent } from './aircall.js';
-import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv } from './calendly.js';
+import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv, getNewsletterRdv } from './calendly.js';
+import { getNewsletterStats } from './mailjet.js';
 import {
   getSignatures,
   getRevenue,
@@ -229,6 +230,41 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     const preset = req.query.preset || 'today';
     const range = resolveRange(preset, req.query.start, req.query.end);
     res.json(await dashboardCache.get(preset, range));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// ---------- NEWSLETTER STATS (Mailjet EXT + Calendly utm_source=newsletter) ----------
+app.get('/api/newsletter-stats', requireAuth, async (req, res) => {
+  try {
+    const preset = req.query.preset || 'this_month';
+    const range = resolveRange(preset, req.query.start, req.query.end);
+    const r = { start: range.start, end: range.end };
+
+    const [mjResult, nlRdvResult] = await Promise.allSettled([
+      getNewsletterStats(r),
+      getNewsletterRdv(r),
+    ]);
+
+    const newsletters = mjResult.status === 'fulfilled'
+      ? mjResult.value
+      : { campaigns: [], totals: { sent: 0, delivered: 0, opened: 0, clicked: 0, unsubscribed: 0, openRate: 0, clickRate: 0, unsubRate: 0, count: 0 } };
+
+    const nlRdv = nlRdvResult.status === 'fulfilled'
+      ? nlRdvResult.value
+      : { total: 0, detail: [] };
+
+    const errors = {};
+    if (mjResult.status === 'rejected') errors.mailjet = String(mjResult.reason?.message || mjResult.reason);
+    if (nlRdvResult.status === 'rejected') errors.calendly = String(nlRdvResult.reason?.message || nlRdvResult.reason);
+
+    res.json({
+      range: { preset, label: range.label, start: range.start.toISOString(), end: range.end.toISOString() },
+      newsletters,
+      nlRdv,
+      errors: Object.keys(errors).length ? errors : null,
+    });
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }

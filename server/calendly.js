@@ -197,6 +197,57 @@ export async function getSalesforgeRdv({ start, end }) {
   return { total: salesforgeEvents.length, detail: groupByHost(salesforgeEvents) };
 }
 
+// Managers dont on veut les RDV NL (noms exacts du roster)
+const NL_MANAGERS = ['Lisa Neveu', 'Paul Jouannet', 'David CHEA', 'Quentin PUREN'];
+
+/**
+ * RDV générés par Newsletter sur la période :
+ * = events CRÉÉS dans la plage (created_at) dont l'invitee a utm_source = "newsletter".
+ * Retourné groupé par manager (Lisa, Paul, David, Quentin) uniquement.
+ */
+export async function getNewsletterRdv({ start, end }) {
+  const scanStart = new Date(start);
+  scanStart.setDate(scanStart.getDate() - 7);
+  const scanEnd = new Date(start);
+  scanEnd.setDate(scanEnd.getDate() + 365);
+
+  const events = await fetchEventsByStart(scanStart.toISOString(), scanEnd.toISOString());
+  const createdInRange = events.filter((e) => {
+    if (!e.created_at) return false;
+    const c = new Date(e.created_at);
+    return c >= start && c <= end;
+  });
+
+  if (createdInRange.length > 2500) {
+    throw new Error(
+      `Période trop large pour le tracking Newsletter (${createdInRange.length} RDV à inspecter).`
+    );
+  }
+
+  // Récupère les utm_source par paquets de 10
+  const BATCH = 10;
+  const nlEvents = [];
+  for (let i = 0; i < createdInRange.length; i += BATCH) {
+    const batch = createdInRange.slice(i, i + BATCH);
+    const sources = await Promise.all(batch.map(getInviteeUtmSource));
+    sources.forEach((src, j) => {
+      if (src === 'newsletter') nlEvents.push(batch[j]);
+    });
+  }
+
+  // Grouper par manager (NL_MANAGERS uniquement)
+  const counts = {};
+  NL_MANAGERS.forEach((m) => { counts[m] = 0; });
+  for (const e of nlEvents) {
+    const name = matchSale(hostName(e));
+    if (name && NL_MANAGERS.includes(name)) counts[name]++;
+  }
+
+  const detail = NL_MANAGERS.map((name) => ({ name, count: counts[name] || 0 }));
+  const total = detail.reduce((s, r) => s + r.count, 0);
+  return { total, detail };
+}
+
 /**
  * DEBUG : liste les noms d'hôtes BRUTS vus dans Calendly (events de la période,
  * sur start_time), avec volume et résultat du matching roster.
