@@ -2,6 +2,7 @@
   "name": "openmedias-dashboard-client",
   "version": "1.0.0",
   "private": true,
+  "homepage": "/dashboard",
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

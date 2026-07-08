@@ -27,7 +27,7 @@ function Login({ onSuccess }) {
   const submit = async () => {
     setLoading(true); setError('');
     try {
-      const res = await fetch('/api/login', {
+      const res = await fetch('api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -366,7 +366,7 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
   useEffect(() => {
     if (!open) return;
     setStatus(null);
-    fetch('/api/admin/settings', { headers: { 'x-dashboard-password': password } })
+    fetch('api/admin/settings', { headers: { 'x-dashboard-password': password } })
       .then((r) => r.json())
       .then((s) => {
         setTheme(s.reportTheme || 'light'); setTo(s.reportTo || '');
@@ -376,7 +376,7 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
         setSched(s.scheduler || null);
       })
       .catch(() => {});
-    fetch('/api/admin/logins', { headers: { 'x-dashboard-password': password } })
+    fetch('api/admin/logins', { headers: { 'x-dashboard-password': password } })
       .then((r) => r.json())
       .then((d) => setLogins(d.events || []))
       .catch(() => {});
@@ -392,7 +392,7 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
   const save = async () => {
     setBusy(true); setStatus(null);
     try {
-      const r = await fetch('/api/admin/settings', {
+      const r = await fetch('api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
         body: JSON.stringify(payload()),
@@ -410,14 +410,14 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
     setBusy(true); setStatus({ ok: true, msg: 'Génération + envoi en cours… (10-30s)' });
     try {
       // On sauvegarde d'abord pour tester les réglages affichés
-      await fetch('/api/admin/settings', {
+      await fetch('api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
         body: JSON.stringify(payload()),
       });
       localStorage.setItem('om_admin_settings', JSON.stringify(payload()));
       // Le test suit la période actuellement sélectionnée sur le dashboard
-      const r = await fetch('/api/admin/send-test', {
+      const r = await fetch('api/admin/send-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
         body: JSON.stringify({ preset: period?.preset || 'today', start: period?.start, end: period?.end }),
@@ -608,8 +608,8 @@ function TvView({ password, hiddenSales, onClose }) {
     const id = ++reqRef.current;
     try {
       const [dayRes, weekRes] = await Promise.all([
-        fetch('/api/dashboard?preset=today', { headers: { 'x-dashboard-password': password } }),
-        fetch('/api/dashboard?preset=this_week', { headers: { 'x-dashboard-password': password } }),
+        fetch('api/dashboard?preset=today', { headers: { 'x-dashboard-password': password } }),
+        fetch('api/dashboard?preset=this_week', { headers: { 'x-dashboard-password': password } }),
       ]);
       if (!dayRes.ok) throw new Error('Erreur serveur');
       const dayJson = await dayRes.json();
@@ -985,7 +985,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     try {
       const saved = localStorage.getItem('om_admin_settings');
       if (saved) {
-        fetch('/api/admin/settings', {
+        fetch('api/admin/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
           body: saved,
@@ -1018,7 +1018,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         qs.set('start', period.start);
         qs.set('end', period.end);
       }
-      const res = await fetch(`/api/dashboard?${qs.toString()}`, {
+      const res = await fetch(`api/dashboard?${qs.toString()}`, {
         headers: { 'x-dashboard-password': password },
       });
       if (res.status === 401) { onLogout(); return; }
@@ -1035,7 +1035,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     try {
       const qs = new URLSearchParams({ preset: period.preset });
       if (period.preset === 'custom') { qs.set('start', period.start); qs.set('end', period.end); }
-      const res = await fetch(`/api/newsletter-stats?${qs.toString()}`, {
+      const res = await fetch(`api/newsletter-stats?${qs.toString()}`, {
         headers: { 'x-dashboard-password': password },
       });
       if (res.ok) setNlData(await res.json());
@@ -1061,7 +1061,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     try {
       const body = { to, preset: period.preset, theme };
       if (period.preset === 'custom') { body.start = period.start; body.end = period.end; }
-      const r = await fetch('/api/admin/email-view', {
+      const r = await fetch('api/admin/email-view', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
         body: JSON.stringify(body),
