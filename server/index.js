@@ -27,6 +27,7 @@ import { buildReportHtml } from './reportHtml.js';
 import { getSettings, updateSettings } from './settings.js';
 import { startScheduler, getSchedulerState } from './scheduler.js';
 import { createDashboardCache } from './dashboardCache.js';
+import { getTeams, createTeam, updateTeam, deleteTeam } from './teamsStore.js';
 
 dotenv.config();
 
@@ -80,6 +81,33 @@ app.post('/api/login', (req, res) => {
 // --- Console admin : journal des connexions ---
 app.get('/api/admin/logins', requireAuth, (req, res) => {
   res.json({ events: [...loginLog].reverse() });
+});
+
+// ---------- ÉQUIPES (création / renommage / suppression via ⚙️ Paramètres) ----------
+app.get('/api/teams', requireAuth, (req, res) => {
+  res.json({ teams: getTeams() });
+});
+app.post('/api/admin/teams', requireAuth, (req, res) => {
+  try {
+    res.status(201).json(createTeam(req.body || {}));
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
+});
+app.patch('/api/admin/teams/:id', requireAuth, (req, res) => {
+  try {
+    res.json(updateTeam(req.params.id, req.body || {}));
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
+});
+app.delete('/api/admin/teams/:id', requireAuth, (req, res) => {
+  try {
+    deleteTeam(req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
 });
 
 // --- Route principale : agrège toutes les sources sur une plage de dates ---
