@@ -532,17 +532,135 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
   );
 }
 
-// ---------- PARAMÈTRES ADMIN (sales visibles) ----------
-function SettingsModal({ open, hidden, onToggle, onShowAll, onClose }) {
+// ---------- PARAMÈTRES ADMIN (équipes + sales visibles) ----------
+function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, teams = [], onTeamsChanged }) {
+  const [newTeamLabel, setNewTeamLabel] = useState('');
+  const [openTeamId, setOpenTeamId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
   if (!open) return null;
+
+  const authHeaders = { 'Content-Type': 'application/json', 'x-dashboard-password': password };
+
+  const run = async (fn) => {
+    setBusy(true); setErr('');
+    try {
+      await fn();
+      onTeamsChanged?.();
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createTeam = () => {
+    const label = newTeamLabel.trim();
+    if (!label) return;
+    run(async () => {
+      const r = await fetch('api/admin/teams', {
+        method: 'POST', headers: authHeaders,
+        body: JSON.stringify({ label, members: [] }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      setNewTeamLabel('');
+    });
+  };
+
+  const renameTeam = (id, currentLabel) => {
+    const label = window.prompt('Nouveau nom pour cette équipe :', currentLabel);
+    if (label === null) return;
+    const trimmed = label.trim();
+    if (!trimmed || trimmed === currentLabel) return;
+    run(async () => {
+      const r = await fetch(`api/admin/teams/${id}`, {
+        method: 'PATCH', headers: authHeaders, body: JSON.stringify({ label: trimmed }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+    });
+  };
+
+  const deleteTeam = (id, label) => {
+    if (!window.confirm(`Supprimer l'équipe "${label}" ? Les sales ne sont pas supprimés, juste détachés de cette équipe.`)) return;
+    run(async () => {
+      const r = await fetch(`api/admin/teams/${id}`, { method: 'DELETE', headers: authHeaders });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Erreur'); }
+    });
+  };
+
+  const toggleMember = (team, name) => {
+    const members = team.members.includes(name)
+      ? team.members.filter((m) => m !== name)
+      : [...team.members, name];
+    run(async () => {
+      const r = await fetch(`api/admin/teams/${team.id}`, {
+        method: 'PATCH', headers: authHeaders, body: JSON.stringify({ members }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+    });
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <span className="modal-title">⚙️ Paramètres · Sales visibles</span>
+          <span className="modal-title">⚙️ Paramètres</span>
           <button className="modal-close" onClick={onClose} aria-label="Fermer">✕</button>
         </div>
         <div className="modal-body">
+          <div className="set-section-title">Équipes</div>
+          {err && <div className="set-error">{err}</div>}
+          {teams.map((t) => (
+            <div className="set-team" key={t.id}>
+              <div className="set-team-head">
+                <span className="set-team-label">{t.label}</span>
+                <span className="set-team-actions">
+                  <button className="set-team-btn" onClick={() => setOpenTeamId(openTeamId === t.id ? null : t.id)} disabled={busy} title="Voir/éditer les membres">
+                    {t.members.length} membre{t.members.length > 1 ? 's' : ''} {openTeamId === t.id ? '▲' : '▾'}
+                  </button>
+                  <button className="set-team-btn set-team-icon" onClick={() => renameTeam(t.id, t.label)} disabled={busy} title="Renommer">✎</button>
+                  <button className="set-team-btn set-team-icon set-team-danger" onClick={() => deleteTeam(t.id, t.label)} disabled={busy} title="Supprimer">✕</button>
+                </span>
+              </div>
+              {openTeamId === t.id && (
+                <div className="set-team-members">
+                  {ALL_SALES.map((s) => (
+                    <label className="set-row" key={s}>
+                      <span className="set-name">{s}</span>
+                      <input
+                        type="checkbox"
+                        className="set-check"
+                        checked={t.members.includes(s)}
+                        onChange={() => toggleMember(t, s)}
+                        disabled={busy}
+                      />
+                      <span className="set-switch" />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          <div className="set-team-new">
+            <input
+              className="set-team-input"
+              placeholder="Nouvelle équipe…"
+              value={newTeamLabel}
+              onChange={(e) => setNewTeamLabel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') createTeam(); }}
+              disabled={busy}
+            />
+            <button className="set-team-btn set-team-add" onClick={createTeam} disabled={busy || !newTeamLabel.trim()}>
+              + Ajouter
+            </button>
+          </div>
+
+          <div className="set-sep" />
+          <div className="set-section-title">Sales visibles</div>
           <div className="set-hint">
             Désactive un commercial pour le masquer de tout le dashboard
             (listes, graphes et totaux recalculés). Réglage mémorisé sur ce navigateur.
@@ -588,7 +706,7 @@ const SIGN_STATUS = {
   5: { emoji: '💀', cls: 'st-5' },
 };
 
-function TvView({ password, hiddenSales, onClose }) {
+function TvView({ password, hiddenSales, onClose, teams = TEAMS }) {
   const [data, setData] = useState(null); // preset=today (calls/R1 du jour + CA du mois)
   const [week, setWeek] = useState(null); // preset=this_week (qui a signé cette semaine)
   const [err, setErr] = useState('');
@@ -667,7 +785,7 @@ function TvView({ password, hiddenSales, onClose }) {
   const caByName = new Map(monthDetail.map((r) => [r.name, r.amount || 0]));
 
   // 4 cards : CA du mois par équipe (somme des membres)
-  const teamCards = TEAMS.map((t, i) => ({
+  const teamCards = teams.map((t, i) => ({
     id: t.id,
     label: t.label,
     accent: `tc-${i + 1}`,
@@ -966,6 +1084,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [nlData, setNlData] = useState(null);
   const [nlLoading, setNlLoading] = useState(false);
   const [nlModal, setNlModal] = useState(null); // 'campaigns' | null
+  const [teams, setTeams] = useState(TEAMS); // liste dynamique (créer/renommer/supprimer via ⚙️ Paramètres)
+  const loadTeams = useCallback(async () => {
+    try {
+      const r = await fetch('api/teams', { headers: { 'x-dashboard-password': password } });
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d.teams)) setTeams(d.teams);
+      }
+    } catch { /* silencieux : on garde la dernière liste connue */ }
+  }, [password]);
+  useEffect(() => { loadTeams(); }, [loadTeams]);
 
   // Console admin cachée : Ctrl/Cmd + Maj + A
   useEffect(() => {
@@ -1129,7 +1258,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   // ===== FILTRAGE ÉQUIPE / SALES + masqués (paramètres) =====
   // allowed = Set des noms autorisés, ou null = pas de filtre
-  const allowed = allowedNames(teamFilter, saleFilter);
+  const allowed = allowedNames(teamFilter, saleFilter, teams);
   const hidden = new Set(hiddenSales);
   const isManager = (name) => MANAGERS.includes(name);
   const roleOk = (name) => !roleFilter || (roleFilter === 'managers' ? isManager(name) : !isManager(name));
@@ -1200,7 +1329,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const baseLabel = saleFilter
     ? saleFilter
     : teamFilter
-      ? (TEAMS.find((t) => t.id === teamFilter)?.label || '')
+      ? (teams.find((t) => t.id === teamFilter)?.label || '')
       : null;
   const filterLabel = [baseLabel, roleLabel].filter(Boolean).join(' · ') || null;
 
@@ -1256,9 +1385,9 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             />
             <FilterDropdown
               icon="👥"
-              label={teamFilter ? (TEAMS.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
+              label={teamFilter ? (teams.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
               allLabel="Toutes les équipes"
-              items={TEAMS.map((t) => ({ value: t.id, label: t.label }))}
+              items={teams.map((t) => ({ value: t.id, label: t.label }))}
               current={teamFilter}
               onPick={(v) => { setTeamFilter(v); setSaleFilter(null); }}
             />
@@ -1267,7 +1396,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               label={saleFilter || 'Sales'}
               allLabel="Tous les sales"
               items={(teamFilter
-                ? (TEAMS.find((t) => t.id === teamFilter)?.members || [])
+                ? (teams.find((t) => t.id === teamFilter)?.members || [])
                 : ALL_SALES
               ).filter((s) => !hidden.has(s) && roleOk(s)).map((s) => ({ value: s, label: s }))}
               current={saleFilter}
@@ -1602,6 +1731,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           password={password}
           hiddenSales={hiddenSales}
           onClose={() => setShowTv(false)}
+          teams={teams}
         />
       )}
 
@@ -1611,6 +1741,9 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         onToggle={toggleHidden}
         onShowAll={() => setHiddenSales([])}
         onClose={() => setShowSettings(false)}
+        password={password}
+        teams={teams}
+        onTeamsChanged={loadTeams}
       />
 
       <DetailModal

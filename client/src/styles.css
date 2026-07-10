@@ -639,7 +639,45 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   font-weight: 700; color: var(--text-muted);
 }
 
-/* ===== PAGE PARAMÈTRES (sales visibles) ===== */
+/* ===== PAGE PARAMÈTRES (équipes + sales visibles) ===== */
+.set-section-title {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.2px;
+  color: var(--text-muted); margin: 4px 0 10px;
+}
+.set-error {
+  font-size: 12px; color: #f87171; background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35); border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 10px;
+}
+.set-sep { height: 1px; background: var(--border-soft); margin: 16px 0; }
+.set-team {
+  background: var(--panel-2); border: 1px solid var(--border-soft);
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+}
+.set-team-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.set-team-label { font-size: 13px; font-weight: 700; color: var(--text); }
+.set-team-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.set-team-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-soft);
+  border-radius: 7px; padding: 4px 9px; font-size: 11px; font-weight: 700;
+  cursor: pointer; font-family: var(--font-body); transition: background 0.15s, color 0.15s;
+}
+.set-team-btn:hover:not(:disabled) { background: rgba(37, 99, 235, 0.12); color: var(--om-blue-light); }
+.set-team-btn:disabled { opacity: 0.5; cursor: default; }
+.set-team-icon { padding: 4px 8px; }
+.set-team-danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.12); color: #f87171; }
+.set-team-members {
+  margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border-soft);
+  max-height: 220px; overflow-y: auto;
+}
+.set-team-new { display: flex; gap: 8px; margin: 12px 0 4px; }
+.set-team-input {
+  flex: 1; background: var(--panel-2); border: 1px solid var(--border-soft);
+  color: var(--text); border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; font-family: var(--font-body);
+}
+.set-team-add { flex-shrink: 0; }
+
 .set-hint {
   font-size: 12px; color: var(--text-soft); line-height: 1.55;
   background: var(--panel-2); border: 1px solid var(--border-soft);

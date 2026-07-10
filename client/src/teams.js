@@ -65,12 +65,15 @@ export const ALL_SALES = [
  * Renvoie l'ensemble des noms autorisés selon les filtres.
  * @param {string|null} teamId - id d'équipe ou null (toutes)
  * @param {string|null} saleName - nom d'un sale ou null (tous)
+ * @param {Array} teamsList - liste d'équipes à utiliser (par défaut TEAMS statique ;
+ *   passer l'état dynamique chargé depuis /api/teams une fois créer/renommer/supprimer
+ *   activés côté ⚙️ Paramètres)
  * @returns {Set<string>|null} null = pas de filtre (tout le monde)
  */
-export function allowedNames(teamId, saleName) {
+export function allowedNames(teamId, saleName, teamsList = TEAMS) {
   if (saleName) return new Set([saleName]);
   if (teamId) {
-    const team = TEAMS.find((t) => t.id === teamId);
+    const team = teamsList.find((t) => t.id === teamId);
     if (team) return new Set(team.members);
   }
   return null; // pas de filtre
