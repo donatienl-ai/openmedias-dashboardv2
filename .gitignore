@@ -6,3 +6,8 @@ client/node_modules/
 *.log
 .DS_Store
 openmedias-dashboard/
+
+# OpenPlanning (fusion) — base SQLite locale, ne doit jamais être commitée
+# (la vraie base vit sur le disque persistant Render, voir render.yaml)
+planning/backend/planning.db
+planning/backend/planning.db-*

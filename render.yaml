@@ -1,13 +1,26 @@
-# Configuration de déploiement Render
-# Render lira ce fichier automatiquement si tu utilises "Blueprint"
+# Configuration de déploiement Render — OpenDashboard (fusion OpenDashboard +
+# OpenPlanning + OpenBDC, un seul service, un seul domaine).
+# Render lira ce fichier automatiquement si tu utilises "Blueprint".
+#
+# ⚠️ Ce service embarque maintenant aussi better-sqlite3 + puppeteer-core +
+# @sparticuz/chromium (moteur BDC) en plus du cache Aircall/Calendly du
+# dashboard. Le plan "free" (512 Mo) sera probablement trop juste une fois les
+# trois outils réunis dans le même process — passe sur un plan avec plus de
+# RAM si tu vois des redémarrages/OOM dans les logs après la bascule, et
+# ajuste --max-old-space-size ci-dessous en conséquence.
 services:
   - type: web
     name: openmedias-dashboard
     env: node
-    plan: free
+    plan: standard
     buildCommand: npm install && npm run build
     startCommand: npm start
+    disk:
+      name: planning-db
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
+      # --- OpenDashboard ---
       - key: DASHBOARD_PASSWORD
         sync: false
       - key: AIRCALL_API_ID
@@ -18,12 +31,6 @@ services:
         sync: false
       - key: CALENDLY_ORG_URI
         value: https://api.calendly.com/organizations/CBCBRNXZXMQEI3KG
-      - key: SALESFORCE_CLIENT_ID
-        sync: false
-      - key: SALESFORCE_CLIENT_SECRET
-        sync: false
-      - key: SALESFORCE_DOMAIN_URL
-        value: https://openmedias.my.salesforce.com
       - key: DOCUSIGN_INTEGRATION_KEY
         sync: false
       - key: DOCUSIGN_USER_ID
@@ -54,3 +61,33 @@ services:
         value: "1,2,3,4,5"
       - key: REPORT_PRESET
         value: today
+      # --- Salesforce (partagé OpenDashboard + OpenPlanning + import BDC) ---
+      - key: SALESFORCE_CLIENT_ID
+        sync: false
+      - key: SALESFORCE_CLIENT_SECRET
+        sync: false
+      - key: SALESFORCE_DOMAIN_URL
+        value: https://openmedias.my.salesforce.com
+      # --- OpenPlanning (PIN édito + comptes commerciaux + BDC) ---
+      - key: PIN_EDIT
+        sync: false
+      - key: PIN_COM
+        sync: false
+      - key: PIN_EVA
+        sync: false
+      - key: PIN_FLAVIE
+        sync: false
+      - key: PIN_CLEVEL
+        sync: false
+      - key: EMAIL_EVA
+        sync: false
+      - key: EMAIL_FLAVIE
+        sync: false
+      - key: EMAIL_CLEVEL
+        sync: false
+      - key: EMAIL_ADMIN
+        value: donatien.l@openmedias.fr
+      - key: SF_WEBHOOK_SECRET
+        sync: false
+      - key: DB_PATH
+        value: /var/data/planning.db

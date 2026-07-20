@@ -28,6 +28,7 @@ import { getSettings, updateSettings } from './settings.js';
 import { startScheduler, getSchedulerState } from './scheduler.js';
 import { createDashboardCache } from './dashboardCache.js';
 import { getTeams, createTeam, updateTeam, deleteTeam } from './teamsStore.js';
+import { scopeDataToCommercial, resolveDisplayName } from './scopeByCommercial.js';
 
 dotenv.config();
 
@@ -41,14 +42,38 @@ app.use(express.json());
 
 const PASSWORD = process.env.DASHBOARD_PASSWORD || 'change-moi';
 
-// --- Middleware d'authentification simple par mot de passe ---
-// Le front envoie le mot de passe dans le header "x-dashboard-password".
+// ── AUTH PARTAGÉE AVEC OPENPLANNING (fusion) ──────────────────────────────────
+// Les comptes commerciaux (email + mot de passe, table commercial_users) sont
+// désormais LE système d'auth du dashboard aussi — mêmes comptes que le
+// planning. Le mot de passe unique historique (DASHBOARD_PASSWORD) reste
+// accepté en parallèle comme filet de sécurité temporaire pendant la bascule
+// (accès admin complet), à retirer une fois les comptes commerciaux validés.
+const { verifyCommercialLogin, getCommercialById } = (await import('../planning/backend/auth.js')).default;
+
+// --- Middleware d'authentification : compte commercial OU mot de passe unique (legacy) ---
+// Le front envoie soit "x-commercial-id" (compte individuel), soit
+// "x-dashboard-password" (filet de sécurité, accès admin complet).
 function requireAuth(req, res, next) {
-  const provided = req.headers['x-dashboard-password'];
-  if (provided !== PASSWORD) {
-    return res.status(401).json({ error: 'Mot de passe incorrect' });
+  const legacyPw = req.headers['x-dashboard-password'];
+  if (legacyPw && legacyPw === PASSWORD) {
+    req.isLegacyAdmin = true;
+    return next();
   }
-  next();
+  const id = req.headers['x-commercial-id'];
+  if (id) {
+    const user = getCommercialById(id);
+    if (user) { req.commercial = user; return next(); }
+  }
+  return res.status(401).json({ error: 'Non authentifié' });
+}
+
+// --- Middleware d'authentification : réservé aux comptes admin (toi + managers) ---
+// ou au mot de passe unique legacy (qui garde un accès complet le temps de la bascule).
+function requireAdmin(req, res, next) {
+  requireAuth(req, res, () => {
+    if (req.isLegacyAdmin || (req.commercial && req.commercial.is_admin)) return next();
+    return res.status(403).json({ error: 'Accès réservé aux comptes admin' });
+  });
 }
 
 // --- Journal des connexions (mémoire volatile, 200 derniers événements) ---
@@ -67,41 +92,52 @@ function recordLogin(req, ok) {
   if (loginLog.length > 200) loginLog.shift();
 }
 
-// --- Route de vérification du mot de passe (pour le login) ---
+// --- Route de connexion : compte commercial (email+mdp) OU mot de passe unique (legacy) ---
 app.post('/api/login', (req, res) => {
-  const { password } = req.body || {};
-  if (password === PASSWORD) {
-    recordLogin(req, true);
-    return res.json({ ok: true });
+  const { password, email } = req.body || {};
+  // Legacy : mot de passe unique (pas d'email transmis) — filet de sécurité pendant la bascule.
+  if (email === undefined) {
+    if (password === PASSWORD) {
+      recordLogin(req, true);
+      return res.json({ ok: true, legacy: true });
+    }
+    recordLogin(req, false);
+    return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
-  recordLogin(req, false);
-  return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
+  // Nouveau : compte commercial individuel (même compte que sur le planning).
+  const user = verifyCommercialLogin(email, password || '');
+  if (!user) {
+    recordLogin(req, false);
+    return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
+  }
+  recordLogin(req, true);
+  res.json({ ok: true, commercialId: user.id, nom: user.nom, email: user.email, isAdmin: !!user.is_admin });
 });
 
 // --- Console admin : journal des connexions ---
-app.get('/api/admin/logins', requireAuth, (req, res) => {
+app.get('/api/admin/logins', requireAdmin, (req, res) => {
   res.json({ events: [...loginLog].reverse() });
 });
 
-// ---------- ÉQUIPES (création / renommage / suppression via ⚙️ Paramètres) ----------
+// ---------- ÉQUIPES (lecture ouverte à tout compte connecté ; édition réservée aux admins) ----------
 app.get('/api/teams', requireAuth, (req, res) => {
   res.json({ teams: getTeams() });
 });
-app.post('/api/admin/teams', requireAuth, (req, res) => {
+app.post('/api/admin/teams', requireAdmin, (req, res) => {
   try {
     res.status(201).json(createTeam(req.body || {}));
   } catch (e) {
     res.status(400).json({ error: String(e.message || e) });
   }
 });
-app.patch('/api/admin/teams/:id', requireAuth, (req, res) => {
+app.patch('/api/admin/teams/:id', requireAdmin, (req, res) => {
   try {
     res.json(updateTeam(req.params.id, req.body || {}));
   } catch (e) {
     res.status(400).json({ error: String(e.message || e) });
   }
 });
-app.delete('/api/admin/teams/:id', requireAuth, (req, res) => {
+app.delete('/api/admin/teams/:id', requireAdmin, (req, res) => {
   try {
     deleteTeam(req.params.id);
     res.json({ success: true });
@@ -257,7 +293,17 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     const preset = req.query.preset || 'today';
     const range = resolveRange(preset, req.query.start, req.query.end);
-    res.json(await dashboardCache.get(preset, range));
+    const full = await dashboardCache.get(preset, range);
+    // Compte commercial non-admin → uniquement ses propres chiffres. Le mot de
+    // passe legacy et les comptes is_admin gardent la vue complète (toute l'équipe).
+    if (req.commercial && !req.commercial.is_admin) {
+      const displayName = resolveDisplayName(req.commercial);
+      if (!displayName) {
+        console.warn(`[SCOPE] commercial "${req.commercial.nom}" (id=${req.commercial.id}) introuvable dans roster.js SALES — verra des données vides sur /api/dashboard.`);
+      }
+      return res.json(scopeDataToCommercial(full, displayName || req.commercial.nom));
+    }
+    res.json(full);
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) });
   }
@@ -350,8 +396,8 @@ app.get('/api/send-report', async (req, res) => {
   }
 });
 
-// ---------- CONSOLE ADMIN (réglages + test, protégés par le mot de passe) ----------
-app.get('/api/admin/settings', requireAuth, (req, res) => {
+// ---------- CONSOLE ADMIN (réglages + test, réservés aux comptes admin) ----------
+app.get('/api/admin/settings', requireAdmin, (req, res) => {
   res.json({ ...getSettings(), scheduler: getSchedulerState() });
 });
 
@@ -361,17 +407,17 @@ app.get('/api/health', (req, res) => {
 });
 
 // Diagnostic : état du cache du dashboard (âge des snapshots, erreurs éventuelles)
-app.get('/api/admin/cache', requireAuth, (req, res) => {
+app.get('/api/admin/cache', requireAdmin, (req, res) => {
   res.json({ entries: dashboardCache.stats() });
 });
 
-app.post('/api/admin/settings', requireAuth, (req, res) => {
+app.post('/api/admin/settings', requireAdmin, (req, res) => {
   res.json(updateSettings(req.body || {}));
 });
 
 // Envoie le reporting pour la VUE COURANTE (période + thème transmis par le front),
 // dans le même style que le reporting programmé, aux destinataires configurés.
-app.post('/api/admin/email-view', requireAuth, async (req, res) => {
+app.post('/api/admin/email-view', requireAdmin, async (req, res) => {
   try {
     const s = getSettings();
     const to = parseRecipients((req.body && req.body.to) || s.reportTo);
@@ -385,7 +431,7 @@ app.post('/api/admin/email-view', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/admin/send-test', requireAuth, async (req, res) => {
+app.post('/api/admin/send-test', requireAdmin, async (req, res) => {
   try {
     const s = getSettings();
     const to = parseRecipients((req.body && req.body.to) || s.reportTo);
@@ -409,6 +455,19 @@ app.post('/api/admin/send-test', requireAuth, async (req, res) => {
     res.status(500).json({ sent: false, error: String(e.message || e) });
   }
 });
+
+// ---------- OPENPLANNING (planning de diffusion + BDC, fusionné sous /planning) ----------
+// router.js est un express.Router() CommonJS (ancien server.js de
+// planning-diff-openmedias, converti). Le package.json imbriqué dans
+// planning/backend/ ({"type":"commonjs"}) permet à ce projet ESM de l'importer
+// tel quel via l'interop Node — pas de renommage .cjs nécessaire.
+// Monté à /planning : ses routes internes (/api/emissions, /api/bdc/*, ...)
+// deviennent /planning/api/... — le frontend planning (const API='api', relatif)
+// s'y retrouve automatiquement une fois servi depuis /planning/.
+const { default: planningRouter } = await import('../planning/backend/router.js');
+const planningFrontendDir = path.join(__dirname, '..', 'planning', 'frontend');
+app.use('/planning', express.static(planningFrontendDir));
+app.use('/planning', planningRouter);
 
 // --- Sert le build React en production ---
 const clientBuild = path.join(__dirname, '..', 'client', 'build');

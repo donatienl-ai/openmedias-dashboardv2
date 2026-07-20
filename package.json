@@ -5,7 +5,7 @@
   "main": "server/index.js",
   "type": "module",
   "scripts": {
-    "start": "node --max-old-space-size=400 server/index.js",
+    "start": "node --max-old-space-size=1024 server/index.js",
     "dev": "node --watch server/index.js",
     "build": "cd client && npm install && npm run build",
     "postinstall": "cd client && npm install && npm run build"
@@ -18,6 +18,11 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "better-sqlite3": "^9.4.3",
+    "node-cron": "^3.0.3",
+    "handlebars": "^4.7.8",
+    "puppeteer-core": "^22.15.0",
+    "@sparticuz/chromium": "^127.0.0"
   }
 }

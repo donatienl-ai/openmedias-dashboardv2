@@ -1,0 +1,6 @@
+{
+  "name": "openplanning-backend",
+  "private": true,
+  "type": "commonjs",
+  "main": "router.js"
+}

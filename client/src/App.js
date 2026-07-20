@@ -18,8 +18,26 @@ function timeLabel(iso) {
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
+// ---------- AUTH (fusion OpenDashboard / OpenPlanning) ----------
+// `cred` (anciennement une simple string "password") est désormais un objet :
+//   { mode: 'legacy', password }                       — mot de passe unique (filet de sécurité, accès admin complet)
+//   { mode: 'commercial', commercialId, nom, isAdmin }  — compte individuel (même compte que sur le planning)
+// credHeaders() construit les headers d'auth adaptés, pour ne pas avoir à
+// dupliquer cette logique à chaque appel fetch.
+function credHeaders(cred, extra = {}) {
+  if (!cred) return extra;
+  if (cred.mode === 'commercial') return { ...extra, 'x-commercial-id': String(cred.commercialId) };
+  return { ...extra, 'x-dashboard-password': cred.password };
+}
+function isAdminCred(cred) {
+  if (!cred) return false;
+  return cred.mode === 'legacy' ? true : !!cred.isAdmin;
+}
+
 // ---------- LOGIN ----------
 function Login({ onSuccess }) {
+  const [mode, setMode] = useState('commercial'); // 'commercial' (par défaut) ou 'legacy'
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,13 +45,20 @@ function Login({ onSuccess }) {
   const submit = async () => {
     setLoading(true); setError('');
     try {
+      const body = mode === 'legacy' ? { password } : { email, password };
       const res = await fetch('api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(body),
       });
-      if (res.ok) onSuccess(password);
-      else setError('Mot de passe incorrect');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && mode === 'legacy') {
+        onSuccess({ mode: 'legacy', password });
+      } else if (res.ok) {
+        onSuccess({ mode: 'commercial', commercialId: data.commercialId, nom: data.nom, isAdmin: !!data.isAdmin });
+      } else {
+        setError(data.error || 'Identifiants incorrects');
+      }
     } catch {
       setError('Erreur de connexion au serveur');
     } finally { setLoading(false); }
@@ -44,15 +69,38 @@ function Login({ onSuccess }) {
       <div className="login-card">
         <div className="login-eyebrow">OpenMedias · Sales Dashboard</div>
         <div className="login-title">Performance<br />Commerciale</div>
-        <input
-          className="login-input" type="password" placeholder="Mot de passe"
-          value={password} onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus
-        />
+        {mode === 'commercial' ? (
+          <>
+            <input
+              className="login-input" type="email" placeholder="Email"
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus
+            />
+            <input
+              className="login-input" type="password" placeholder="Mot de passe"
+              value={password} onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submit()}
+              style={{ marginTop: 8 }}
+            />
+          </>
+        ) : (
+          <input
+            className="login-input" type="password" placeholder="Mot de passe"
+            value={password} onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus
+          />
+        )}
         <button className="login-btn" onClick={submit} disabled={loading}>
           {loading ? 'Connexion…' : 'Accéder au dashboard'}
         </button>
         {error && <div className="login-error">{error}</div>}
+        <button
+          className="login-switch-mode"
+          onClick={() => { setMode((m) => (m === 'commercial' ? 'legacy' : 'commercial')); setError(''); }}
+          style={{ marginTop: 12, background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontSize: 12, opacity: 0.7 }}
+        >
+          {mode === 'commercial' ? 'Mot de passe unique (admin)' : 'Compte commercial (email)'}
+        </button>
       </div>
     </div>
   );
@@ -366,7 +414,7 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
   useEffect(() => {
     if (!open) return;
     setStatus(null);
-    fetch('api/admin/settings', { headers: { 'x-dashboard-password': password } })
+    fetch('api/admin/settings', { headers: credHeaders(password) })
       .then((r) => r.json())
       .then((s) => {
         setTheme(s.reportTheme || 'light'); setTo(s.reportTo || '');
@@ -376,7 +424,7 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
         setSched(s.scheduler || null);
       })
       .catch(() => {});
-    fetch('api/admin/logins', { headers: { 'x-dashboard-password': password } })
+    fetch('api/admin/logins', { headers: credHeaders(password) })
       .then((r) => r.json())
       .then((d) => setLogins(d.events || []))
       .catch(() => {});
@@ -394,7 +442,7 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
     try {
       const r = await fetch('api/admin/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload()),
       });
       if (!r.ok) throw new Error('Sauvegarde refusée');
@@ -412,14 +460,14 @@ function AdminConsole({ open, password, onClose, period, rangeLabel }) {
       // On sauvegarde d'abord pour tester les réglages affichés
       await fetch('api/admin/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload()),
       });
       localStorage.setItem('om_admin_settings', JSON.stringify(payload()));
       // Le test suit la période actuellement sélectionnée sur le dashboard
       const r = await fetch('api/admin/send-test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
         body: JSON.stringify({ preset: period?.preset || 'today', start: period?.start, end: period?.end }),
       });
       const d = await r.json();
@@ -541,7 +589,7 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, t
 
   if (!open) return null;
 
-  const authHeaders = { 'Content-Type': 'application/json', 'x-dashboard-password': password };
+  const authHeaders = credHeaders(password, { 'Content-Type': 'application/json' });
 
   const run = async (fn) => {
     setBusy(true); setErr('');
@@ -726,8 +774,8 @@ function TvView({ password, hiddenSales, onClose, teams = TEAMS }) {
     const id = ++reqRef.current;
     try {
       const [dayRes, weekRes] = await Promise.all([
-        fetch('api/dashboard?preset=today', { headers: { 'x-dashboard-password': password } }),
-        fetch('api/dashboard?preset=this_week', { headers: { 'x-dashboard-password': password } }),
+        fetch('api/dashboard?preset=today', { headers: credHeaders(password) }),
+        fetch('api/dashboard?preset=this_week', { headers: credHeaders(password) }),
       ]);
       if (!dayRes.ok) throw new Error('Erreur serveur');
       const dayJson = await dayRes.json();
@@ -1069,6 +1117,7 @@ function NewsletterSection({ nlData, nlLoading, rangeLabel, onOpenCampaigns }) {
 
 // ---------- DASHBOARD ----------
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
+  const isAdmin = isAdminCred(password);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1087,7 +1136,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [teams, setTeams] = useState(TEAMS); // liste dynamique (créer/renommer/supprimer via ⚙️ Paramètres)
   const loadTeams = useCallback(async () => {
     try {
-      const r = await fetch('api/teams', { headers: { 'x-dashboard-password': password } });
+      const r = await fetch('api/teams', { headers: credHeaders(password) });
       if (r.ok) {
         const d = await r.json();
         if (Array.isArray(d.teams)) setTeams(d.teams);
@@ -1096,8 +1145,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   }, [password]);
   useEffect(() => { loadTeams(); }, [loadTeams]);
 
-  // Console admin cachée : Ctrl/Cmd + Maj + A
+  // Console admin cachée : Ctrl/Cmd + Maj + A (réservée aux comptes admin — le
+  // backend la protège de toute façon, mais autant ne pas l'ouvrir pour rien).
   useEffect(() => {
+    if (!isAdmin) return;
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         e.preventDefault();
@@ -1106,7 +1157,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [isAdmin]);
 
   // Resynchronise les réglages admin sauvegardés vers le serveur
   // (la mémoire serveur est volatile sur Render free)
@@ -1116,7 +1167,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       if (saved) {
         fetch('api/admin/settings', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+          headers: credHeaders(password, { 'Content-Type': 'application/json' }),
           body: saved,
         }).catch(() => {});
       }
@@ -1148,7 +1199,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         qs.set('end', period.end);
       }
       const res = await fetch(`api/dashboard?${qs.toString()}`, {
-        headers: { 'x-dashboard-password': password },
+        headers: credHeaders(password),
       });
       if (res.status === 401) { onLogout(); return; }
       if (!res.ok) throw new Error('Erreur serveur');
@@ -1165,7 +1216,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       const qs = new URLSearchParams({ preset: period.preset });
       if (period.preset === 'custom') { qs.set('start', period.start); qs.set('end', period.end); }
       const res = await fetch(`api/newsletter-stats?${qs.toString()}`, {
-        headers: { 'x-dashboard-password': password },
+        headers: credHeaders(password),
       });
       if (res.ok) setNlData(await res.json());
     } catch { /* silencieux */ } finally { setNlLoading(false); }
@@ -1192,7 +1243,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       if (period.preset === 'custom') { body.start = period.start; body.end = period.end; }
       const r = await fetch('api/admin/email-view', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-dashboard-password': password },
+        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       });
       const j = await r.json().catch(() => ({}));
@@ -1410,15 +1461,22 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
+            <button className="theme-btn" onClick={() => { window.location.href = '/planning'; }} title="Planning de diffusion + BDC">
+              📅 Planning
+            </button>
             <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
               📺
             </button>
-            <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
-              ⚙️
-            </button>
-            <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
-              ✉️
-            </button>
+            {isAdmin && (
+              <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
+                ⚙️
+              </button>
+            )}
+            {isAdmin && (
+              <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
+                ✉️
+              </button>
+            )}
             <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
@@ -1761,12 +1819,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
 // ---------- ROOT ----------
 export default function App() {
-  const [password, setPassword] = useState(null);
+  const [password, setPassword] = useState(null); // `password` = objet credential (voir credHeaders/isAdminCred plus haut)
   const [theme, setTheme] = useState(() => localStorage.getItem('om_theme') || 'dark');
 
   useEffect(() => {
-    const saved = sessionStorage.getItem('om_pw');
-    if (saved) setPassword(saved);
+    const saved = sessionStorage.getItem('om_cred');
+    if (saved) {
+      try { setPassword(JSON.parse(saved)); } catch { /* session pré-fusion invalide, ignorée */ }
+    }
   }, []);
 
   // Applique le thème sur <html> et mémorise la préférence
@@ -1777,8 +1837,23 @@ export default function App() {
 
   const toggleTheme = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), []);
 
-  const handleSuccess = useCallback((pw) => { sessionStorage.setItem('om_pw', pw); setPassword(pw); }, []);
-  const handleLogout = useCallback(() => { sessionStorage.removeItem('om_pw'); setPassword(null); }, []);
+  const handleSuccess = useCallback((cred) => {
+    sessionStorage.setItem('om_cred', JSON.stringify(cred));
+    // SSO vers OpenPlanning (/planning) : même compte commercial, mêmes clés
+    // localStorage que le planning attend (commercialId/commercialNom) — évite
+    // de se reconnecter en passant d'un onglet à l'autre.
+    if (cred.mode === 'commercial') {
+      localStorage.setItem('commercialId', String(cred.commercialId));
+      localStorage.setItem('commercialNom', cred.nom || '');
+    }
+    setPassword(cred);
+  }, []);
+  const handleLogout = useCallback(() => {
+    sessionStorage.removeItem('om_cred');
+    localStorage.removeItem('commercialId');
+    localStorage.removeItem('commercialNom');
+    setPassword(null);
+  }, []);
 
   if (!password) return <Login onSuccess={handleSuccess} />;
   return <Dashboard password={password} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
