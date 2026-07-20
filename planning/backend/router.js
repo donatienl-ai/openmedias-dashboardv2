@@ -34,6 +34,7 @@ const EMAIL_ADMIN = process.env.EMAIL_ADMIN || 'donatien.l@openmedias.fr';
 // ── MOTS DE PASSE (comptes commerciaux) ───────────────────────────────────────
 // Partagé avec le host OpenDashboard depuis la fusion — voir ./auth.js.
 const { hashPassword, verifyCommercialLogin, getCommercialById } = require('./auth');
+const salesTeams = require('./teams');
 
 function getHorizonMois() {
   const row = db.prepare("SELECT value FROM config WHERE key='horizon_mois'").get();
@@ -54,6 +55,26 @@ function requireCommercial(req, res, next) {
   next();
 }
 
+// ── PONT COMPTES → RÔLE PIN (login unique) ────────────────────────────────────
+// Toutes les routes existantes vérifient `req.headers.role` (valeurs historiques
+// 'edit'/'com', posées par le PIN côté front). Plutôt que de retoucher chaque
+// route une par une, on fait en sorte qu'un compte commercial (x-commercial-id)
+// avec le bon rôle produise le MÊME header, de façon transparente — les PIN
+// continuent aussi de fonctionner en parallèle le temps de la bascule complète.
+app.use((req, res, next) => {
+  if (req.headers.role !== 'edit' && req.headers.role !== 'com') {
+    const id = req.headers['x-commercial-id'];
+    if (id) {
+      const user = getCommercialById(id);
+      if (user) {
+        if (user.role === 'edito' || user.role === 'admin') req.headers.role = 'edit';
+        else if (user.role === 'communication') req.headers.role = 'com';
+      }
+    }
+  }
+  next();
+});
+
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 app.post('/api/auth', (req, res) => {
   const { pin } = req.body;
@@ -69,7 +90,10 @@ app.post('/api/auth', (req, res) => {
 app.post('/api/auth/commercial', (req, res) => {
   const user = verifyCommercialLogin(req.body.email, req.body.password || '');
   if (!user) return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
-  res.json({ role: 'sales', commercial_id: user.id, nom: user.nom, email: user.email, isAdmin: !!user.is_admin });
+  // `role: 'sales'` conservé pour compat (ancien champ, valeur historique unique) —
+  // `accountRole` porte le VRAI rôle du compte (commercial/manager/edito/communication/admin),
+  // que le front traduit via planningRoleFor() vers ses capacités internes.
+  res.json({ role: 'sales', accountRole: user.role || 'commercial', commercial_id: user.id, nom: user.nom, email: user.email, isAdmin: !!user.is_admin });
 });
 
 // Définition du mot de passe par le commercial lui-même, via le lien reçu par email
@@ -85,7 +109,21 @@ app.post('/api/auth/set-password', (req, res) => {
   }
   db.prepare('UPDATE commercial_users SET password_hash=?, reset_token=NULL, reset_token_expires=NULL WHERE id=?')
     .run(hashPassword(password), user.id);
-  res.json({ role: 'sales', commercial_id: user.id, nom: user.nom, email: user.email });
+  res.json({ role: 'sales', accountRole: user.role || 'commercial', commercial_id: user.id, nom: user.nom, email: user.email });
+});
+
+// Restaure une session déjà ouverte (SSO OpenDashboard ↔ OpenPlanning, ou retour
+// sur cette page) sans redemander les identifiants — le front appelle cette
+// route avec le x-commercial-id déjà connu (localStorage) au chargement.
+app.get('/api/auth/me', requireCommercial, (req, res) => {
+  res.json({
+    commercial_id: req.commercial.id,
+    nom: req.commercial.nom,
+    email: req.commercial.email,
+    accountRole: req.commercial.role || 'commercial',
+    isAdmin: !!req.commercial.is_admin,
+    teamId: req.commercial.team_id || null,
+  });
 });
 
 // ── WEBHOOK SALESFORCE ────────────────────────────────────────────────────────
@@ -930,12 +968,34 @@ app.get('/api/admin/salesforce-commerciaux', requireEdit, async (req, res) => {
 });
 
 // ── ADMIN - COMPTES COMMERCIAUX ───────────────────────────────────────────────
+const VALID_ROLES = ['commercial', 'manager', 'edito', 'communication', 'admin'];
+
 app.get('/api/admin/commerciaux', requireEdit, (req, res) => {
   res.json(db.prepare(`
-    SELECT cu.id, cu.email, cu.nom, cu.actif, cu.is_admin, cu.equipe_edito_id, e.nom as equipe_nom
-    FROM commercial_users cu LEFT JOIN equipes_edito e ON e.id = cu.equipe_edito_id
+    SELECT cu.id, cu.email, cu.nom, cu.actif, cu.is_admin, cu.role, cu.team_id,
+           cu.equipe_edito_id, e.nom as equipe_nom, st.label as team_label
+    FROM commercial_users cu
+    LEFT JOIN equipes_edito e ON e.id = cu.equipe_edito_id
+    LEFT JOIN sales_teams st ON st.id = cu.team_id
     ORDER BY cu.nom ASC
   `).all());
+});
+
+// ── ÉQUIPES DE VENTE (rôle manager) ───────────────────────────────────────────
+app.get('/api/admin/sales-teams', requireEdit, (req, res) => {
+  res.json(salesTeams.listSalesTeams());
+});
+app.post('/api/admin/sales-teams', requireEdit, (req, res) => {
+  try { res.status(201).json(salesTeams.createSalesTeam(req.body.label)); }
+  catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+app.patch('/api/admin/sales-teams/:id', requireEdit, (req, res) => {
+  try { res.json(salesTeams.renameSalesTeam(req.params.id, req.body.label)); }
+  catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+app.delete('/api/admin/sales-teams/:id', requireEdit, (req, res) => {
+  try { salesTeams.deleteSalesTeam(req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(400).json({ error: String(e.message || e) }); }
 });
 // Génère un token d'invitation (7 jours de validité) et envoie le mail
 // "définis ton mot de passe" au commercial, via le mailer Mailjet déjà en place
@@ -994,16 +1054,19 @@ app.post('/api/admin/commerciaux', requireEdit, (req, res) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const equipe_edito_id = req.body.equipe_edito_id || null;
   const sf_user_id = req.body.sf_user_id || null;
-  // is_admin : coche "compte admin" (voit tout OpenDashboard, pas seulement ses
-  // propres chiffres) — réservé à toi + managers, à cocher depuis ce panneau.
-  const is_admin = req.body.is_admin ? 1 : 0;
+  const team_id = req.body.team_id || null;
+  // role : commercial (défaut, ses seuls chiffres) | manager (chiffres de son
+  // équipe) | edito | communication (pas d'accès dashboard) | admin (tout voir).
+  const role = VALID_ROLES.includes(req.body.role) ? req.body.role : 'commercial';
+  // is_admin conservé pour compat ascendante (anciens comptes) — équivalent à role='admin'.
+  const is_admin = role === 'admin' ? 1 : (req.body.is_admin ? 1 : 0);
   if (!nom || !email) return res.status(400).json({ error: 'Nom et email requis' });
   try {
     // Mot de passe temporaire aléatoire et inconnu de tous : le commercial le remplace
     // via le lien reçu par email avant de pouvoir se connecter.
     const placeholder = crypto.randomBytes(32).toString('hex');
-    const r = db.prepare(`INSERT INTO commercial_users (email,password_hash,nom,sf_user_id,equipe_edito_id,is_admin) VALUES (?,?,?,?,?,?)`)
-      .run(email, hashPassword(placeholder), nom, sf_user_id, equipe_edito_id, is_admin);
+    const r = db.prepare(`INSERT INTO commercial_users (email,password_hash,nom,sf_user_id,equipe_edito_id,is_admin,role,team_id) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(email, hashPassword(placeholder), nom, sf_user_id, equipe_edito_id, is_admin, role, team_id);
     const user = { id: r.lastInsertRowid, nom, email };
     envoyerInvitation(req, user);
     res.status(201).json({ id: r.lastInsertRowid, invitationEnvoyee: true });
@@ -1020,17 +1083,33 @@ app.post('/api/admin/commerciaux/:id/resend-invite', requireEdit, (req, res) => 
   res.json({ success: true });
 });
 app.patch('/api/admin/commerciaux/:id', requireEdit, (req, res) => {
-  const { equipe_edito_id, actif, password, is_admin } = req.body;
+  const { equipe_edito_id, actif, password, is_admin, role, team_id } = req.body;
+  if (role !== undefined && !VALID_ROLES.includes(role)) {
+    return res.status(400).json({ error: `Rôle invalide (attendu: ${VALID_ROLES.join(', ')})` });
+  }
   if (password) {
     if (password.length < 6) return res.status(400).json({ error: 'Mot de passe trop court (6 caractères minimum)' });
     db.prepare('UPDATE commercial_users SET password_hash=? WHERE id=?').run(hashPassword(password), req.params.id);
   }
+  // Si le rôle change, is_admin (ancien flag, conservé pour compat) SUIT le
+  // rôle explicitement — sinon un compte rétrogradé depuis 'admin' garderait
+  // is_admin=1 en mémoire et conserverait un accès admin fantôme.
+  const isAdminFinal = role !== undefined ? (role === 'admin' ? 1 : 0) : (is_admin !== undefined ? (is_admin ? 1 : 0) : null);
   db.prepare(`UPDATE commercial_users SET
     equipe_edito_id = CASE WHEN ? THEN ? ELSE equipe_edito_id END,
     actif = COALESCE(?, actif),
-    is_admin = COALESCE(?, is_admin)
+    is_admin = COALESCE(?, is_admin),
+    role = COALESCE(?, role),
+    team_id = CASE WHEN ? THEN ? ELSE team_id END
     WHERE id=?`
-  ).run(equipe_edito_id !== undefined ? 1 : 0, equipe_edito_id || null, actif !== undefined ? (actif ? 1 : 0) : null, is_admin !== undefined ? (is_admin ? 1 : 0) : null, req.params.id);
+  ).run(
+    equipe_edito_id !== undefined ? 1 : 0, equipe_edito_id || null,
+    actif !== undefined ? (actif ? 1 : 0) : null,
+    isAdminFinal,
+    role !== undefined ? role : null,
+    team_id !== undefined ? 1 : 0, team_id || null,
+    req.params.id
+  );
   res.json({ success: true });
 });
 app.delete('/api/admin/commerciaux/:id', requireEdit, (req, res) => {

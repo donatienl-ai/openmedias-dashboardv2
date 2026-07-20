@@ -55,7 +55,7 @@ function Login({ onSuccess }) {
       if (res.ok && mode === 'legacy') {
         onSuccess({ mode: 'legacy', password });
       } else if (res.ok) {
-        onSuccess({ mode: 'commercial', commercialId: data.commercialId, nom: data.nom, isAdmin: !!data.isAdmin });
+        onSuccess({ mode: 'commercial', commercialId: data.commercialId, nom: data.nom, isAdmin: !!data.isAdmin, role: data.role, teamId: data.teamId });
       } else {
         setError(data.error || 'Identifiants incorrects');
       }
@@ -1825,7 +1825,17 @@ export default function App() {
   useEffect(() => {
     const saved = sessionStorage.getItem('om_cred');
     if (saved) {
-      try { setPassword(JSON.parse(saved)); } catch { /* session pré-fusion invalide, ignorée */ }
+      try {
+        const cred = JSON.parse(saved);
+        // Un compte édito/communication qui revient sur la racine du domaine
+        // (ex: lien direct, retour navigateur) est renvoyé vers le planning —
+        // il n'a jamais eu accès au dashboard, même via une session déjà ouverte.
+        if (cred.mode === 'commercial' && ['edito', 'communication'].includes(cred.role)) {
+          window.location.href = '/planning';
+          return;
+        }
+        setPassword(cred);
+      } catch { /* session pré-fusion invalide, ignorée */ }
     }
   }, []);
 
@@ -1845,6 +1855,12 @@ export default function App() {
     if (cred.mode === 'commercial') {
       localStorage.setItem('commercialId', String(cred.commercialId));
       localStorage.setItem('commercialNom', cred.nom || '');
+    }
+    // Édito et communication n'ont pas accès au dashboard — leur landing page
+    // est directement le planning (redirection immédiate après connexion).
+    if (cred.mode === 'commercial' && ['edito', 'communication'].includes(cred.role)) {
+      window.location.href = '/planning';
+      return;
     }
     setPassword(cred);
   }, []);

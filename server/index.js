@@ -28,7 +28,7 @@ import { getSettings, updateSettings } from './settings.js';
 import { startScheduler, getSchedulerState } from './scheduler.js';
 import { createDashboardCache } from './dashboardCache.js';
 import { getTeams, createTeam, updateTeam, deleteTeam } from './teamsStore.js';
-import { scopeDataToCommercial, resolveDisplayName } from './scopeByCommercial.js';
+import { scopeDataToCommercial, resolveDisplayName, resolveTeamDisplayNames } from './scopeByCommercial.js';
 
 dotenv.config();
 
@@ -49,6 +49,7 @@ const PASSWORD = process.env.DASHBOARD_PASSWORD || 'change-moi';
 // accepté en parallèle comme filet de sécurité temporaire pendant la bascule
 // (accès admin complet), à retirer une fois les comptes commerciaux validés.
 const { verifyCommercialLogin, getCommercialById } = (await import('../planning/backend/auth.js')).default;
+const { getTeamMembers } = (await import('../planning/backend/teams.js')).default;
 
 // --- Middleware d'authentification : compte commercial OU mot de passe unique (legacy) ---
 // Le front envoie soit "x-commercial-id" (compte individuel), soit
@@ -67,11 +68,15 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'Non authentifié' });
 }
 
-// --- Middleware d'authentification : réservé aux comptes admin (toi + managers) ---
-// ou au mot de passe unique legacy (qui garde un accès complet le temps de la bascule).
+// --- Middleware d'authentification : réservé aux comptes admin ---
+// (role='admin', ou l'ancien flag is_admin des comptes migrés) ou au mot de
+// passe unique legacy (qui garde un accès complet le temps de la bascule).
+function isAdminAccount(commercial) {
+  return !!commercial && (commercial.role === 'admin' || !!commercial.is_admin);
+}
 function requireAdmin(req, res, next) {
   requireAuth(req, res, () => {
-    if (req.isLegacyAdmin || (req.commercial && req.commercial.is_admin)) return next();
+    if (req.isLegacyAdmin || isAdminAccount(req.commercial)) return next();
     return res.status(403).json({ error: 'Accès réservé aux comptes admin' });
   });
 }
@@ -111,7 +116,16 @@ app.post('/api/login', (req, res) => {
     return res.status(401).json({ ok: false, error: 'Email ou mot de passe incorrect' });
   }
   recordLogin(req, true);
-  res.json({ ok: true, commercialId: user.id, nom: user.nom, email: user.email, isAdmin: !!user.is_admin });
+  const role = user.role || (user.is_admin ? 'admin' : 'commercial');
+  res.json({
+    ok: true,
+    commercialId: user.id,
+    nom: user.nom,
+    email: user.email,
+    isAdmin: !!user.is_admin || role === 'admin',
+    role,
+    teamId: user.team_id || null,
+  });
 });
 
 // --- Console admin : journal des connexions ---
@@ -291,12 +305,24 @@ const dashboardCache = createDashboardCache({
 
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
+    // Édito / communication n'ont pas accès au dashboard — leur landing page
+    // est le planning (voir App.js, redirection juste après connexion).
+    if (req.commercial && ['edito', 'communication'].includes(req.commercial.role)) {
+      return res.status(403).json({ error: "Ce compte n'a pas accès au dashboard — rendez-vous sur /planning" });
+    }
     const preset = req.query.preset || 'today';
     const range = resolveRange(preset, req.query.start, req.query.end);
     const full = await dashboardCache.get(preset, range);
-    // Compte commercial non-admin → uniquement ses propres chiffres. Le mot de
-    // passe legacy et les comptes is_admin gardent la vue complète (toute l'équipe).
-    if (req.commercial && !req.commercial.is_admin) {
+    // Mot de passe legacy et comptes admin gardent la vue complète (toute l'équipe).
+    if (req.commercial && !isAdminAccount(req.commercial)) {
+      if (req.commercial.role === 'manager' && req.commercial.team_id) {
+        const members = getTeamMembers(req.commercial.team_id);
+        const names = resolveTeamDisplayNames(members.length ? members : [req.commercial]);
+        if (!names.length) {
+          console.warn(`[SCOPE] équipe "${req.commercial.team_id}" du manager "${req.commercial.nom}" — aucun membre reconnu dans roster.js SALES, verra des données vides.`);
+        }
+        return res.json(scopeDataToCommercial(full, names.length ? names : [req.commercial.nom]));
+      }
       const displayName = resolveDisplayName(req.commercial);
       if (!displayName) {
         console.warn(`[SCOPE] commercial "${req.commercial.nom}" (id=${req.commercial.id}) introuvable dans roster.js SALES — verra des données vides sur /api/dashboard.`);

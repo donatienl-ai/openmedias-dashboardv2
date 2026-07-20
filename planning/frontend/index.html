@@ -720,6 +720,7 @@ td { padding: 10px 14px; font-size: 13px; }
 
     <div class="param-card">
       <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Équipes édito</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Pour l'assignation "resp. édito" des émissions — sans rapport avec les équipes de vente ci-dessous.</div>
       <div id="equipes-list" class="param-chip-list"></div>
       <div class="form-row" style="margin-top:12px;align-items:flex-end">
         <div class="form-group"><label class="form-label">Nouvelle équipe</label><input class="form-input" id="param-nouvelle-equipe" placeholder="Ex: Lola" onkeydown="if(event.key==='Enter')addEquipe()"></div>
@@ -728,9 +729,20 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
 
     <div class="param-card">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Comptes commerciaux</div>
+      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Équipes de vente</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Détermine ce que voit un compte "manager" sur OpenDashboard (les chiffres de son équipe).</div>
+      <div id="sales-teams-list" class="param-chip-list"></div>
+      <div class="form-row" style="margin-top:12px;align-items:flex-end">
+        <div class="form-group"><label class="form-label">Nouvelle équipe de vente</label><input class="form-input" id="param-nouvelle-sales-team" placeholder="Ex: Équipe Lisa" onkeydown="if(event.key==='Enter')addSalesTeam()"></div>
+        <button class="btn-secondary" onclick="addSalesTeam()">+ Ajouter</button>
+      </div>
+    </div>
+
+    <div class="param-card">
+      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Comptes (accès OpenDashboard + OpenPlanning)</div>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-        <button class="btn-secondary" onclick="loadSalesforceCommerciaux()">🔄 Charger les commerciaux depuis Salesforce</button>
+        <button class="btn-secondary" onclick="loadSalesforceCommerciaux()">🔄 Depuis Salesforce (commerciaux)</button>
+        <button class="btn-secondary" onclick="openManualAccountModal()">✍️ Créer manuellement (édito, communication...)</button>
       </div>
       <div id="sf-commerciaux-list" class="param-table" style="display:none"></div>
       <div class="param-sep"></div>
@@ -761,6 +773,60 @@ let pinBuffer='', searchQuery='', bdcFilterActive=false;
 let commercialId = localStorage.getItem('commercialId') || null;
 let commercialNom = localStorage.getItem('commercialNom') || '';
 
+// Traduit le rôle réel du compte (commercial_users.role) vers le modèle de
+// rôle interne du planning ('edit'/'com'/'sales', hérité de l'ancien système
+// PIN) — permet à un compte admin/édito/communication/manager/commercial
+// d'obtenir les bonnes capacités, qu'il arrive par PIN, par login direct sur
+// cette page, ou par SSO depuis OpenDashboard.
+function planningRoleFor(accountRole){
+  if(accountRole==='admin'||accountRole==='edito')return 'edit';
+  if(accountRole==='communication')return 'com';
+  return 'sales'; // manager, commercial, ou valeur inconnue -> par défaut le plus restreint
+}
+// Active la session applicative (affiche l'app, cache l'écran de connexion) de
+// façon identique quel que soit le point d'entrée (PIN, login direct, SSO depuis
+// le dashboard) — évite de dupliquer cette logique 4 fois de façon divergente.
+function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal}){
+  role=r; myName=nom||null; isCLevel=!!clevel;
+  if(commercialIdVal){
+    commercialId=commercialIdVal; commercialNom=commercialNomVal||'';
+    localStorage.setItem('commercialId',commercialId); localStorage.setItem('commercialNom',commercialNom);
+  }
+  document.getElementById('pin-screen').style.display='none';
+  document.getElementById('app').style.display='flex';
+  if(role==='sales'){
+    document.getElementById('role-badge').textContent=commercialNom||'Commercial';
+    document.getElementById('role-badge').className='role-badge sales';
+    document.getElementById('btn-bdc-commercial').style.display='';
+    document.getElementById('btn-mes-creneaux').style.display='';
+    document.getElementById('nav-bdc').style.display='';
+  }else{
+    document.getElementById('role-badge').textContent=role==='edit'?'Édito':(role==='com'?'Communication':'Commercial');
+    document.getElementById('role-badge').className=`role-badge ${role}`;
+    if(role==='edit')document.querySelectorAll('.edit-only').forEach(el=>el.style.display='');
+  }
+}
+// SSO depuis OpenDashboard (ou session déjà ouverte sur cette page) : si un
+// commercialId est déjà en localStorage, on retente une session directement
+// via /api/auth/me au lieu de redemander les identifiants — c'est tout
+// l'intérêt de la fusion (pas de re-login en passant d'un onglet à l'autre).
+async function tryAutoLogin(){
+  if(!commercialId || window._inviteToken)return false;
+  try{
+    const r=await fetch(`${API}/auth/me`,{headers:{'x-commercial-id':commercialId}});
+    if(!r.ok)throw new Error('session invalide');
+    const d=await r.json();
+    activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom});
+    await init();
+    return true;
+  }catch{
+    // Compte supprimé/désactivé depuis : on nettoie pour retomber proprement sur l'écran de connexion.
+    localStorage.removeItem('commercialId'); localStorage.removeItem('commercialNom');
+    commercialId=null; commercialNom='';
+    return false;
+  }
+}
+
 function toggleLoginMode(ev){
   ev.preventDefault();
   const edito=document.getElementById('pin-card-edito'), com=document.getElementById('pin-card-commercial');
@@ -777,15 +843,7 @@ async function commercialLoginSubmit(){
     const r=await fetch(`${API}/auth/commercial`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const d=await r.json();
     if(r.ok){
-      role='sales'; commercialId=d.commercial_id; commercialNom=d.nom;
-      localStorage.setItem('commercialId',commercialId); localStorage.setItem('commercialNom',commercialNom);
-      document.getElementById('pin-screen').style.display='none';
-      document.getElementById('app').style.display='flex';
-      document.getElementById('role-badge').textContent=commercialNom;
-      document.getElementById('role-badge').className='role-badge sales';
-      document.getElementById('btn-bdc-commercial').style.display='';
-      document.getElementById('btn-mes-creneaux').style.display='';
-      document.getElementById('nav-bdc').style.display='';
+      activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom});
       await init();
     }else{
       errEl.textContent=d.error||'Email ou mot de passe incorrect.';
@@ -796,15 +854,7 @@ async function commercialLoginSubmit(){
 // Connexion "réussie" commune (login classique OU juste après avoir défini son mot
 // de passe via le lien d'invitation reçu par email) : bascule vers l'app en rôle sales.
 function entrerCommeCommercial(d){
-  role='sales'; commercialId=d.commercial_id; commercialNom=d.nom;
-  localStorage.setItem('commercialId',commercialId); localStorage.setItem('commercialNom',commercialNom);
-  document.getElementById('pin-screen').style.display='none';
-  document.getElementById('app').style.display='flex';
-  document.getElementById('role-badge').textContent=commercialNom;
-  document.getElementById('role-badge').className='role-badge sales';
-  document.getElementById('btn-bdc-commercial').style.display='';
-  document.getElementById('btn-mes-creneaux').style.display='';
-  document.getElementById('nav-bdc').style.display='';
+  activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom});
   init();
 }
 
@@ -834,6 +884,7 @@ async function inviteSubmit(){
   }catch{errEl.textContent='Erreur réseau.';}
 }
 checkInviteToken();
+tryAutoLogin();
 let RESP_EDIT_LIST = ['Lola','Eva','Flavie'];
 async function refreshEquipesList(){
   if(role!=='edit')return;
@@ -880,12 +931,8 @@ async function pinSubmit(){
   try{
     const r=await fetch(`${API}/auth`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin:pinBuffer})});
     if(r.ok){
-      const d=await r.json(); role=d.role; myName=d.nom||null; isCLevel=!!d.clevel;
-      document.getElementById('pin-screen').style.display='none';
-      document.getElementById('app').style.display='flex';
-      document.getElementById('role-badge').textContent=role==='edit'?'Édito':(role==='com'?'Communication':'Commercial');
-      document.getElementById('role-badge').className=`role-badge ${role}`;
-      if(role==='edit')document.querySelectorAll('.edit-only').forEach(el=>el.style.display='');
+      const d=await r.json();
+      activateSession({role:d.role, nom:d.nom, clevel:d.clevel});
       await init();
     }else{
       document.getElementById('pin-error').textContent='Code incorrect.';
@@ -2395,17 +2442,57 @@ function logout(){
 document.addEventListener('keydown',e=>{if(document.getElementById('pin-screen').style.display==='none')return;if(document.getElementById('pin-card-edito').style.display==='none')return;if(e.key>='0'&&e.key<='9')pinKey(e.key);else if(e.key==='Backspace')pinDel();else if(e.key==='Enter')pinSubmit();});
 
 // ── PARAMÈTRES (édito uniquement) ─────────────────────────────────────────────
-let equipesCache=[], commerciauxCache=[];
+let equipesCache=[], commerciauxCache=[], salesTeamsCache=[];
+
+// Rôles disponibles à la création/édition d'un compte — un seul système de
+// comptes pour tout OpenMedias (dashboard + planning), fini les codes PIN.
+const ROLES_COMPTE=[
+  {value:'commercial',label:'Commercial (ses seuls chiffres)'},
+  {value:'manager',label:'Manager (chiffres de son équipe)'},
+  {value:'edito',label:'Édito (planning, pas de dashboard)'},
+  {value:'communication',label:'Communication (planning, pas de dashboard)'},
+  {value:'admin',label:'Admin (tout voir)'},
+];
 
 async function loadParametres(){
-  const [settings,equipes,commerciaux]=await Promise.all([
+  const [settings,equipes,commerciaux,salesTeams]=await Promise.all([
     fetch(`${API}/admin/settings`,{headers:{role:'edit'}}).then(r=>r.json()),
     fetch(`${API}/admin/equipes`,{headers:{role:'edit'}}).then(r=>r.json()),
-    fetch(`${API}/admin/commerciaux`,{headers:{role:'edit'}}).then(r=>r.json())
+    fetch(`${API}/admin/commerciaux`,{headers:{role:'edit'}}).then(r=>r.json()),
+    fetch(`${API}/admin/sales-teams`,{headers:{role:'edit'}}).then(r=>r.json())
   ]);
   document.getElementById('param-horizon').value=settings.horizonMois;
-  equipesCache=equipes; commerciauxCache=commerciaux;
-  renderEquipesList(); renderCommerciauxList();
+  equipesCache=equipes; commerciauxCache=commerciaux; salesTeamsCache=salesTeams;
+  renderEquipesList(); renderCommerciauxList(); renderSalesTeamsList();
+}
+
+function renderSalesTeamsList(){
+  const el=document.getElementById('sales-teams-list');
+  el.innerHTML=salesTeamsCache.length?salesTeamsCache.map(t=>
+    `<div class="param-chip">${t.label}<button onclick="deleteSalesTeam('${t.id}','${t.label.replace(/'/g,"\\'")}')" title="Supprimer">✕</button></div>`
+  ).join(''):'<div style="font-size:12px;color:var(--text-muted)">Aucune équipe de vente créée pour l\'instant.</div>';
+}
+async function addSalesTeam(){
+  const input=document.getElementById('param-nouvelle-sales-team');
+  const label=input.value.trim();
+  if(!label)return;
+  const r=await fetch(`${API}/admin/sales-teams`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({label})});
+  if(!r.ok){showToast('Erreur','warning');return;}
+  input.value='';
+  await loadParametres();
+  showToast('Équipe de vente créée ✓','success');
+}
+async function deleteSalesTeam(id,label){
+  if(!confirm(`Supprimer "${label}" ? Les comptes rattachés seront détachés (pas supprimés).`))return;
+  await fetch(`${API}/admin/sales-teams/${id}`,{method:'DELETE',headers:{role:'edit'}});
+  await loadParametres();
+  showToast('Équipe de vente supprimée ✓','success');
+}
+function salesTeamOptionsHtml(selectedId){
+  return `<option value="">— équipe de vente —</option>`+salesTeamsCache.map(t=>`<option value="${t.id}" ${selectedId===t.id?'selected':''}>${t.label}</option>`).join('');
+}
+function roleOptionsHtml(selectedRole){
+  return ROLES_COMPTE.map(r=>`<option value="${r.value}" ${selectedRole===r.value?'selected':''}>${r.label}</option>`).join('');
 }
 
 async function saveHorizon(){
@@ -2490,7 +2577,8 @@ function createCommercialFromSf(sfId,nom,sfEmail,uid){
   document.getElementById('modal-body').innerHTML=`
     <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="newacc-nom" value="${nom}"></div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Email de connexion</label><input class="form-input" type="email" id="newacc-email" value="${sfEmail||''}"></div>
-    <div class="form-group" style="margin-top:10px"><label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="newacc-admin" style="width:auto"> Compte admin (voit les chiffres de toute l'équipe sur OpenDashboard, pas seulement les siens)</label></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label><select class="form-select" id="newacc-role">${roleOptionsHtml('commercial')}</select></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Équipe de vente (commercial/manager)</label><select class="form-select" id="newacc-team">${salesTeamOptionsHtml(null)}</select></div>
     <div class="info-banner neutral" style="margin-top:10px">✉️ Un email va être envoyé à cette adresse pour que ${nom.split(' ')[0]} définisse lui/elle-même son mot de passe.</div>
   `;
   document.getElementById('modal-footer').innerHTML=`
@@ -2501,9 +2589,41 @@ function createCommercialFromSf(sfId,nom,sfEmail,uid){
 async function confirmCreateCommercial(sfId,equipe_edito_id){
   const nom=document.getElementById('newacc-nom').value.trim();
   const email=document.getElementById('newacc-email').value.trim();
-  const is_admin=document.getElementById('newacc-admin').checked;
+  const role=document.getElementById('newacc-role').value;
+  const team_id=document.getElementById('newacc-team').value||null;
   if(!nom||!email){showToast('Nom et email sont requis','warning');return;}
-  const r=await fetch(`${API}/admin/commerciaux`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom,email,equipe_edito_id,sf_user_id:sfId,is_admin})});
+  const r=await fetch(`${API}/admin/commerciaux`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom,email,equipe_edito_id,sf_user_id:sfId,role,team_id})});
+  const d=await r.json();
+  if(!r.ok){showToast(d.error||'Erreur','warning');return;}
+  closeModal();
+  await loadParametres();
+  showToast('Compte créé, email d\'invitation envoyé ✓','success');
+}
+
+// Création manuelle (édito, communication, admin, ou tout compte sans fiche
+// Salesforce) — même flux d'invitation par email que la création depuis Salesforce.
+function openManualAccountModal(){
+  document.getElementById('modal-title').textContent='Créer un compte manuellement';
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML=`
+    <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="newacc-nom" placeholder="Ex: Eva Dupont"></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Email de connexion</label><input class="form-input" type="email" id="newacc-email" placeholder="prenom.nom@openmedias.fr"></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label><select class="form-select" id="newacc-role">${roleOptionsHtml('edito')}</select></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Équipe de vente (commercial/manager)</label><select class="form-select" id="newacc-team">${salesTeamOptionsHtml(null)}</select></div>
+    <div class="info-banner neutral" style="margin-top:10px">✉️ Un email va être envoyé à cette adresse pour que la personne définisse elle-même son mot de passe.</div>
+  `;
+  document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="closeModal()">Annuler</button>
+    <button class="btn-primary" onclick="confirmCreateManualAccount()">Créer le compte</button>
+  `;
+}
+async function confirmCreateManualAccount(){
+  const nom=document.getElementById('newacc-nom').value.trim();
+  const email=document.getElementById('newacc-email').value.trim();
+  const role=document.getElementById('newacc-role').value;
+  const team_id=document.getElementById('newacc-team').value||null;
+  if(!nom||!email){showToast('Nom et email sont requis','warning');return;}
+  const r=await fetch(`${API}/admin/commerciaux`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom,email,role,team_id})});
   const d=await r.json();
   if(!r.ok){showToast(d.error||'Erreur','warning');return;}
   closeModal();
@@ -2517,12 +2637,13 @@ function renderCommerciauxList(){
     <div class="param-row">
       <span class="pr-name">${c.nom}</span><span class="pr-email">${c.email}</span>
       <div class="pr-actions">
-        <select class="form-select" onchange="updateCommercialEquipe(${c.id},this.value)">
-          <option value="">— équipe —</option>
+        <select class="form-select" title="Rôle" onchange="updateCommercialRole(${c.id},this.value)">${roleOptionsHtml(c.role||'commercial')}</select>
+        <select class="form-select" title="Équipe de vente" onchange="updateCommercialTeam(${c.id},this.value)">${salesTeamOptionsHtml(c.team_id)}</select>
+        <select class="form-select" title="Équipe édito" onchange="updateCommercialEquipe(${c.id},this.value)">
+          <option value="">— équipe édito —</option>
           ${equipesCache.map(e=>`<option value="${e.id}" ${c.equipe_edito_id===e.id?'selected':''}>${e.nom}</option>`).join('')}
         </select>
         <button class="btn-icon" title="${c.actif?'Désactiver':'Réactiver'}" onclick="toggleCommercialActif(${c.id},${c.actif?0:1})">${c.actif?'🟢':'⚪'}</button>
-        <button class="btn-icon" title="${c.is_admin?'Retirer les droits admin (OpenDashboard)':'Donner les droits admin (voit toute équipe sur OpenDashboard)'}" onclick="toggleCommercialAdmin(${c.id},${c.is_admin?0:1})">${c.is_admin?'👑':'👤'}</button>
         <button class="btn-icon" title="Renvoyer l'email d'invitation (définir mot de passe)" onclick="resendInvite(${c.id},'${c.nom.replace(/'/g,"\\'")}')">✉️</button>
         <button class="btn-icon" title="Réinitialiser le mot de passe manuellement" onclick="resetCommercialPassword(${c.id})">🔑</button>
         <button class="btn-icon" title="Supprimer" onclick="deleteCommercial(${c.id},'${c.nom.replace(/'/g,"\\'")}')">🗑️</button>
@@ -2533,16 +2654,22 @@ function renderCommerciauxList(){
 async function updateCommercialEquipe(id,equipe_edito_id){
   await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({equipe_edito_id:equipe_edito_id||null})});
   await loadParametres();
-  showToast('Équipe mise à jour ✓','success');
+  showToast('Équipe édito mise à jour ✓','success');
+}
+async function updateCommercialTeam(id,team_id){
+  await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({team_id:team_id||null})});
+  await loadParametres();
+  showToast('Équipe de vente mise à jour ✓','success');
+}
+async function updateCommercialRole(id,role){
+  const r=await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({role})});
+  if(!r.ok){showToast('Erreur','warning');await loadParametres();return;}
+  await loadParametres();
+  showToast('Rôle mis à jour ✓','success');
 }
 async function toggleCommercialActif(id,actif){
   await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({actif})});
   await loadParametres();
-}
-async function toggleCommercialAdmin(id,is_admin){
-  await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({is_admin})});
-  await loadParametres();
-  showToast(is_admin?'Droits admin accordés ✓':'Droits admin retirés ✓','success');
 }
 async function resetCommercialPassword(id){
   const pw=prompt('Nouveau mot de passe (6 caractères minimum) :');

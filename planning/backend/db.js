@@ -74,6 +74,39 @@ try { db.exec('ALTER TABLE commercial_users ADD COLUMN reset_token_expires TEXT'
 // Migration: flag admin (fusion OpenDashboard) — un commercial admin voit les
 // chiffres de toute l'équipe sur le dashboard, au lieu de ses seuls chiffres.
 try { db.exec('ALTER TABLE commercial_users ADD COLUMN is_admin INTEGER DEFAULT 0'); } catch(e) {}
+
+// ── RÔLES + ÉQUIPES DE VENTE (login unique, fusion OpenDashboard) ────────────
+// role : 'commercial' (ses seuls chiffres) | 'manager' (chiffres de son équipe)
+// | 'edito' | 'communication' (pas d'accès dashboard, atterrissent sur /planning)
+// | 'admin' (tout voir, ancien is_admin). team_id : équipe de vente (sales_teams),
+// utilisée pour scoper les managers — distincte de equipes_edito (équipes
+// éditoriales, pour l'assignation resp_edit des émissions, non liée aux rôles).
+try { db.exec("ALTER TABLE commercial_users ADD COLUMN role TEXT DEFAULT 'commercial'"); } catch(e) {}
+try { db.exec('ALTER TABLE commercial_users ADD COLUMN team_id TEXT'); } catch(e) {}
+// Migration : les anciens comptes is_admin=1 deviennent role='admin' (une seule fois)
+try { db.exec("UPDATE commercial_users SET role='admin' WHERE is_admin=1 AND (role IS NULL OR role='commercial')"); } catch(e) {}
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sales_teams (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+// Seed unique (première fusion) : reprend les 4 équipes qui existaient jusque-là
+// uniquement en mémoire côté dashboard (server/teamsStore.js), pour ne pas perdre
+// la config existante — table vide = jamais seedée.
+try {
+  const seeded = db.prepare('SELECT COUNT(*) as n FROM sales_teams').get();
+  if (seeded.n === 0) {
+    const seedTeams = db.prepare('INSERT INTO sales_teams (id,label) VALUES (?,?)');
+    seedTeams.run('lisa', 'Équipe Lisa');
+    seedTeams.run('quentin', 'Équipe Quentin');
+    seedTeams.run('david', 'Équipe David');
+    seedTeams.run('paul', 'Équipe Paul');
+  }
+} catch(e) {}
+
 // Seed setting: horizon de visibilité commercial (en mois), 3 par défaut
 try {
   const exists = db.prepare("SELECT 1 FROM config WHERE key='horizon_mois'").get();
