@@ -2522,7 +2522,7 @@ function renderCommerciauxList(){
           ${equipesCache.map(e=>`<option value="${e.id}" ${c.equipe_edito_id===e.id?'selected':''}>${e.nom}</option>`).join('')}
         </select>
         <button class="btn-icon" title="${c.actif?'Désactiver':'Réactiver'}" onclick="toggleCommercialActif(${c.id},${c.actif?0:1})">${c.actif?'🟢':'⚪'}</button>
-        <button class="btn-icon" title="${c.is_admin?'Retirer les droits admin (OpenDashboard)':'Donner les droits admin (voit toute l\\'équipe sur OpenDashboard)'}" onclick="toggleCommercialAdmin(${c.id},${c.is_admin?0:1})">${c.is_admin?'👑':'👤'}</button>
+        <button class="btn-icon" title="${c.is_admin?'Retirer les droits admin (OpenDashboard)':'Donner les droits admin (voit toute équipe sur OpenDashboard)'}" onclick="toggleCommercialAdmin(${c.id},${c.is_admin?0:1})">${c.is_admin?'👑':'👤'}</button>
         <button class="btn-icon" title="Renvoyer l'email d'invitation (définir mot de passe)" onclick="resendInvite(${c.id},'${c.nom.replace(/'/g,"\\'")}')">✉️</button>
         <button class="btn-icon" title="Réinitialiser le mot de passe manuellement" onclick="resetCommercialPassword(${c.id})">🔑</button>
         <button class="btn-icon" title="Supprimer" onclick="deleteCommercial(${c.id},'${c.nom.replace(/'/g,"\\'")}')">🗑️</button>
