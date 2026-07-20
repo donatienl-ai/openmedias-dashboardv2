@@ -20,6 +20,12 @@ services:
       mountPath: /var/data
       sizeGB: 1
     envVars:
+      # Pin explicite de la version Node — better-sqlite3 (module natif compilé
+      # à l'install) casse sur les Node trop récents (ex: Node 26, V8/ABI trop
+      # différent). 20.x est la version déjà utilisée avec succès par le
+      # planning avant la fusion — restons dessus.
+      - key: NODE_VERSION
+        value: 20.18.1
       # --- OpenDashboard ---
       - key: DASHBOARD_PASSWORD
         sync: false

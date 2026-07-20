@@ -944,8 +944,10 @@ function envoyerInvitation(req, user) {
   const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   db.prepare('UPDATE commercial_users SET reset_token=?, reset_token_expires=? WHERE id=?').run(token, expires, user.id);
+  // Depuis la fusion, le planning est servi sous /planning (plus à la racine
+  // du domaine) — le lien d'invitation doit pointer vers /planning/?invite=...
   const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
-  const lien = `${baseUrl}/?invite=${token}`;
+  const lien = `${baseUrl}/planning/?invite=${token}`;
   const prenom = user.nom.split(' ')[0];
   const html = `
   <div style="background:#f3f4f6;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">

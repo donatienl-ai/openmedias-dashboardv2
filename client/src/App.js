@@ -1462,7 +1462,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <div className="topbar-divider" />
           <div className="status-cluster">
             <button className="theme-btn" onClick={() => { window.location.href = '/planning'; }} title="Planning de diffusion + BDC">
-              📅 Planning
+              📅
             </button>
             <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
               📺

@@ -80,9 +80,10 @@ Un service existant créé avant la fusion n'a ni disque ni les nouvelles variab
 
 1. Onglet **Disks** du service → *Add Disk* → nom `planning-db`, mount path `/var/data`, 1 Go.
 2. Onglet **Environment** → ajoute toutes les nouvelles variables listées dans `.env.example` sous "OPENPLANNING + OPENBDC" (`PIN_EDIT`, `PIN_COM`, `PIN_EVA`, `PIN_FLAVIE`, `PIN_CLEVEL`, `EMAIL_EVA`, `EMAIL_FLAVIE`, `EMAIL_CLEVEL`, `EMAIL_ADMIN`, `SF_WEBHOOK_SECRET`, `DB_PATH=/var/data/planning.db`) — reprends les mêmes valeurs que sur le service `planning-diffusion` actuel.
-3. Si le plan actuel est **Free**, passe sur un plan payant (nécessaire pour le disque, et probablement pour la RAM).
-4. Redeploy (Manual Deploy → Deploy latest commit) une fois le disque et les variables en place.
-5. Surveille les logs après le premier `POST /api/bdc/generate` ou `/planning` : c'est le moment où Puppeteer/Chromium consomment le plus de mémoire.
+3. **Ajoute aussi `NODE_VERSION=20.18.1`** (onglet Environment). Sans ça, Render utilise sa version Node par défaut (très récente) sur laquelle `better-sqlite3` ne compile pas (erreur `npm error ... class CS has no member named ...` au build). Le `engines.node` du `package.json` pointe déjà vers `20.x`, mais si ton service existant ignore ce champ, la variable d'env force la bonne version.
+4. Si le plan actuel est **Free**, passe sur un plan payant (nécessaire pour le disque, et probablement pour la RAM).
+5. Redeploy (Manual Deploy → Deploy latest commit) une fois le disque et les variables en place.
+6. Surveille les logs après le premier `POST /api/bdc/generate` ou `/planning` : c'est le moment où Puppeteer/Chromium consomment le plus de mémoire.
 
 ### Nouveau service (via Blueprint)
 
