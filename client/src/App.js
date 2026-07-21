@@ -1843,7 +1843,34 @@ export default function App() {
           return;
         }
         setPassword(cred);
+        return;
       } catch { /* session pré-fusion invalide, ignorée */ }
+    }
+    // Pas de session dans cet onglet (sessionStorage est propre à chaque onglet) :
+    // si un commercialId existe déjà en localStorage (ouvert depuis le planning,
+    // ou un autre onglet du dashboard), on retente une connexion silencieuse via
+    // /api/auth/me au lieu d'afficher l'écran de connexion — c'est tout l'intérêt
+    // du portail unique (pas de re-login en changeant d'onglet/de page).
+    const storedId = localStorage.getItem('commercialId');
+    if (storedId) {
+      fetch('api/auth/me', { headers: { 'x-commercial-id': storedId } })
+        .then((r) => { if (!r.ok) throw new Error('session invalide'); return r.json(); })
+        .then((d) => {
+          const cred = {
+            mode: 'commercial', commercialId: d.commercial_id, nom: d.nom,
+            isAdmin: !!d.isAdmin, role: d.accountRole, teamId: d.teamId,
+          };
+          if (['edito', 'communication'].includes(cred.role)) {
+            window.location.href = '/planning';
+            return;
+          }
+          sessionStorage.setItem('om_cred', JSON.stringify(cred));
+          setPassword(cred);
+        })
+        .catch(() => {
+          // Compte supprimé/désactivé depuis : on nettoie pour retomber sur l'écran de connexion.
+          localStorage.removeItem('commercialId'); localStorage.removeItem('commercialNom');
+        });
     }
   }, []);
 

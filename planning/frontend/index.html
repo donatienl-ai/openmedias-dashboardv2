@@ -103,6 +103,7 @@ header {
 .role-badge.edit { background: var(--gold-dim); color: var(--gold); }
 .role-badge.sales { background: var(--accent-dim); color: var(--accent); }
 .role-badge.com { background: var(--green-dim); color: var(--green); }
+.role-badge.admin { background: rgba(139,92,246,0.16); color: #8b5cf6; }
 .header-nav { display: inline-flex; align-items: center; gap: 2px; background: var(--surface2); border: 1px solid var(--border); border-radius: 13px; padding: 4px; }
 .nav-btn { background: none; border: none; color: var(--text-dim); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
 .nav-btn:hover { color: var(--text); }
@@ -393,6 +394,11 @@ td { padding: 10px 14px; font-size: 13px; }
 .form-input:disabled, .form-select:disabled, .form-textarea:disabled { opacity: 0.6; cursor: not-allowed; }
 .form-textarea { min-height: 72px; resize: vertical; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+/* Un bouton posé à côté d'un champ dans une .form-row hérite sinon du stretch
+   par défaut de la grille et s'étire sur toute la largeur de sa colonne (ex:
+   "Enregistrer"/"Importer"/"+ Ajouter" dans Paramètres) — on le garde à sa
+   largeur naturelle, aligné en bas comme le champ à côté. */
+.form-row > .btn-primary, .form-row > .btn-secondary { justify-self: start; align-self: end; }
 .bdc-editor { display: grid; grid-template-columns: minmax(340px, 480px) 1fr; gap: 24px; align-items: start; max-width: 1320px; }
 .bdc-form-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
 @media (max-width: 980px) { .bdc-editor { grid-template-columns: 1fr; } }
@@ -482,8 +488,8 @@ td { padding: 10px 14px; font-size: 13px; }
     <nav class="header-nav">
       <button class="nav-btn active" onclick="switchView('calendar')" id="nav-calendar">Calendrier</button>
       <button class="nav-btn" onclick="switchView('list')" id="nav-list">Liste</button>
-      <button class="nav-btn" onclick="switchView('reporting')" id="nav-reporting" style="display:none">Reporting</button>
-      <button class="nav-btn" onclick="switchView('parametres')" id="nav-parametres" style="display:none">⚙️ Paramètres</button>
+      <button class="nav-btn edit-only" onclick="switchView('reporting')" id="nav-reporting" style="display:none">Reporting</button>
+      <button class="nav-btn edit-only" onclick="switchView('parametres')" id="nav-parametres" style="display:none">⚙️ Paramètres</button>
       <button class="nav-btn" onclick="switchView('bdc')" id="nav-bdc" style="display:none">📄 BDC</button>
     </nav>
     <div class="header-right">
@@ -826,6 +832,10 @@ td { padding: 10px 14px; font-size: 13px; }
 
 <script>
 const API = 'api'; // relatif : fonctionne servi à la racine ou derrière un reverse-proxy sous /planning/
+// Icône enveloppe en SVG inline plutôt qu'en emoji (✉️ ne s'affiche pas sur
+// certaines combinaisons OS/police — ex: Chrome/Windows — et rend une case
+// vide). Un SVG s'affiche à l'identique partout.
+const ICON_MAIL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline-block"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>';
 let role=null, myName=null, isCLevel=false, isAccountAdmin=false, currentMedia='TIME', currentDate=new Date();
 let emissions=[], slotMap=[], joursBlockes=[], meta={};
 let pinBuffer='', searchQuery='', bdcFilterActive=false;
@@ -855,8 +865,11 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
   document.getElementById('app').style.display='flex';
   // Édito/communication n'ont pas accès au dashboard (leur page dédiée est le
   // planning) : inutile de leur montrer un onglet "Dashboard" qui les
-  // renverrait aussitôt ici.
-  document.getElementById('app-tab-dashboard').style.display = (role==='edit'||role==='com') ? 'none' : '';
+  // renverrait aussitôt ici. Un compte admin partage le même rôle interne
+  // "edit" qu'un édito (mêmes droits planning) mais A bien accès au dashboard,
+  // lui — donc on ne masque l'onglet que si ce n'est pas un admin.
+  const hideDashboardTab=(role==='edit'&&!isAccountAdmin)||role==='com';
+  document.getElementById('app-tab-dashboard').style.display = hideDashboardTab ? 'none' : '';
   // Réglages spécifiques au dashboard (reporting, connexions, groupements
   // d'affichage) : réservés aux comptes admin, seuls comptes autorisés côté
   // serveur sur ces routes (requireAdmin).
@@ -869,8 +882,13 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
     document.getElementById('btn-mes-creneaux').style.display='';
     document.getElementById('nav-bdc').style.display='';
   }else{
-    document.getElementById('role-badge').textContent=role==='edit'?'Édito':(role==='com'?'Communication':'Commercial');
-    document.getElementById('role-badge').className=`role-badge ${role}`;
+    // Admin et édito partagent le rôle interne "edit" (mêmes droits côté
+    // planning) mais un compte admin garde son propre badge — sinon impossible
+    // de voir en un coup d'oeil qu'on est bien connecté avec les droits admin.
+    const badgeLabel=isAccountAdmin?'Admin':(role==='edit'?'Édito':(role==='com'?'Communication':'Commercial'));
+    const badgeClass=isAccountAdmin?'admin':role;
+    document.getElementById('role-badge').textContent=badgeLabel;
+    document.getElementById('role-badge').className=`role-badge ${badgeClass}`;
     if(role==='edit')document.querySelectorAll('.edit-only').forEach(el=>el.style.display='');
   }
 }
@@ -1056,20 +1074,6 @@ async function loadData(){
   if(respFilter)url+=`&resp_edit=${encodeURIComponent(respFilter)}`;
   [emissions,slotMap]=await Promise.all([fetch(url,{headers:{role}}).then(r=>r.json()),fetch(`${API}/slots?media=${encodeURIComponent(currentMedia)}&mois=${m}&annee=${y}`).then(r=>r.json())]);
 }
-
-// ── RACCOURCI CACHÉ : Ctrl/Cmd + Alt + R révèle Reporting + Paramètres (édito uniquement) ──
-let reportingUnlocked = false;
-document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.altKey && e.code === 'KeyR') {
-    if (role !== 'edit') return;
-    e.preventDefault();
-    reportingUnlocked = !reportingUnlocked;
-    document.getElementById('nav-reporting').style.display = reportingUnlocked ? '' : 'none';
-    document.getElementById('nav-parametres').style.display = reportingUnlocked ? '' : 'none';
-    if (reportingUnlocked) switchView('reporting');
-    else if (document.getElementById('view-reporting').classList.contains('active') || document.getElementById('view-parametres').classList.contains('active')) switchView('calendar');
-  }
-});
 
 // ── NAV ─────────────────────────────────────────────────────────────────────
 function switchView(v){
@@ -1322,9 +1326,11 @@ async function fetchSemaineData(){
     return true;
   }catch(e){return false;}
 }
+// Ne s'ouvre plus tout seul au chargement (c'était une interruption systématique
+// à chaque visite) — on se contente de préparer le badge du bouton flottant
+// (semaine-fab), que l'utilisateur ouvre lui-même quand il le souhaite.
 async function showSemaineBanner(){
-  const has=await fetchSemaineData();
-  if(has)openSemaineModal();
+  await fetchSemaineData();
 }
 function openSemaineModal(){
   if(!semaineData||!semaineData.emissions.length)return;
@@ -2783,7 +2789,7 @@ function createCommercialFromSf(sfId,nom,sfEmail,uid){
     <div class="form-group" style="margin-top:10px"><label class="form-label">Email de connexion</label><input class="form-input" type="email" id="newacc-email" value="${sfEmail||''}"></div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label><select class="form-select" id="newacc-role">${roleOptionsHtml('commercial')}</select></div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Équipe de vente (commercial/manager)</label><select class="form-select" id="newacc-team">${salesTeamOptionsHtml(null)}</select></div>
-    <div class="info-banner neutral" style="margin-top:10px">✉️ Un email va être envoyé à cette adresse pour que ${nom.split(' ')[0]} définisse lui/elle-même son mot de passe.</div>
+    <div class="info-banner neutral" style="margin-top:10px">${ICON_MAIL} Un email va être envoyé à cette adresse pour que ${nom.split(' ')[0]} définisse lui/elle-même son mot de passe.</div>
   `;
   document.getElementById('modal-footer').innerHTML=`
     <button class="btn-secondary" onclick="closeModal()">Annuler</button>
@@ -2814,7 +2820,7 @@ function openManualAccountModal(){
     <div class="form-group" style="margin-top:10px"><label class="form-label">Email de connexion</label><input class="form-input" type="email" id="newacc-email" placeholder="prenom.nom@openmedias.fr"></div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label><select class="form-select" id="newacc-role">${roleOptionsHtml('edito')}</select></div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Équipe de vente (commercial/manager)</label><select class="form-select" id="newacc-team">${salesTeamOptionsHtml(null)}</select></div>
-    <div class="info-banner neutral" style="margin-top:10px">✉️ Un email va être envoyé à cette adresse pour que la personne définisse elle-même son mot de passe.</div>
+    <div class="info-banner neutral" style="margin-top:10px">${ICON_MAIL} Un email va être envoyé à cette adresse pour que la personne définisse elle-même son mot de passe.</div>
   `;
   document.getElementById('modal-footer').innerHTML=`
     <button class="btn-secondary" onclick="closeModal()">Annuler</button>
@@ -2848,7 +2854,7 @@ function renderCommerciauxList(){
           ${equipesCache.map(e=>`<option value="${e.id}" ${c.equipe_edito_id===e.id?'selected':''}>${e.nom}</option>`).join('')}
         </select>
         <button class="btn-icon" title="${c.actif?'Désactiver':'Réactiver'}" onclick="toggleCommercialActif(${c.id},${c.actif?0:1})">${c.actif?'🟢':'⚪'}</button>
-        <button class="btn-icon" title="Renvoyer l'email d'invitation (définir mot de passe)" onclick="resendInvite(${c.id},'${c.nom.replace(/'/g,"\\'")}')">✉️</button>
+        <button class="btn-icon" title="Renvoyer l'email d'invitation (définir mot de passe)" onclick="resendInvite(${c.id},'${c.nom.replace(/'/g,"\\'")}')">${ICON_MAIL}</button>
         <button class="btn-icon" title="Réinitialiser le mot de passe manuellement" onclick="resetCommercialPassword(${c.id})">🔑</button>
         <button class="btn-icon" title="Supprimer" onclick="deleteCommercial(${c.id},'${c.nom.replace(/'/g,"\\'")}')">🗑️</button>
       </div>
