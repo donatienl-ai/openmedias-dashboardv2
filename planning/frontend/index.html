@@ -147,6 +147,13 @@ header {
 .filter-chip:hover { border-color: var(--bdc); color: var(--bdc-text); }
 .filter-chip.active { background: var(--bdc-bg); border-color: var(--bdc); color: var(--bdc-text); }
 .filter-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bdc); }
+/* Burger mobile (header) — caché par défaut, activé uniquement dans le bloc
+   RESPONSIVE MOBILE en fin de feuille de style (voir commentaire là-bas pour
+   l'explication de l'ordre des règles). .toolbar-extra en display:contents
+   sur desktop : ses enfants se comportent comme s'ils étaient posés
+   directement dans .toolbar, aucun changement visuel. */
+.planning-burger-btn { display: none; }
+.toolbar-extra { display: contents; }
 #retard-badge { background: var(--red-dim); border-color: rgba(220,38,38,0.3); color: var(--red); font-weight: 700; }
 #retard-badge:hover { background: rgba(220,38,38,0.15); }
 
@@ -492,6 +499,41 @@ td { padding: 10px 14px; font-size: 13px; }
   input, select, textarea { font-size: 16px !important; }
   .list-filter-input { font-size: 16px !important; }
   .param-row select.form-select { font-size: 16px !important; }
+
+  /* Menu burger : header-right (mois + actions) et toolbar-extra (filtres/
+     badges secondaires) sont cachés par défaut et regroupés dans un seul
+     panneau déroulant ouvert via le bouton ☰ — ne restent visibles en
+     permanence que la navigation (app-switch/header-nav) et la recherche. */
+  .planning-burger-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; margin-left: 8px; flex-shrink: 0;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 9px;
+    color: var(--text); font-size: 16px; cursor: pointer; order: 2;
+  }
+  .header-right { display: none; }
+  .toolbar-extra { display: none; }
+  body.planning-menu-open .header-right {
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+    width: 100%; order: 5;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px; margin-top: 4px;
+  }
+  body.planning-menu-open .header-right .month-nav { justify-content: center; }
+  body.planning-menu-open .toolbar-extra {
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%;
+  }
+  body.planning-menu-open .toolbar-extra .form-select { width: 100%; }
+
+  /* Paramètres — lignes "Comptes/Équipes/Salesforce" (.param-row) : jusqu'à
+     3 selects + 4 boutons icône posés côte à côte dans .pr-actions, qui ne
+     passait jamais à la ligne (pas de flex-wrap) — débordait hors écran sur
+     mobile, surtout depuis que les selects sont passés à 16px (fix anti-zoom
+     ci-dessus). On empile nom/email/actions comme une carte, et les actions
+     elles-mêmes passent à la ligne au besoin. */
+  .param-row { flex-direction: column; align-items: stretch; }
+  .param-row .pr-name, .param-row .pr-email { min-width: 0; width: 100%; }
+  .param-row .pr-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  .param-row .pr-actions select.form-select { flex: 1 1 110px; }
 }
 </style>
 </head>
@@ -570,7 +612,12 @@ td { padding: 10px 14px; font-size: 13px; }
       <button class="nav-btn admin-only" onclick="switchView('reporting')" id="nav-reporting" style="display:none">Reporting</button>
       <button class="nav-btn" onclick="switchView('bdc')" id="nav-bdc" style="display:none">📄 BDC</button>
     </nav>
-    <div class="header-right">
+    <!-- Menu burger : sur mobile, tout ce qui suit (navigation mois, actualiser,
+         thème, déconnexion, +Ajouter, BDC...) est caché par défaut derrière ce
+         bouton pour alléger le header — sur desktop il reste invisible et sans
+         effet (voir bloc RESPONSIVE MOBILE en fin de feuille de style). -->
+    <button class="planning-burger-btn" id="planning-burger-btn" onclick="togglePlanningMenu()" aria-label="Menu" title="Menu">☰</button>
+    <div class="header-right" id="header-right">
       <div class="month-nav">
         <button onclick="changeMonth(-1)">‹</button>
         <div class="month-label" id="month-label"></div>
@@ -591,24 +638,29 @@ td { padding: 10px 14px; font-size: 13px; }
       <input class="search-input" type="text" placeholder="Rechercher entreprise, secteur…" oninput="onSearchInput(this.value)" onkeydown="onSearchKey(event)" id="search-input" autocomplete="off">
       <div id="search-dropdown" style="display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);z-index:100;overflow:hidden;max-height:320px;overflow-y:auto"></div>
     </div>
-    <div class="filter-chip" id="bdc-filter" onclick="toggleBdcFilter()">
-      <span class="dot"></span> BDC en attente
-    </div>
-    <select class="form-select edit-only" id="resp-filter" style="display:none;width:auto;font-size:12px;padding:5px 10px" onchange="onRespFilterChange()">
-      <option value="">👤 Tout le monde</option>
-      <option value="_none">Non assignées</option>
-      <option value="Lola">Lola</option>
-      <option value="Eva">Eva</option>
-      <option value="Flavie">Flavie</option>
-    </select>
-    <div class="filter-chip edit-only" id="retard-badge" style="display:none" onclick="showRetardList()">
-      ⚠️ <span id="retard-count">0</span> à assigner (J-5)
-    </div>
-    <div class="filter-chip" id="perso-aprog-badge" style="display:none" onclick="openMyAProgrammerModal()">
-      📌 <span id="perso-aprog-count">0</span> à programmer
-    </div>
-    <div class="filter-chip" id="clevel-aprog-badge" style="display:none" onclick="openCLevelAProgrammerModal()">
-      📌 <span id="clevel-aprog-count">0</span> à programmer (équipe)
+    <!-- Filtres/badges secondaires : rejoignent le même menu burger que le
+         header-right sur mobile (voir .toolbar-extra dans le bloc RESPONSIVE
+         MOBILE) — sur desktop rien ne change (display:contents). -->
+    <div class="toolbar-extra" id="toolbar-extra">
+      <div class="filter-chip" id="bdc-filter" onclick="toggleBdcFilter()">
+        <span class="dot"></span> BDC en attente
+      </div>
+      <select class="form-select edit-only" id="resp-filter" style="display:none;width:auto;font-size:12px;padding:5px 10px" onchange="onRespFilterChange()">
+        <option value="">👤 Tout le monde</option>
+        <option value="_none">Non assignées</option>
+        <option value="Lola">Lola</option>
+        <option value="Eva">Eva</option>
+        <option value="Flavie">Flavie</option>
+      </select>
+      <div class="filter-chip edit-only" id="retard-badge" style="display:none" onclick="showRetardList()">
+        ⚠️ <span id="retard-count">0</span> à assigner (J-5)
+      </div>
+      <div class="filter-chip" id="perso-aprog-badge" style="display:none" onclick="openMyAProgrammerModal()">
+        📌 <span id="perso-aprog-count">0</span> à programmer
+      </div>
+      <div class="filter-chip" id="clevel-aprog-badge" style="display:none" onclick="openCLevelAProgrammerModal()">
+        📌 <span id="clevel-aprog-count">0</span> à programmer (équipe)
+      </div>
     </div>
   </div>
 
@@ -1190,6 +1242,21 @@ function switchView(v){
   if(v==='reporting')loadReporting();
   if(v==='parametres')loadParametres();
   if(v==='bdc')bdcOnShow();
+  closePlanningMenu();
+}
+// Menu burger mobile (voir bloc RESPONSIVE MOBILE en fin de <style>) : ouvre/
+// ferme le panneau qui regroupe navigation mois + actions (header-right) et
+// les filtres/badges secondaires (toolbar-extra). Sans effet sur desktop.
+function togglePlanningMenu(){
+  document.body.classList.toggle('planning-menu-open');
+  const open=document.body.classList.contains('planning-menu-open');
+  const btn=document.getElementById('planning-burger-btn');
+  if(btn)btn.textContent=open?'✕':'☰';
+}
+function closePlanningMenu(){
+  document.body.classList.remove('planning-menu-open');
+  const btn=document.getElementById('planning-burger-btn');
+  if(btn)btn.textContent='☰';
 }
 async function selectMedia(m){
   currentMedia=m;
