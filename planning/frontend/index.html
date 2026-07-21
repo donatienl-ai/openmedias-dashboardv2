@@ -188,6 +188,42 @@ header {
   .header-right { flex-wrap: wrap; gap: 6px; }
   .month-label { min-width: 90px; font-size: 12px; }
   .report-grid { grid-template-columns: 1fr 1fr; }
+
+  /* Bandeau médias (TIME/BFMTV/...) : une seule ligne qui scrolle plutôt que
+     de retourner à la ligne sur 2-3 rangées et bouffer l'écran en hauteur. */
+  .media-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+  .media-tab { flex: 0 0 auto; }
+
+  /* Calendrier : les colonnes Lundi/Mercredi/Vendredi gardent une largeur
+     lisible (200px) au lieu de s'écraser à ~110px — on scrolle latéralement
+     pour voir les 3 jours plutôt que tout entasser. La colonne "S1/S2..."
+     reste épinglée à gauche pour toujours savoir sur quelle semaine on est. */
+  #calendar-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .calendar-grid { grid-template-columns: 52px repeat(3, 200px); width: max-content; }
+  .cal-week-label { position: sticky; left: 0; z-index: 2; }
+
+  /* Liste : le tableau devient une pile de cartes (une diffusion = une carte)
+     plutôt qu'un tableau à 10 colonnes illisible sans scroll latéral. Les
+     en-têtes de colonnes/filtres disparaissent (la recherche de la barre du
+     haut reste disponible) ; chaque cellule affiche son étiquette via
+     data-label (voir renderListRows). */
+  #view-list table, #view-list tbody, #view-list tr, #view-list td { display: block; width: 100%; }
+  #view-list thead { display: none; }
+  #view-list tbody tr {
+    margin-bottom: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px 12px; background: var(--surface); box-shadow: var(--shadow);
+  }
+  #view-list tbody td { border: none; padding: 3px 0; max-width: none !important; white-space: normal !important; }
+  #view-list tbody td[data-label]::before {
+    content: attr(data-label); display: inline-block; min-width: 100px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    color: var(--text-muted); vertical-align: top;
+  }
+
+  /* Formulaires (modale émission, BDC, comptes...) : un champ par ligne au
+     lieu de 2 champs côte à côte qui deviennent trop étroits pour être saisis
+     confortablement au clavier tactile. */
+  .form-row { grid-template-columns: 1fr; }
 }
 
 .side-panels-wrap {
@@ -1798,16 +1834,16 @@ function renderListRows(all){
     const isBdc=e.statut==='bdc_attente';
     const isDecale=e.date_diffusion!==e.date_diffusion_originale;
     return `<tr ${role==='com'?'style="cursor:default"':`onclick="openEmission(${e.id})"`} class="${isBdc?'td-bdc':''}">
-      <td><strong>${e.entreprise}</strong>${isDecale?' <span style="color:var(--bdc-text)">⟳</span>':''}</td>
-      <td style="color:var(--text-dim)">${e.media}${e.sous_media?` <span style="color:var(--text-muted);font-size:11px">· ${e.sous_media}</span>`:''}</td>
-      <td>${formatDateFR(e.date_diffusion)}</td>
-      <td>${e.format?`<span class="fmt-strip" style="background:${fmtColor(e.format)}"></span>${e.format}`:'—'}</td>
-      <td style="color:var(--text-dim);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.secteur||'—'}</td>
-      <td style="color:var(--text-dim)">${e.commercial&&e.commercial!=='/'?e.commercial:'—'}</td>
-      <td>${e.resp_edit||'<span style="color:var(--bdc-text);font-weight:500">À assigner</span>'}</td>
-      ${isAccountAdmin?`<td>${e.montant?'<strong style="color:var(--accent)">'+fmtCA(e.montant)+'</strong>':'—'}</td>`:''}
-      ${isAccountAdmin?`<td>${e.upsell?'<strong style="color:var(--gold)">'+fmtCA(e.upsell)+'</strong>':'—'}</td>`:''}
-      <td>${statutBadge(e.statut)}</td>
+      <td data-label="Entreprise"><strong>${e.entreprise}</strong>${isDecale?' <span style="color:var(--bdc-text)">⟳</span>':''}</td>
+      <td data-label="Média" style="color:var(--text-dim)">${e.media}${e.sous_media?` <span style="color:var(--text-muted);font-size:11px">· ${e.sous_media}</span>`:''}</td>
+      <td data-label="Date">${formatDateFR(e.date_diffusion)}</td>
+      <td data-label="Format">${e.format?`<span class="fmt-strip" style="background:${fmtColor(e.format)}"></span>${e.format}`:'—'}</td>
+      <td data-label="Secteur" style="color:var(--text-dim);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.secteur||'—'}</td>
+      <td data-label="Commercial" style="color:var(--text-dim)">${e.commercial&&e.commercial!=='/'?e.commercial:'—'}</td>
+      <td data-label="Resp. édito">${e.resp_edit||'<span style="color:var(--bdc-text);font-weight:500">À assigner</span>'}</td>
+      ${isAccountAdmin?`<td data-label="CA diffusion">${e.montant?'<strong style="color:var(--accent)">'+fmtCA(e.montant)+'</strong>':'—'}</td>`:''}
+      ${isAccountAdmin?`<td data-label="CA upsell">${e.upsell?'<strong style="color:var(--gold)">'+fmtCA(e.upsell)+'</strong>':'—'}</td>`:''}
+      <td data-label="Statut">${statutBadge(e.statut)}</td>
     </tr>`;
   }).join('');
 }

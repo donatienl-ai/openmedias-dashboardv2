@@ -292,6 +292,12 @@ body {
   .grid { grid-template-columns: repeat(2, 1fr); }
   .col-2, .col-3, .col-4, .col-5, .col-6, .col-7, .col-8, .col-12 { grid-column: span 2; }
   .shell { padding: 16px; }
+  /* Filtres (Rôle/Équipes/Sales/Période) : passent à la ligne dans leur pilule
+     plutôt que de déborder de l'écran, et leurs menus déroulants restent dans
+     la largeur de l'écran (right:0 les faisait sinon parfois dépasser). */
+  .controls-group { flex-wrap: wrap; width: 100%; justify-content: flex-start; }
+  .controls-group .period-btn { flex: 1 1 auto; justify-content: center; }
+  .period-menu { left: 0; right: auto; min-width: 0; width: calc(100vw - 64px); max-width: 300px; }
 }
 
 /* ===== TUILES CLIQUABLES ===== */
