@@ -1145,6 +1145,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [bdcView, setBdcView] = useState('pending'); // 'sent' | 'signed' | 'pending'
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTv, setShowTv] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // menu ☰ mobile (filtres/actions du header)
   const [nlData, setNlData] = useState(null);
   const [nlLoading, setNlLoading] = useState(false);
   const [nlModal, setNlModal] = useState(null); // 'campaigns' | null
@@ -1456,77 +1457,91 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
         </div>
         <div className="topbar-right">
-          <div className="controls-group">
-            {showCrossTeamFilters && (
-              <FilterDropdown
-                icon="👔"
-                label={roleLabel || 'Rôle'}
-                allLabel="Tous les rôles"
-                items={[
-                  { value: 'managers', label: 'Managers' },
-                  { value: 'sales', label: 'Sales' },
-                ]}
-                current={roleFilter}
-                onPick={(v) => { setRoleFilter(v); setSaleFilter(null); }}
+          {/* Menu burger : sur mobile, tous les filtres/actions ci-dessous sont
+              cachés par défaut derrière ce bouton (voir styles.css) pour
+              alléger le header — sur desktop il reste invisible et n'a aucun
+              effet sur la mise en page (.topbar-controls-panel en display:contents). */}
+          <button
+            className="burger-btn"
+            onClick={() => setMobileMenuOpen((o) => !o)}
+            aria-label={mobileMenuOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
+            aria-expanded={mobileMenuOpen}
+          >
+            {mobileMenuOpen ? '✕' : '☰'}
+          </button>
+          <div className={`topbar-controls-panel${mobileMenuOpen ? ' open' : ''}`}>
+            <div className="controls-group">
+              {showCrossTeamFilters && (
+                <FilterDropdown
+                  icon="👔"
+                  label={roleLabel || 'Rôle'}
+                  allLabel="Tous les rôles"
+                  items={[
+                    { value: 'managers', label: 'Managers' },
+                    { value: 'sales', label: 'Sales' },
+                  ]}
+                  current={roleFilter}
+                  onPick={(v) => { setRoleFilter(v); setSaleFilter(null); }}
+                />
+              )}
+              {showCrossTeamFilters && (
+                <FilterDropdown
+                  icon="👥"
+                  label={teamFilter ? (teams.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
+                  allLabel="Toutes les équipes"
+                  items={teams.map((t) => ({ value: t.id, label: t.label }))}
+                  current={teamFilter}
+                  onPick={(v) => { setTeamFilter(v); setSaleFilter(null); }}
+                />
+              )}
+              {/* Un commercial ne voit déjà que ses propres chiffres (scopés côté
+                  serveur) — un filtre "Sales" n'aurait ici aucun sens. */}
+              {!isRestrictedCommercial && (
+                <FilterDropdown
+                  icon="👤"
+                  label={saleFilter || 'Sales'}
+                  allLabel="Tous les sales"
+                  items={(isRestrictedManager
+                    ? myTeamMembers
+                    : teamFilter
+                      ? (teams.find((t) => t.id === teamFilter)?.members || [])
+                      : ALL_SALES
+                  ).filter((s) => !hidden.has(s) && roleOk(s)).map((s) => ({ value: s, label: s }))}
+                  current={saleFilter}
+                  onPick={(v) => setSaleFilter(v)}
+                />
+              )}
+              <PeriodSelector
+                current={d.range?.preset || 'today'}
+                label={rangeLabel}
+                onApply={(p) => setPeriod(p)}
               />
-            )}
-            {showCrossTeamFilters && (
-              <FilterDropdown
-                icon="👥"
-                label={teamFilter ? (teams.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
-                allLabel="Toutes les équipes"
-                items={teams.map((t) => ({ value: t.id, label: t.label }))}
-                current={teamFilter}
-                onPick={(v) => { setTeamFilter(v); setSaleFilter(null); }}
-              />
-            )}
-            {/* Un commercial ne voit déjà que ses propres chiffres (scopés côté
-                serveur) — un filtre "Sales" n'aurait ici aucun sens. */}
-            {!isRestrictedCommercial && (
-              <FilterDropdown
-                icon="👤"
-                label={saleFilter || 'Sales'}
-                allLabel="Tous les sales"
-                items={(isRestrictedManager
-                  ? myTeamMembers
-                  : teamFilter
-                    ? (teams.find((t) => t.id === teamFilter)?.members || [])
-                    : ALL_SALES
-                ).filter((s) => !hidden.has(s) && roleOk(s)).map((s) => ({ value: s, label: s }))}
-                current={saleFilter}
-                onPick={(v) => setSaleFilter(v)}
-              />
-            )}
-            <PeriodSelector
-              current={d.range?.preset || 'today'}
-              label={rangeLabel}
-              onApply={(p) => setPeriod(p)}
-            />
-          </div>
-          <div className="topbar-divider" />
-          <div className="status-cluster">
-            <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
-              📺
-            </button>
-            {isAdmin && (
-              <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
-                ⚙️
+            </div>
+            <div className="topbar-divider" />
+            <div className="status-cluster">
+              <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
+                📺
               </button>
-            )}
-            {isAdmin && (
-              <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
-                ✉️
+              {isAdmin && (
+                <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
+                  ⚙️
+                </button>
+              )}
+              {isAdmin && (
+                <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
+                  ✉️
+                </button>
+              )}
+              <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
+                {theme === 'dark' ? '☀️' : '🌙'}
               </button>
-            )}
-            <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
-            {emailMsg && <span className="maj">{emailMsg}</span>}
-            {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
-            <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
-              <span className="refresh-icon">↻</span>
-              {loading ? 'Maj…' : 'Rafraîchir'}
-            </button>
+              {emailMsg && <span className="maj">{emailMsg}</span>}
+              {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
+              <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
+                <span className="refresh-icon">↻</span>
+                {loading ? 'Maj…' : 'Rafraîchir'}
+              </button>
+            </div>
           </div>
         </div>
       </div>

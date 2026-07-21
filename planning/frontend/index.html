@@ -482,6 +482,16 @@ td { padding: 10px 14px; font-size: 13px; }
      lieu de 2 champs côte à côte qui deviennent trop étroits pour être saisis
      confortablement au clavier tactile. */
   .form-row { grid-template-columns: 1fr; }
+
+  /* Zoom auto au focus (iOS ET Android) : les navigateurs mobiles zooment
+     automatiquement sur un champ dont le texte fait moins de 16px, puis ne
+     dézooment pas forcément après — d'où l'impression que "la page n'est
+     plus fixe". Tous les champs (form-input/select/textarea, filtres de la
+     Liste, selects de Paramètres...) étaient entre 11px et 13px. En les
+     remontant à 16px sur mobile, le zoom automatique ne se déclenche plus. */
+  input, select, textarea { font-size: 16px !important; }
+  .list-filter-input { font-size: 16px !important; }
+  .param-row select.form-select { font-size: 16px !important; }
 }
 </style>
 </head>

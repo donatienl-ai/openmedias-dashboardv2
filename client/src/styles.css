@@ -1145,3 +1145,48 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 
 [data-theme="light"] .nl-rate-lo { color: #DC2626; }
 [data-theme="light"] .nl-rdv-card:hover { box-shadow: 0 6px 16px rgba(22,22,60,0.10); }
+
+/* ── MENU BURGER MOBILE ──────────────────────────────────────────────────
+   Placé en tout dernier dans la feuille : mêmes raisons que côté planning
+   (voir commentaire équivalent dans planning/frontend/index.html) — à
+   spécificité égale, la règle déclarée en dernier gagne, donc ce bloc doit
+   toujours rester après tout le reste pour ne pas se faire silencieusement
+   écraser par une règle "de base" ajoutée plus haut par la suite.
+   Sur desktop .topbar-controls-panel est en display:contents : ses enfants
+   (controls-group, divider, status-cluster) se comportent exactement comme
+   avant, comme s'ils étaient posés directement dans .topbar-right. Le bouton
+   burger reste caché. Sur mobile, le panneau devient un menu déroulant caché
+   par défaut, et le burger devient visible pour l'ouvrir/fermer. */
+.burger-btn { display: none; }
+.topbar-controls-panel { display: contents; }
+
+@media (max-width: 640px) {
+  .topbar-right { position: relative; width: 100%; justify-content: flex-end; }
+  .burger-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; flex-shrink: 0;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    color: var(--text); font-size: 17px; cursor: pointer;
+  }
+  .burger-btn:active { transform: scale(0.95); }
+  .topbar-controls-panel { display: none; }
+  .topbar-controls-panel.open {
+    display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+    position: absolute; top: calc(100% + 8px); right: 0; left: 0;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px; z-index: 60; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  }
+  .topbar-controls-panel.open .controls-group {
+    flex-direction: column; align-items: stretch; width: 100%; background: none; border: none; padding: 0; gap: 8px;
+  }
+  .topbar-controls-panel.open .controls-group .period-btn { justify-content: flex-start; width: 100%; }
+  .topbar-controls-panel.open .topbar-divider { display: none; }
+  .topbar-controls-panel.open .status-cluster { flex-wrap: wrap; width: 100%; justify-content: flex-start; }
+  .topbar-controls-panel.open .refresh-btn { width: 100%; justify-content: center; }
+  .topbar-controls-panel.open .period-menu { position: static; width: 100%; margin-top: 6px; box-shadow: none; }
+
+  /* Zoom auto au focus (iOS ET Android) : tout champ texte sous 16px déclenche
+     un zoom automatique au tap, qui laisse ensuite la page décalée/zoomée.
+     Login, recherche, dates personnalisées... étaient tous entre 13 et 15px. */
+  input, select, textarea { font-size: 16px !important; }
+}
