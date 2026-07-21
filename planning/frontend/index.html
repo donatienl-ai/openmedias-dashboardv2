@@ -489,7 +489,8 @@ td { padding: 10px 14px; font-size: 13px; }
          qu'il s'agit du niveau "application", au-dessus des sous-onglets. -->
     <div class="app-switch">
       <button class="app-switch-btn" onclick="window.location.href='/'" id="app-tab-dashboard">📊 Dashboard</button>
-      <button class="app-switch-btn active">📅 Planning</button>
+      <button class="app-switch-btn active" onclick="switchView('calendar')" id="app-tab-planning">📅 Planning</button>
+      <button class="app-switch-btn admin-only" onclick="switchView('parametres')" id="app-tab-parametres" style="display:none">⚙️ Paramètres</button>
     </div>
     <div class="header-sep"></div>
     <div class="header-brand">
@@ -504,8 +505,7 @@ td { padding: 10px 14px; font-size: 13px; }
     <nav class="header-nav">
       <button class="nav-btn active" onclick="switchView('calendar')" id="nav-calendar">Calendrier</button>
       <button class="nav-btn" onclick="switchView('list')" id="nav-list">Liste</button>
-      <button class="nav-btn edit-only" onclick="switchView('reporting')" id="nav-reporting" style="display:none">Reporting</button>
-      <button class="nav-btn edit-only" onclick="switchView('parametres')" id="nav-parametres" style="display:none">⚙️ Paramètres</button>
+      <button class="nav-btn admin-only" onclick="switchView('reporting')" id="nav-reporting" style="display:none">Reporting</button>
       <button class="nav-btn" onclick="switchView('bdc')" id="nav-bdc" style="display:none">📄 BDC</button>
     </nav>
     <div class="header-right">
@@ -572,8 +572,8 @@ td { padding: 10px 14px; font-size: 13px; }
           <th class="sortable-th" onclick="toggleSort('secteur')">Secteur<span class="sort-arrow" id="sa-secteur"></span></th>
           <th class="sortable-th" onclick="toggleSort('commercial')">Commercial<span class="sort-arrow" id="sa-commercial"></span></th>
           <th class="sortable-th" onclick="toggleSort('resp')">Resp. édito<span class="sort-arrow" id="sa-resp"></span></th>
-          <th class="sortable-th edit-only" style="display:none" id="th-ca" onclick="toggleSort('ca')">CA diffusion<span class="sort-arrow" id="sa-ca"></span></th>
-          <th class="sortable-th edit-only" style="display:none" id="th-upsell" onclick="toggleSort('upsell')">CA upsell<span class="sort-arrow" id="sa-upsell"></span></th>
+          <th class="sortable-th admin-only" style="display:none" id="th-ca" onclick="toggleSort('ca')">CA diffusion<span class="sort-arrow" id="sa-ca"></span></th>
+          <th class="sortable-th admin-only" style="display:none" id="th-upsell" onclick="toggleSort('upsell')">CA upsell<span class="sort-arrow" id="sa-upsell"></span></th>
           <th class="sortable-th" onclick="toggleSort('statut')">Statut<span class="sort-arrow" id="sa-statut"></span></th>
         </tr>
         <tr class="list-filter-row">
@@ -584,8 +584,8 @@ td { padding: 10px 14px; font-size: 13px; }
           <th><input class="form-input list-filter-input" id="lf-secteur" placeholder="Filtrer…" oninput="applyListFilters()"></th>
           <th><input class="form-input list-filter-input" id="lf-commercial" placeholder="Filtrer…" oninput="applyListFilters()"></th>
           <th><select class="form-select list-filter-input" id="lf-resp" onchange="applyListFilters()"><option value="">Tous</option><option value="_none">Non assignées</option></select></th>
-          <th class="edit-only" style="display:none"></th>
-          <th class="edit-only" style="display:none"></th>
+          <th class="admin-only" style="display:none"></th>
+          <th class="admin-only" style="display:none"></th>
           <th><select class="form-select list-filter-input" id="lf-statut" onchange="applyListFilters()">
             <option value="">Tous</option>
             <option value="a_assigner">À assigner</option>
@@ -906,6 +906,14 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
     document.getElementById('role-badge').textContent=badgeLabel;
     document.getElementById('role-badge').className=`role-badge ${badgeClass}`;
     if(role==='edit')document.querySelectorAll('.edit-only').forEach(el=>el.style.display='');
+    // CA/reporting/paramètres : réservés aux comptes admin, pas à l'édito
+    // (qui gère la programmation mais n'a pas à voir les chiffres commerciaux).
+    if(isAccountAdmin)document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
+  }
+  // Lien direct vers Paramètres depuis l'onglet du dashboard (/planning?view=parametres).
+  if(isAccountAdmin && new URLSearchParams(window.location.search).get('view')==='parametres'){
+    switchView('parametres');
+    window.history.replaceState({},'',window.location.pathname);
   }
 }
 // SSO depuis OpenDashboard (ou session déjà ouverte sur cette page) : si un
@@ -1110,7 +1118,12 @@ function switchView(v){
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(el=>el.classList.remove('active'));
   document.getElementById('view-'+v).classList.add('active');
-  document.getElementById('nav-'+v).classList.add('active');
+  // Paramètres n'a plus de bouton dans le sous-menu (header-nav) depuis que
+  // c'est un onglet de premier niveau à côté de Dashboard/Planning — d'où le
+  // "?." (sinon erreur, car #nav-parametres n'existe plus).
+  document.getElementById('nav-'+v)?.classList.add('active');
+  document.getElementById('app-tab-planning')?.classList.toggle('active',v!=='parametres');
+  document.getElementById('app-tab-parametres')?.classList.toggle('active',v==='parametres');
   if(v==='list')renderList();
   if(v==='reporting')loadReporting();
   if(v==='parametres')loadParametres();
@@ -1346,6 +1359,10 @@ async function showRetardList(){
 
 // ── SEMAINE POPUP ────────────────────────────────────────────────────────────
 let semaineData = null;
+// Émission actuellement ouverte dans la modale — utilisé par saveEmission()
+// pour retomber sur les valeurs montant/upsell existantes quand ces champs ne
+// sont pas rendus (compte non-admin), plutôt que les écraser à 0.
+let currentEmissionData = null;
 async function fetchSemaineData(){
   try{
     semaineData=await fetch(`${API}/reporting/semaine`).then(r=>r.json());
@@ -1761,8 +1778,8 @@ function applyListFilters(){
     <div class="stat-pill"><div class="stat-pill-val" style="color:var(--bdc-text)">${filtered.filter(e=>e.statut==='bdc_attente').length}</div><div class="stat-pill-lbl">BDC en attente</div></div>
     <div class="stat-pill"><div class="stat-pill-val" style="color:var(--gold)">${filtered.filter(e=>e.statut==='a_assigner').length}</div><div class="stat-pill-lbl">À assigner</div></div>
     <div class="stat-pill"><div class="stat-pill-val" style="color:var(--green)">${filtered.filter(e=>e.statut==='confirme').length}</div><div class="stat-pill-lbl">Confirmées</div></div>
-    ${caDiffusion&&role==='edit'?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--accent)">${fmtCA(caDiffusion)}</div><div class="stat-pill-lbl">CA diffusion</div></div>`:''}
-    ${caUpsell&&role==='edit'?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--gold)">${fmtCA(caUpsell)}</div><div class="stat-pill-lbl">CA upsell</div></div>`:''}
+    ${caDiffusion&&isAccountAdmin?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--accent)">${fmtCA(caDiffusion)}</div><div class="stat-pill-lbl">CA diffusion</div></div>`:''}
+    ${caUpsell&&isAccountAdmin?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--gold)">${fmtCA(caUpsell)}</div><div class="stat-pill-lbl">CA upsell</div></div>`:''}
     ${filtered.length!==listAllCache.length?`<span class="list-filter-reset" onclick="resetListFilters()">✕ Réinitialiser les filtres (${listAllCache.length} au total)</span>`:''}
   `;
 }
@@ -1788,8 +1805,8 @@ function renderListRows(all){
       <td style="color:var(--text-dim);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.secteur||'—'}</td>
       <td style="color:var(--text-dim)">${e.commercial&&e.commercial!=='/'?e.commercial:'—'}</td>
       <td>${e.resp_edit||'<span style="color:var(--bdc-text);font-weight:500">À assigner</span>'}</td>
-      ${role==='edit'?`<td>${e.montant?'<strong style="color:var(--accent)">'+fmtCA(e.montant)+'</strong>':'—'}</td>`:''}
-      ${role==='edit'?`<td>${e.upsell?'<strong style="color:var(--gold)">'+fmtCA(e.upsell)+'</strong>':'—'}</td>`:''}
+      ${isAccountAdmin?`<td>${e.montant?'<strong style="color:var(--accent)">'+fmtCA(e.montant)+'</strong>':'—'}</td>`:''}
+      ${isAccountAdmin?`<td>${e.upsell?'<strong style="color:var(--gold)">'+fmtCA(e.upsell)+'</strong>':'—'}</td>`:''}
       <td>${statutBadge(e.statut)}</td>
     </tr>`;
   }).join('');
@@ -1914,6 +1931,7 @@ async function loadReporting(){
 // ── MODAL ────────────────────────────────────────────────────────────────────
 async function openEmission(id){
   const e=await fetch(`${API}/emissions/${id}`).then(r=>r.json());
+  currentEmissionData=e; // conservé pour saveEmission() : ne pas écraser montant/upsell si les champs ne sont pas rendus (non-admin)
   const isEdit=role==='edit';
   const isBdc=e.statut==='bdc_attente';
   const isDecale=e.date_diffusion!==e.date_diffusion_originale;
@@ -1924,7 +1942,7 @@ async function openEmission(id){
   document.getElementById('modal-body').innerHTML=`
     ${isBdc?'<div class="info-banner bdc">⏳ BDC en attente — diffusion réservée, contrat non signé</div>':''}
     ${isDecale?`<div class="info-banner warning">⟳ Date décalée — originale : ${formatDateFR(e.date_diffusion_originale)}</div>`:''}
-    ${role==='edit'&&(e.montant||e.upsell)?`<div class="info-banner neutral">💰 <strong style="color:var(--accent)">${fmtCA((e.montant||0)+(e.upsell||0))}</strong>${e.upsell?' <span style="color:var(--text-muted);font-size:11px">(dont '+fmtCA(e.upsell)+' upsell)</span>':''}</div>`:''}
+    ${isAccountAdmin&&(e.montant||e.upsell)?`<div class="info-banner neutral">💰 <strong style="color:var(--accent)">${fmtCA((e.montant||0)+(e.upsell||0))}</strong>${e.upsell?' <span style="color:var(--text-muted);font-size:11px">(dont '+fmtCA(e.upsell)+' upsell)</span>':''}</div>`:''}
     <div class="form-row">
       <div class="form-group"><label class="form-label">Entreprise</label><input class="form-input" id="edit-entreprise" value="${e.entreprise}" ${!isEdit?'disabled':''}></div>
       <div class="form-group"><label class="form-label">Commercial</label><input class="form-input" id="edit-commercial" value="${e.commercial||''}" ${!isEdit?'disabled':''}></div>
@@ -1946,7 +1964,7 @@ async function openEmission(id){
         </select>
       </div>
     </div>
-    ${isEdit?`<div class="form-row">
+    ${isAccountAdmin?`<div class="form-row">
       <div class="form-group"><label class="form-label">Montant (€)</label><input class="form-input" type="number" id="edit-montant" value="${e.montant||''}"></div>
       <div class="form-group"><label class="form-label">Upsell (€)</label><input class="form-input" type="number" id="edit-upsell" value="${e.upsell||''}" placeholder="0"></div>
     </div>`:''}
@@ -2037,8 +2055,10 @@ async function saveEmission(id){
     resp_edit:document.getElementById('edit-resp').value,
     statut:document.getElementById('edit-statut').value,
     notes:document.getElementById('edit-notes').value,
-    montant:parseFloat(document.getElementById('edit-montant').value)||0,
-    upsell:parseFloat(document.getElementById('edit-upsell').value)||0,
+    // Champs non rendus pour un compte non-admin (voir openEmission) : on
+    // retombe sur la valeur déjà connue plutôt que d'écraser à 0.
+    montant:document.getElementById('edit-montant')?(parseFloat(document.getElementById('edit-montant').value)||0):(currentEmissionData?.montant||0),
+    upsell:document.getElementById('edit-upsell')?(parseFloat(document.getElementById('edit-upsell').value)||0):(currentEmissionData?.upsell||0),
   };
   if(!payload.entreprise){showToast('Entreprise ne peut pas être vide','warning');return;}
   if(showFigaro){payload.homepage=document.getElementById('edit-hp').checked;payload.homepage_eco=document.getElementById('edit-hpeco').checked;}
@@ -2448,7 +2468,7 @@ function openAddModal(date='',force=false){
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Secteur</label><input class="form-input" id="add-secteur" placeholder="Ex: Santé, Finance…"></div>
-      <div class="form-group"><label class="form-label">Montant (€)</label><input class="form-input" type="number" id="add-montant" placeholder="0"></div>
+      ${isAccountAdmin?'<div class="form-group"><label class="form-label">Montant (€)</label><input class="form-input" type="number" id="add-montant" placeholder="0"></div>':''}
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Statut</label>
@@ -2509,7 +2529,7 @@ async function submitAdd(){
     secteur:document.getElementById('add-secteur').value,
     commercial:document.getElementById('add-commercial').value,
     resp_edit:document.getElementById('add-resp').value,
-    montant:parseFloat(document.getElementById('add-montant').value)||0,
+    montant:parseFloat(document.getElementById('add-montant')?.value)||0,
     homepage:document.getElementById('add-hp')?.checked||false,
     homepage_eco:document.getElementById('add-hpeco')?.checked||false,
   };

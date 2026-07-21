@@ -1440,6 +1440,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <div className="app-switch">
             <button className="app-switch-btn active">📊 Dashboard</button>
             <button className="app-switch-btn" onClick={() => { window.location.href = '/planning'; }}>📅 Planning</button>
+            {/* Réglages (comptes/rôles/équipes/reporting) : un seul endroit, dans
+                le planning, réservé aux comptes admin. */}
+            {isAdmin && (
+              <button className="app-switch-btn" onClick={() => { window.location.href = '/planning?view=parametres'; }}>⚙️ Paramètres</button>
+            )}
           </div>
           <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
           <div className="brand-title">Performance Commerciale</div>
