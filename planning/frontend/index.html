@@ -184,7 +184,10 @@ header {
 }
 
 .side-panels-wrap {
-  position: fixed; top: 100px; right: 20px; width: 240px;
+  /* --header-stack-height est mesuré en JS (header + barre d'onglets
+     Dashboard/Planning au-dessus) pour ne pas se retrouver caché derrière —
+     100px en repli le temps que le JS calcule la vraie valeur. */
+  position: fixed; top: calc(var(--header-stack-height, 100px) + 20px); right: 20px; width: 240px;
   z-index: 40; display: flex; flex-direction: column; gap: 14px;
 }
 .a-programmer-panel {
@@ -192,7 +195,7 @@ header {
   border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px;
 }
 .a-programmer-panel-title { font-weight: 700; font-size: 12px; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-#aprogrammer-cards-wrap { max-height: calc(100vh - 260px); overflow-y: auto; }
+#aprogrammer-cards-wrap { max-height: calc(100vh - var(--header-stack-height, 100px) - 160px); overflow-y: auto; }
 .a-programmer-card {
   background: var(--surface2); border: 1px solid var(--border);
   box-shadow: inset 3px 0 0 var(--accent);
@@ -986,6 +989,20 @@ async function bootstrapLogin(){
   }
 }
 bootstrapLogin();
+
+// Mesure la hauteur réelle header + barre d'onglets Dashboard/Planning, pour
+// que le panneau flottant "À programmer" (position fixed) se cale toujours
+// juste en dessous au lieu de passer derrière (cf. valeur figée précédente,
+// devenue fausse le jour où la barre d'onglets a été ajoutée au-dessus).
+function positionSidePanels(){
+  const header=document.querySelector('header');
+  if(!header)return;
+  const bottom=Math.round(header.getBoundingClientRect().bottom);
+  document.documentElement.style.setProperty('--header-stack-height',`${bottom}px`);
+}
+window.addEventListener('resize',positionSidePanels);
+window.addEventListener('load',positionSidePanels);
+positionSidePanels();
 let RESP_EDIT_LIST = ['Lola','Eva','Flavie'];
 async function refreshEquipesList(){
   if(role!=='edit')return;

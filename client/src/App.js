@@ -1124,6 +1124,15 @@ function NewsletterSection({ nlData, nlLoading, rangeLabel, onOpenCampaigns }) {
 // ---------- DASHBOARD ----------
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const isAdmin = isAdminCred(password);
+  // Rôle du compte connecté, pour adapter les filtres visibles à ce qu'il peut
+  // réellement voir — le serveur ne renvoie déjà que ses propres données à un
+  // commercial (ou celles de son équipe à un manager), donc lui proposer de
+  // filtrer sur d'autres collègues/équipes n'a pas de sens et ne fait que
+  // donner l'impression d'un dashboard cassé (résultat vide).
+  const myAccountRole = password?.mode === 'commercial' ? password.role : null; // null = legacy/admin, vue complète
+  const isRestrictedCommercial = myAccountRole === 'commercial';
+  const isRestrictedManager = myAccountRole === 'manager';
+  const showCrossTeamFilters = !isRestrictedCommercial && !isRestrictedManager;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -1313,6 +1322,13 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     labelStrong: isLight ? '#101A2E' : '#FFFFFF',
   };
 
+  // Pour un manager, le filtre "Sales" ne doit proposer que les membres de sa
+  // propre équipe (celle-ci est de toute façon la seule qu'il voit) — jamais
+  // tout le roster ni les autres équipes.
+  const myTeamMembers = isRestrictedManager
+    ? (teams.find((t) => t.id === password.teamId)?.members || [])
+    : null;
+
   // ===== FILTRAGE ÉQUIPE / SALES + masqués (paramètres) =====
   // allowed = Set des noms autorisés, ou null = pas de filtre
   const allowed = allowedNames(teamFilter, saleFilter, teams);
@@ -1434,36 +1450,46 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
         <div className="topbar-right">
           <div className="controls-group">
-            <FilterDropdown
-              icon="👔"
-              label={roleLabel || 'Rôle'}
-              allLabel="Tous les rôles"
-              items={[
-                { value: 'managers', label: 'Managers' },
-                { value: 'sales', label: 'Sales' },
-              ]}
-              current={roleFilter}
-              onPick={(v) => { setRoleFilter(v); setSaleFilter(null); }}
-            />
-            <FilterDropdown
-              icon="👥"
-              label={teamFilter ? (teams.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
-              allLabel="Toutes les équipes"
-              items={teams.map((t) => ({ value: t.id, label: t.label }))}
-              current={teamFilter}
-              onPick={(v) => { setTeamFilter(v); setSaleFilter(null); }}
-            />
-            <FilterDropdown
-              icon="👤"
-              label={saleFilter || 'Sales'}
-              allLabel="Tous les sales"
-              items={(teamFilter
-                ? (teams.find((t) => t.id === teamFilter)?.members || [])
-                : ALL_SALES
-              ).filter((s) => !hidden.has(s) && roleOk(s)).map((s) => ({ value: s, label: s }))}
-              current={saleFilter}
-              onPick={(v) => setSaleFilter(v)}
-            />
+            {showCrossTeamFilters && (
+              <FilterDropdown
+                icon="👔"
+                label={roleLabel || 'Rôle'}
+                allLabel="Tous les rôles"
+                items={[
+                  { value: 'managers', label: 'Managers' },
+                  { value: 'sales', label: 'Sales' },
+                ]}
+                current={roleFilter}
+                onPick={(v) => { setRoleFilter(v); setSaleFilter(null); }}
+              />
+            )}
+            {showCrossTeamFilters && (
+              <FilterDropdown
+                icon="👥"
+                label={teamFilter ? (teams.find((t) => t.id === teamFilter)?.label || 'Équipe') : 'Équipes'}
+                allLabel="Toutes les équipes"
+                items={teams.map((t) => ({ value: t.id, label: t.label }))}
+                current={teamFilter}
+                onPick={(v) => { setTeamFilter(v); setSaleFilter(null); }}
+              />
+            )}
+            {/* Un commercial ne voit déjà que ses propres chiffres (scopés côté
+                serveur) — un filtre "Sales" n'aurait ici aucun sens. */}
+            {!isRestrictedCommercial && (
+              <FilterDropdown
+                icon="👤"
+                label={saleFilter || 'Sales'}
+                allLabel="Tous les sales"
+                items={(isRestrictedManager
+                  ? myTeamMembers
+                  : teamFilter
+                    ? (teams.find((t) => t.id === teamFilter)?.members || [])
+                    : ALL_SALES
+                ).filter((s) => !hidden.has(s) && roleOk(s)).map((s) => ({ value: s, label: s }))}
+                current={saleFilter}
+                onPick={(v) => setSaleFilter(v)}
+              />
+            )}
             <PeriodSelector
               current={d.range?.preset || 'today'}
               label={rangeLabel}
