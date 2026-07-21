@@ -2729,12 +2729,17 @@ let equipesCache=[], commerciauxCache=[], salesTeamsCache=[];
 
 // Rôles disponibles à la création/édition d'un compte — un seul système de
 // comptes pour tout OpenMedias (dashboard + planning), fini les codes PIN.
+// Labels courts dans le <select> lui-même : la liste déroulante native (mobile
+// et desktop) dimensionne sa largeur sur l'option la plus longue, sans lien
+// avec le CSS du champ fermé — avec les anciens libellés à rallonge, le menu
+// déroulant débordait largement de l'écran sur mobile. Le détail passe en
+// "title" (info-bulle au survol sur desktop), sans impact sur la largeur.
 const ROLES_COMPTE=[
-  {value:'commercial',label:'Commercial (ses seuls chiffres)'},
-  {value:'manager',label:'Manager (chiffres de son équipe)'},
-  {value:'edito',label:'Édito (planning, pas de dashboard)'},
-  {value:'communication',label:'Communication (planning, pas de dashboard)'},
-  {value:'admin',label:'Admin (tout voir)'},
+  {value:'commercial',label:'Commercial',hint:'Commercial — ses seuls chiffres'},
+  {value:'manager',label:'Manager',hint:'Manager — chiffres de son équipe'},
+  {value:'edito',label:'Édito',hint:'Édito — planning, pas de dashboard'},
+  {value:'communication',label:'Communication',hint:'Communication — planning, pas de dashboard'},
+  {value:'admin',label:'Admin',hint:'Admin — tout voir'},
 ];
 
 async function loadParametres(){
@@ -2896,7 +2901,7 @@ function salesTeamOptionsHtml(selectedId){
   return `<option value="">— équipe de vente —</option>`+salesTeamsCache.map(t=>`<option value="${t.id}" ${selectedId===t.id?'selected':''}>${t.label}</option>`).join('');
 }
 function roleOptionsHtml(selectedRole){
-  return ROLES_COMPTE.map(r=>`<option value="${r.value}" ${selectedRole===r.value?'selected':''}>${r.label}</option>`).join('');
+  return ROLES_COMPTE.map(r=>`<option value="${r.value}" title="${r.hint}" ${selectedRole===r.value?'selected':''}>${r.label}</option>`).join('');
 }
 
 async function saveHorizon(){
