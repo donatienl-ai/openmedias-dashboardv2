@@ -56,4 +56,29 @@ function deleteSalesTeam(id) {
   if (r.changes === 0) throw new Error('Équipe introuvable');
 }
 
-module.exports = { listSalesTeams, getTeamMembers, createSalesTeam, renameSalesTeam, deleteSalesTeam };
+function normalizeNom(str) {
+  return String(str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
+// Retrouve le compte commercial correspondant à un nom du roster (utilisé côté
+// dashboard, où les groupements d'équipe se font par nom affiché plutôt que par
+// id de compte). Match sur le nom complet normalisé, ou sur le nom de famille
+// si fourni — mêmes règles que server/roster.js côté dashboard.
+function findAccountByRosterName(displayName, lastName) {
+  const rows = db.prepare("SELECT id, nom, team_id FROM commercial_users WHERE actif=1").all();
+  const normDisplay = normalizeNom(displayName);
+  const normLast = normalizeNom(lastName || '');
+  return rows.find((r) => {
+    const n = normalizeNom(r.nom);
+    return n === normDisplay || (normLast && n.includes(normLast));
+  }) || null;
+}
+
+function setAccountTeam(commercialId, teamId) {
+  db.prepare('UPDATE commercial_users SET team_id=? WHERE id=?').run(teamId, commercialId);
+}
+
+module.exports = {
+  listSalesTeams, getTeamMembers, createSalesTeam, renameSalesTeam, deleteSalesTeam,
+  findAccountByRosterName, setAccountTeam,
+};

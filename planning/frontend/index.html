@@ -107,6 +107,12 @@ header {
 .nav-btn { background: none; border: none; color: var(--text-dim); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
 .nav-btn:hover { color: var(--text); }
 .nav-btn.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+/* ===== APP TABS (navigation majeure Dashboard / Planning) ===== */
+.app-tabs { display: flex; gap: 10px; padding: 14px 20px 0; }
+.app-tab { flex: 0 0 auto; padding: 13px 32px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 800; letter-spacing: -0.2px; cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s; }
+.app-tab:hover { border-color: var(--accent); color: var(--text); transform: translateY(-1px); }
+.app-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); cursor: default; transform: none; }
+@media (max-width: 640px) { .app-tabs { flex-direction: column; padding: 10px 14px 0; } .app-tab { width: 100%; text-align: center; } }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .month-nav { display: inline-flex; align-items: center; gap: 2px; background: var(--surface2); border: 1px solid var(--border); border-radius: 13px; padding: 4px; }
 .month-nav button { background: none; border: none; color: var(--text-dim); width: 30px; height: 30px; border-radius: 9px; cursor: pointer; font-size: 15px; transition: all 0.12s; display: flex; align-items: center; justify-content: center; }
@@ -459,6 +465,10 @@ td { padding: 10px 14px; font-size: 13px; }
 
 <!-- APP -->
 <div id="app">
+  <div class="app-tabs">
+    <button class="app-tab" onclick="window.location.href='/'" id="app-tab-dashboard">📊 Dashboard</button>
+    <button class="app-tab active">📅 Planning</button>
+  </div>
   <header>
     <div class="header-brand">
       <div class="header-mark"></div>
@@ -470,7 +480,6 @@ td { padding: 10px 14px; font-size: 13px; }
     <div class="header-sep"></div>
     <div class="role-badge" id="role-badge"></div>
     <nav class="header-nav">
-      <button class="nav-btn" onclick="window.location.href='/'" id="nav-dashboard" title="Retour au dashboard OpenMedias">📊 Dashboard</button>
       <button class="nav-btn active" onclick="switchView('calendar')" id="nav-calendar">Calendrier</button>
       <button class="nav-btn" onclick="switchView('list')" id="nav-list">Liste</button>
       <button class="nav-btn" onclick="switchView('reporting')" id="nav-reporting" style="display:none">Reporting</button>
@@ -749,6 +758,56 @@ td { padding: 10px 14px; font-size: 13px; }
       <div class="kpi-eyebrow" style="margin:14px 0 10px"><span class="dot" style="background:var(--green)"></span>Comptes créés</div>
       <div id="commerciaux-list" class="param-table"></div>
     </div>
+
+    <!-- Réglages historiquement propres à OpenDashboard (reporting email,
+         connexions, groupements d'affichage) — portés ici pour n'avoir qu'un
+         seul endroit de gestion admin, quelle que soit la page de départ.
+         Réservé aux comptes rôle "admin" (display:none par défaut). -->
+    <div class="param-card" id="dash-admin-card" style="display:none">
+      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>📊 OpenDashboard — Reporting automatique</div>
+      <div class="form-row" style="align-items:flex-end;flex-wrap:wrap;gap:12px">
+        <div class="form-group">
+          <label class="form-label">Thème de l'email</label>
+          <select class="form-input" id="dash-report-theme"><option value="light">☀️ Clair</option><option value="dark">🌙 Sombre</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Période auto</label>
+          <select class="form-input" id="dash-report-preset"><option value="today">Aujourd'hui</option><option value="yesterday">Hier</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Heure d'envoi</label>
+          <input class="form-input" type="time" id="dash-report-time" style="max-width:120px">
+        </div>
+        <label class="form-group" style="flex-direction:row;align-items:center;gap:8px;margin-bottom:8px">
+          <input type="checkbox" id="dash-report-auto"><span class="form-label" style="margin:0">Envoi automatique actif</span>
+        </label>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label class="form-label">Jours d'envoi</label>
+        <div id="dash-report-days" class="param-chip-list"></div>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label class="form-label">Destinataires (séparés par des virgules)</label>
+        <textarea class="form-input" id="dash-report-to" rows="2" placeholder="prenom@openmedias.fr, autre@openmedias.fr"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn-secondary" onclick="saveDashReportSettings()">Sauvegarder</button>
+        <button class="btn-primary" onclick="sendDashReportTest()">📬 Envoyer un test</button>
+      </div>
+      <div id="dash-report-status" style="font-size:12px;margin-top:8px"></div>
+
+      <div class="param-sep"></div>
+      <div class="kpi-eyebrow" style="margin:14px 0 10px"><span class="dot" style="background:var(--accent)"></span>Connexions récentes</div>
+      <div id="dash-logins-list" class="param-table"></div>
+
+      <div class="param-sep"></div>
+      <div class="kpi-eyebrow" style="margin:14px 0 10px"><span class="dot" style="background:var(--accent)"></span>Groupements d'affichage (filtres, TV)</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
+        Utilisés pour regrouper les commerciaux dans les filtres et la vue TV du dashboard —
+        même table que "Équipes de vente" ci-dessus, un compte étant nécessaire pour rattacher quelqu'un à un groupe.
+      </div>
+      <div id="dash-teams-list"></div>
+    </div>
   </div>
 </div>
 
@@ -767,7 +826,7 @@ td { padding: 10px 14px; font-size: 13px; }
 
 <script>
 const API = 'api'; // relatif : fonctionne servi à la racine ou derrière un reverse-proxy sous /planning/
-let role=null, myName=null, isCLevel=false, currentMedia='TIME', currentDate=new Date();
+let role=null, myName=null, isCLevel=false, isAccountAdmin=false, currentMedia='TIME', currentDate=new Date();
 let emissions=[], slotMap=[], joursBlockes=[], meta={};
 let pinBuffer='', searchQuery='', bdcFilterActive=false;
 let commercialId = localStorage.getItem('commercialId') || null;
@@ -786,14 +845,23 @@ function planningRoleFor(accountRole){
 // Active la session applicative (affiche l'app, cache l'écran de connexion) de
 // façon identique quel que soit le point d'entrée (PIN, login direct, SSO depuis
 // le dashboard) — évite de dupliquer cette logique 4 fois de façon divergente.
-function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal}){
-  role=r; myName=nom||null; isCLevel=!!clevel;
+function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal, accountRole}){
+  role=r; myName=nom||null; isCLevel=!!clevel; isAccountAdmin=(accountRole==='admin');
   if(commercialIdVal){
     commercialId=commercialIdVal; commercialNom=commercialNomVal||'';
     localStorage.setItem('commercialId',commercialId); localStorage.setItem('commercialNom',commercialNom);
   }
   document.getElementById('pin-screen').style.display='none';
   document.getElementById('app').style.display='flex';
+  // Édito/communication n'ont pas accès au dashboard (leur page dédiée est le
+  // planning) : inutile de leur montrer un onglet "Dashboard" qui les
+  // renverrait aussitôt ici.
+  document.getElementById('app-tab-dashboard').style.display = (role==='edit'||role==='com') ? 'none' : '';
+  // Réglages spécifiques au dashboard (reporting, connexions, groupements
+  // d'affichage) : réservés aux comptes admin, seuls comptes autorisés côté
+  // serveur sur ces routes (requireAdmin).
+  const dashAdminCard=document.getElementById('dash-admin-card');
+  if(dashAdminCard)dashAdminCard.style.display=isAccountAdmin?'':'none';
   if(role==='sales'){
     document.getElementById('role-badge').textContent=commercialNom||'Commercial';
     document.getElementById('role-badge').className='role-badge sales';
@@ -816,7 +884,7 @@ async function tryAutoLogin(){
     const r=await fetch(`${API}/auth/me`,{headers:{'x-commercial-id':commercialId}});
     if(!r.ok)throw new Error('session invalide');
     const d=await r.json();
-    activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom});
+    activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole});
     await init();
     return true;
   }catch{
@@ -843,7 +911,7 @@ async function commercialLoginSubmit(){
     const r=await fetch(`${API}/auth/commercial`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const d=await r.json();
     if(r.ok){
-      activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom});
+      activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole});
       await init();
     }else{
       errEl.textContent=d.error||'Email ou mot de passe incorrect.';
@@ -854,7 +922,7 @@ async function commercialLoginSubmit(){
 // Connexion "réussie" commune (login classique OU juste après avoir défini son mot
 // de passe via le lien d'invitation reçu par email) : bascule vers l'app en rôle sales.
 function entrerCommeCommercial(d){
-  activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom});
+  activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole});
   init();
 }
 
@@ -883,8 +951,23 @@ async function inviteSubmit(){
     else{errEl.textContent=d.error||'Erreur.';}
   }catch{errEl.textContent='Erreur réseau.';}
 }
-checkInviteToken();
-tryAutoLogin();
+// Portail unique : le point d'entrée par défaut pour se connecter est le
+// dashboard ("/"), qui redirige lui-même vers /planning selon le rôle du
+// compte. Si on arrive ici sans session valide (ni lien d'invitation), on
+// renvoie donc vers "/" au lieu d'afficher un second écran de connexion.
+// L'ancien accès par code PIN reste joignable via /planning?pin=1 pour ne
+// pas bloquer les personnes pas encore migrées vers un compte (Eva, Flavie...).
+async function bootstrapLogin(){
+  checkInviteToken();
+  if(window._inviteToken)return;
+  const ok = await tryAutoLogin();
+  if(ok)return;
+  const wantsPin = new URLSearchParams(window.location.search).get('pin')==='1';
+  if(!wantsPin){
+    window.location.href='/';
+  }
+}
+bootstrapLogin();
 let RESP_EDIT_LIST = ['Lola','Eva','Flavie'];
 async function refreshEquipesList(){
   if(role!=='edit')return;
@@ -2464,6 +2547,127 @@ async function loadParametres(){
   document.getElementById('param-horizon').value=settings.horizonMois;
   equipesCache=equipes; commerciauxCache=commerciaux; salesTeamsCache=salesTeams;
   renderEquipesList(); renderCommerciauxList(); renderSalesTeamsList();
+  if(isAccountAdmin)loadDashboardAdmin();
+}
+
+// ── OPENDASHBOARD — réglages reporting / connexions / groupements d'affichage
+// (portés ici depuis la console cachée du dashboard, cf. Task "backend admin
+// commun") : ces routes vivent à la racine du serveur (requireAdmin côté
+// dashboard), pas sous /planning/api/ — d'où les chemins absolus et l'en-tête
+// x-commercial-id plutôt que "role:edit".
+const DASH_DAYS=[['L',1],['M',2],['M',3],['J',4],['V',5],['S',6],['D',0]];
+let dashReportDays=[1,2,3,4,5], dashTeamsCache=[], dashRosterCache=[];
+function dashAuthHeaders(extra={}){ return {'x-commercial-id':commercialId, ...extra}; }
+async function loadDashboardAdmin(){
+  try{
+    const [settings,logins,teams,roster]=await Promise.all([
+      fetch('/api/admin/settings',{headers:dashAuthHeaders()}).then(r=>r.json()),
+      fetch('/api/admin/logins',{headers:dashAuthHeaders()}).then(r=>r.json()),
+      fetch('/api/teams',{headers:dashAuthHeaders()}).then(r=>r.json()),
+      fetch('/api/admin/roster',{headers:dashAuthHeaders()}).then(r=>r.json()),
+    ]);
+    document.getElementById('dash-report-theme').value=settings.reportTheme||'light';
+    document.getElementById('dash-report-preset').value=settings.reportPreset||'today';
+    document.getElementById('dash-report-time').value=settings.reportTime||'08:00';
+    document.getElementById('dash-report-auto').checked=!!settings.reportAuto;
+    document.getElementById('dash-report-to').value=settings.reportTo||'';
+    dashReportDays=Array.isArray(settings.reportDays)?settings.reportDays:[1,2,3,4,5];
+    renderDashReportDays();
+    renderDashLogins(logins.events||[]);
+    dashTeamsCache=teams.teams||[]; dashRosterCache=roster.names||[];
+    renderDashTeamsList();
+  }catch(e){ /* section masquée si erreur (compte non-admin, etc.) */ }
+}
+function renderDashReportDays(){
+  const el=document.getElementById('dash-report-days');
+  el.innerHTML=DASH_DAYS.map(([lbl,val])=>
+    `<div class="param-chip" style="cursor:pointer;${dashReportDays.includes(val)?'background:var(--accent);color:#fff':''}" onclick="toggleDashReportDay(${val})">${lbl}</div>`
+  ).join('');
+}
+function toggleDashReportDay(val){
+  dashReportDays=dashReportDays.includes(val)?dashReportDays.filter(d=>d!==val):[...dashReportDays,val];
+  renderDashReportDays();
+}
+function dashReportPayload(){
+  return {
+    reportTheme: document.getElementById('dash-report-theme').value,
+    reportPreset: document.getElementById('dash-report-preset').value,
+    reportTime: document.getElementById('dash-report-time').value,
+    reportAuto: document.getElementById('dash-report-auto').checked,
+    reportTo: document.getElementById('dash-report-to').value,
+    reportDays: dashReportDays,
+  };
+}
+async function saveDashReportSettings(){
+  const statusEl=document.getElementById('dash-report-status');
+  statusEl.textContent=''; statusEl.style.color='';
+  try{
+    const r=await fetch('/api/admin/settings',{method:'POST',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify(dashReportPayload())});
+    if(!r.ok)throw new Error('Sauvegarde refusée');
+    statusEl.textContent='Réglages sauvegardés ✓'; statusEl.style.color='var(--green)';
+  }catch(e){ statusEl.textContent=String(e.message||e); statusEl.style.color='var(--danger,#d33)'; }
+}
+async function sendDashReportTest(){
+  const statusEl=document.getElementById('dash-report-status');
+  statusEl.textContent='Génération + envoi en cours… (10-30s)'; statusEl.style.color='';
+  try{
+    await fetch('/api/admin/settings',{method:'POST',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify(dashReportPayload())});
+    const r=await fetch('/api/admin/send-test',{method:'POST',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify({preset:document.getElementById('dash-report-preset').value})});
+    const d=await r.json();
+    if(!r.ok||!d.sent)throw new Error(d.error||"Échec de l'envoi");
+    statusEl.textContent=`Reporting envoyé à ${(d.to||[]).join(', ')} ✓`; statusEl.style.color='var(--green)';
+  }catch(e){ statusEl.textContent=String(e.message||e); statusEl.style.color='var(--danger,#d33)'; }
+}
+function dashUaShort(ua){
+  const browser=/Edg\//.test(ua)?'Edge':/OPR\//.test(ua)?'Opera':/Chrome\//.test(ua)?'Chrome':/Safari\//.test(ua)&&/Version\//.test(ua)?'Safari':/Firefox\//.test(ua)?'Firefox':'Navigateur';
+  const os=/Windows/.test(ua)?'Windows':/Mac OS X/.test(ua)?'macOS':/iPhone|iPad/.test(ua)?'iOS':/Android/.test(ua)?'Android':/Linux/.test(ua)?'Linux':'';
+  return os?`${browser} · ${os}`:browser;
+}
+function renderDashLogins(events){
+  const el=document.getElementById('dash-logins-list');
+  if(!events.length){ el.innerHTML='<div style="font-size:12px;color:var(--text-muted)">Aucune connexion enregistrée.</div>'; return; }
+  el.innerHTML=events.slice(0,25).map(l=>
+    `<div style="display:flex;gap:10px;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span style="width:8px;height:8px;border-radius:50%;background:${l.ok?'var(--green)':'#d33'}" title="${l.ok?'Connexion réussie':'Échec'}"></span>
+      <span>${new Date(l.at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</span>
+      <span style="color:var(--text-muted)">${dashUaShort(l.ua)}</span>
+      <span style="color:var(--text-muted)">${l.ip}</span>
+    </div>`
+  ).join('');
+}
+let dashOpenTeamId=null;
+function renderDashTeamsList(){
+  const el=document.getElementById('dash-teams-list');
+  if(!dashTeamsCache.length){ el.innerHTML='<div style="font-size:12px;color:var(--text-muted)">Aucune équipe.</div>'; return; }
+  el.innerHTML=dashTeamsCache.map(t=>`
+    <div class="param-card" style="margin-bottom:8px;padding:10px 12px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:13px">${t.label}</strong>
+        <button class="btn-secondary" style="font-size:11px;padding:4px 10px" onclick="dashOpenTeamId=dashOpenTeamId==='${t.id}'?null:'${t.id}';renderDashTeamsList()">
+          ${t.members.length} membre${t.members.length>1?'s':''} ${dashOpenTeamId===t.id?'▲':'▾'}
+        </button>
+      </div>
+      ${dashOpenTeamId===t.id?`
+        <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+          ${dashRosterCache.map(name=>`
+            <label style="display:flex;align-items:center;gap:5px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:3px 8px;cursor:pointer">
+              <input type="checkbox" ${t.members.includes(name)?'checked':''} onchange="toggleDashTeamMember('${t.id}','${name.replace(/'/g,"\\'")}')">${name}
+            </label>
+          `).join('')}
+        </div>
+      `:''}
+    </div>
+  `).join('');
+}
+async function toggleDashTeamMember(teamId,name){
+  const t=dashTeamsCache.find(t=>t.id===teamId);
+  const members=t.members.includes(name)?t.members.filter(m=>m!==name):[...t.members,name];
+  try{
+    const r=await fetch(`/api/admin/teams/${teamId}`,{method:'PATCH',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify({members})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Erreur');
+    await loadDashboardAdmin();
+  }catch(e){ showToast(String(e.message||e),'warning'); }
 }
 
 function renderSalesTeamsList(){

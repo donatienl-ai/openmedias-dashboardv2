@@ -101,6 +101,12 @@ function Login({ onSuccess }) {
         >
           {mode === 'commercial' ? 'Mot de passe unique (admin)' : 'Compte commercial (email)'}
         </button>
+        <a
+          href="/planning?pin=1"
+          style={{ display: 'block', marginTop: 6, fontSize: 11, opacity: 0.5, textDecoration: 'underline' }}
+        >
+          Accès édito par code (ancien système)
+        </a>
       </div>
     </div>
   );
@@ -1409,6 +1415,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   return (
     <div className="shell">
+      {/* NAVIGATION PRINCIPALE — Dashboard / Planning : les deux piliers d'OpenMedias */}
+      <div className="app-tabs">
+        <button className="app-tab active">📊 Dashboard</button>
+        <button className="app-tab" onClick={() => { window.location.href = '/planning'; }}>📅 Planning</button>
+      </div>
       {/* TOPBAR */}
       <div className="topbar">
         <div className="topbar-left">
@@ -1461,9 +1472,6 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
-            <button className="theme-btn" onClick={() => { window.location.href = '/planning'; }} title="Planning de diffusion + BDC">
-              📅
-            </button>
             <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
               📺
             </button>

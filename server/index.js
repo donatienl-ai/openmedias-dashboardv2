@@ -24,10 +24,8 @@ import { getRawHosts } from './calendly.js';
 import { SALES } from './roster.js';
 import { sendEmail, getMessageStatus } from './mailer.js';
 import { buildReportHtml } from './reportHtml.js';
-import { getSettings, updateSettings } from './settings.js';
 import { startScheduler, getSchedulerState } from './scheduler.js';
 import { createDashboardCache } from './dashboardCache.js';
-import { getTeams, createTeam, updateTeam, deleteTeam } from './teamsStore.js';
 import { scopeDataToCommercial, resolveDisplayName, resolveTeamDisplayNames } from './scopeByCommercial.js';
 
 dotenv.config();
@@ -49,7 +47,17 @@ const PASSWORD = process.env.DASHBOARD_PASSWORD || 'change-moi';
 // accepté en parallèle comme filet de sécurité temporaire pendant la bascule
 // (accès admin complet), à retirer une fois les comptes commerciaux validés.
 const { verifyCommercialLogin, getCommercialById } = (await import('../planning/backend/auth.js')).default;
-const { getTeamMembers } = (await import('../planning/backend/teams.js')).default;
+// ── ÉQUIPES + RÉGLAGES ADMIN : mêmes modules partagés que le planning (SQLite
+// persisté), pour n'avoir qu'un seul backend admin quelle que soit la page
+// depuis laquelle on les modifie (remplace teamsStore.js et settings.js,
+// tous deux volatiles en mémoire).
+const {
+  listSalesTeams, getTeamMembers, createSalesTeam, renameSalesTeam, deleteSalesTeam,
+  findAccountByRosterName, setAccountTeam,
+} = (await import('../planning/backend/teams.js')).default;
+const {
+  getReportSettings, updateReportSettings, recordLoginEvent, getLoginEvents,
+} = (await import('../planning/backend/adminSettings.js')).default;
 
 // --- Middleware d'authentification : compte commercial OU mot de passe unique (legacy) ---
 // Le front envoie soit "x-commercial-id" (compte individuel), soit
@@ -81,20 +89,13 @@ function requireAdmin(req, res, next) {
   });
 }
 
-// --- Journal des connexions (mémoire volatile, 200 derniers événements) ---
-const loginLog = [];
+// --- Journal des connexions (persisté SQLite, 200 derniers événements) ---
 function clientIp(req) {
   const fwd = req.headers['x-forwarded-for'];
   return (fwd ? String(fwd).split(',')[0] : req.socket?.remoteAddress || '').trim() || 'inconnue';
 }
 function recordLogin(req, ok) {
-  loginLog.push({
-    at: new Date().toISOString(),
-    ok,
-    ip: clientIp(req),
-    ua: String(req.headers['user-agent'] || '').slice(0, 200),
-  });
-  if (loginLog.length > 200) loginLog.shift();
+  recordLoginEvent(ok, clientIp(req), req.headers['user-agent']);
 }
 
 // --- Route de connexion : compte commercial (email+mdp) OU mot de passe unique (legacy) ---
@@ -130,30 +131,71 @@ app.post('/api/login', (req, res) => {
 
 // --- Console admin : journal des connexions ---
 app.get('/api/admin/logins', requireAdmin, (req, res) => {
-  res.json({ events: [...loginLog].reverse() });
+  res.json({ events: getLoginEvents(200) });
 });
 
 // ---------- ÉQUIPES (lecture ouverte à tout compte connecté ; édition réservée aux admins) ----------
+// Mêmes équipes que "Équipes de vente" côté planning (table sales_teams,
+// appartenance via commercial_users.team_id) — une seule source de vérité,
+// affichée ici sous forme de {id, label, members: [noms du roster]} pour ne
+// rien changer côté React (SettingsModal, TvView, FilterDropdown...).
+function teamsWithRosterMembers() {
+  return listSalesTeams().map((t) => ({
+    id: t.id,
+    label: t.label,
+    members: getTeamMembers(t.id)
+      .map((u) => resolveDisplayName(u.nom) || u.nom)
+      .filter(Boolean),
+  }));
+}
 app.get('/api/teams', requireAuth, (req, res) => {
-  res.json({ teams: getTeams() });
+  res.json({ teams: teamsWithRosterMembers() });
+});
+// Liste des noms du roster (pour construire les cases à cocher membres d'équipe
+// côté planning, qui n'a pas accès à server/roster.js directement).
+app.get('/api/admin/roster', requireAdmin, (req, res) => {
+  res.json({ names: SALES.map((s) => s.display) });
 });
 app.post('/api/admin/teams', requireAdmin, (req, res) => {
   try {
-    res.status(201).json(createTeam(req.body || {}));
+    const created = createSalesTeam((req.body || {}).label);
+    res.status(201).json({ ...created, members: [] });
   } catch (e) {
     res.status(400).json({ error: String(e.message || e) });
   }
 });
 app.patch('/api/admin/teams/:id', requireAdmin, (req, res) => {
   try {
-    res.json(updateTeam(req.params.id, req.body || {}));
+    const { label, members } = req.body || {};
+    if (typeof label === 'string' && label.trim()) renameSalesTeam(req.params.id, label);
+    if (Array.isArray(members)) {
+      const current = new Set(getTeamMembers(req.params.id).map((u) => resolveDisplayName(u.nom) || u.nom));
+      const next = new Set(members);
+      // Ajouts : il faut un compte existant pour ce nom (les groupements sont
+      // désormais basés sur les comptes, plus sur une simple liste de noms).
+      for (const name of next) {
+        if (current.has(name)) continue;
+        const entry = SALES.find((s) => s.display === name);
+        const account = findAccountByRosterName(name, entry?.last);
+        if (!account) throw new Error(`Aucun compte pour « ${name} » — créez-lui d'abord un compte dans Comptes.`);
+        setAccountTeam(account.id, req.params.id);
+      }
+      // Retraits
+      for (const name of current) {
+        if (next.has(name)) continue;
+        const entry = SALES.find((s) => s.display === name);
+        const account = findAccountByRosterName(name, entry?.last);
+        if (account) setAccountTeam(account.id, null);
+      }
+    }
+    res.json(teamsWithRosterMembers().find((t) => t.id === req.params.id));
   } catch (e) {
     res.status(400).json({ error: String(e.message || e) });
   }
 });
 app.delete('/api/admin/teams/:id', requireAdmin, (req, res) => {
   try {
-    deleteTeam(req.params.id);
+    deleteSalesTeam(req.params.id);
     res.json({ success: true });
   } catch (e) {
     res.status(400).json({ error: String(e.message || e) });
@@ -402,7 +444,7 @@ app.get('/api/send-report', async (req, res) => {
   if (!expected || req.query.key !== expected) {
     return res.status(401).json({ error: 'Clé invalide' });
   }
-  const s = getSettings();
+  const s = getReportSettings();
   const to = parseRecipients(req.query.to || s.reportTo);
   const theme = req.query.theme === 'dark' ? 'dark' : req.query.theme === 'light' ? 'light' : s.reportTheme;
   const preset = req.query.preset || s.reportPreset;
@@ -424,7 +466,7 @@ app.get('/api/send-report', async (req, res) => {
 
 // ---------- CONSOLE ADMIN (réglages + test, réservés aux comptes admin) ----------
 app.get('/api/admin/settings', requireAdmin, (req, res) => {
-  res.json({ ...getSettings(), scheduler: getSchedulerState() });
+  res.json({ ...getReportSettings(), scheduler: getSchedulerState() });
 });
 
 // Endpoint léger pour le pinger (UptimeRobot) : maintient le service éveillé
@@ -438,14 +480,14 @@ app.get('/api/admin/cache', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/settings', requireAdmin, (req, res) => {
-  res.json(updateSettings(req.body || {}));
+  res.json(updateReportSettings(req.body || {}));
 });
 
 // Envoie le reporting pour la VUE COURANTE (période + thème transmis par le front),
 // dans le même style que le reporting programmé, aux destinataires configurés.
 app.post('/api/admin/email-view', requireAdmin, async (req, res) => {
   try {
-    const s = getSettings();
+    const s = getReportSettings();
     const to = parseRecipients((req.body && req.body.to) || s.reportTo);
     if (to.length === 0) return res.status(400).json({ error: 'Aucun destinataire configuré (réglages admin)' });
     const b = req.body || {};
@@ -459,7 +501,7 @@ app.post('/api/admin/email-view', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/send-test', requireAdmin, async (req, res) => {
   try {
-    const s = getSettings();
+    const s = getReportSettings();
     const to = parseRecipients((req.body && req.body.to) || s.reportTo);
     if (to.length === 0) return res.status(400).json({ error: 'Aucun destinataire configuré' });
     const b = req.body || {};
@@ -505,11 +547,11 @@ app.get('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 // Planificateur de l'envoi automatique (réglé via la console admin)
 startScheduler(async () => {
-  const s = getSettings();
+  const s = getReportSettings();
   const to = parseRecipients(s.reportTo);
   if (to.length === 0) throw new Error('Aucun destinataire configuré');
   return sendReportNow({ to, theme: s.reportTheme, preset: s.reportPreset });
-}, getSettings);
+}, getReportSettings);
 
 app.listen(PORT, () => {
   console.log(`OpenMedias Dashboard en écoute sur le port ${PORT}`);
