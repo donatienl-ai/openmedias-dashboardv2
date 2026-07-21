@@ -1431,14 +1431,16 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   return (
     <div className="shell">
-      {/* NAVIGATION PRINCIPALE — Dashboard / Planning : les deux piliers d'OpenMedias */}
-      <div className="app-tabs">
-        <button className="app-tab active">📊 Dashboard</button>
-        <button className="app-tab" onClick={() => { window.location.href = '/planning'; }}>📅 Planning</button>
-      </div>
       {/* TOPBAR */}
       <div className="topbar">
         <div className="topbar-left">
+          {/* NAVIGATION PRINCIPALE — Dashboard / Planning : les deux piliers
+              d'OpenMedias, intégrés directement dans la topbar (plutôt qu'une
+              bande séparée au-dessus, qui créait une double bordure disgracieuse). */}
+          <div className="app-switch">
+            <button className="app-switch-btn active">📊 Dashboard</button>
+            <button className="app-switch-btn" onClick={() => { window.location.href = '/planning'; }}>📅 Planning</button>
+          </div>
           <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
           <div className="brand-title">Performance Commerciale</div>
           <div className="context-line">
