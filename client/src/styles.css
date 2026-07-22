@@ -116,19 +116,28 @@ body {
    doit suivre le padding réduit de .shell à 620px). */
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
-  flex-wrap: wrap; gap: 16px;
+  flex-wrap: wrap; gap: 16px; min-height: 68px;
   margin: -24px -24px 0; padding: 14px 24px;
   background: var(--panel); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 50;
 }
-.topbar-left { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
+.topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+/* Barre d'accent + séparateurs verticaux : mêmes tailles que .header-mark/
+   .header-sep côté planning, pour la même "signature" visuelle de header. */
+.brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
+.brand-sep { width: 1px; height: 30px; background: var(--border); flex-shrink: 0; }
+.brand-text { display: flex; flex-direction: column; gap: 1px; }
+/* Tailles alignées sur .header-eyebrow/.header-logo du planning : avant,
+   22px/9px en empilement "hero" pleine largeur rendait ce header 2 à 3 fois
+   plus haut que celui du planning pour la même info (marque + titre). */
 .brand-eyebrow {
-  font-size: 9px; letter-spacing: 3px; font-weight: 700;
-  color: var(--om-blue-light); text-transform: uppercase;
+  font-size: 12px; letter-spacing: 0.6px; font-weight: 800;
+  color: var(--text); text-transform: uppercase; line-height: 1.25;
 }
 .brand-title {
-  font-family: var(--font-display); font-size: 22px; font-weight: 800;
-  color: var(--text); letter-spacing: -0.5px;
+  font-family: var(--font-display); font-size: 14px; font-weight: 700;
+  color: var(--text); letter-spacing: 0.4px; text-transform: uppercase;
+  line-height: 1.25; white-space: nowrap;
 }
 .brand-date { font-size: 13px; color: var(--text-soft); text-transform: capitalize; }
 
@@ -528,16 +537,19 @@ body {
    REFONTE DESIGN — Command Center polish
    ========================================== */
 
-/* --- Header 3 zones ---
-   margin-bottom retiré : .topbar est directement suivie de .dash-toolbar
+/* --- Header, une seule ligne dense (comme le planning) ---
+   Avant : .topbar-left en display:block empilait app-switch / eyebrow /
+   titre / date sur 3-4 lignes PLEINE LARGEUR ("hero"), ce qui rendait ce
+   header 2 à 3 fois plus haut que le header du planning pour la même info.
+   Repassé en ligne unique (voir .topbar-left plus haut) ; margin-bottom
+   retiré du côté de .topbar : elle est directement suivie de .dash-toolbar
    (pas de gap entre les deux bandes, comme header+toolbar côté planning) ;
    l'espacement avant la grille de KPIs vient maintenant du margin-bottom
    de .dash-toolbar. */
-.topbar { align-items: flex-end; }
-.topbar-left { display: block; }
+.topbar { align-items: center; }
 .context-line {
   display: flex; align-items: center; gap: 10px;
-  margin-top: 8px; font-size: 13px; color: var(--text-soft);
+  font-size: 13px; color: var(--text-soft);
   text-transform: capitalize;
 }
 .period-chip {
