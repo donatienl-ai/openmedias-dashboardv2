@@ -117,7 +117,7 @@ body {
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
   flex-wrap: wrap; gap: 16px;
-  margin: -24px -24px 24px; padding: 14px 24px;
+  margin: -24px -24px 0; padding: 14px 24px;
   background: var(--panel); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 50;
 }
@@ -131,7 +131,22 @@ body {
   color: var(--text); letter-spacing: -0.5px;
 }
 .brand-date { font-size: 13px; color: var(--text-soft); text-transform: capitalize; }
-.topbar-right { display: flex; align-items: center; gap: 14px; }
+
+/* ===== TOOLBAR (filtres + actions) =====
+   Même bande que .toolbar côté planning (planning/frontend/index.html) :
+   fond + bordure basse, padding 10px/24px, directement collée sous la barre
+   d'identité (.topbar) sans gap — comme planning empile header puis toolbar.
+   PAS sticky : contrairement à .topbar, elle défile avec le contenu.
+   display:flex ici (au lieu de sur .topbar-right, qui n'existe plus dans ce
+   rôle) : .topbar-controls-panel est en display:contents sur desktop (voir
+   bloc MENU BURGER MOBILE, tout en bas du fichier), donc ses enfants
+   (controls-group, divider, status-cluster) se comportent comme des enfants
+   directs de .dash-toolbar — c'est donc .dash-toolbar qui doit porter le flex. */
+.dash-toolbar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 0 -24px 24px; padding: 10px 24px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+}
 .maj { font-size: 11px; color: var(--text-muted); }
 .refresh-btn {
   background: var(--om-blue); color: #fff; border: none; border-radius: 10px;
@@ -303,10 +318,12 @@ body {
   .grid { grid-template-columns: repeat(2, 1fr); }
   .col-2, .col-3, .col-4, .col-5, .col-6, .col-7, .col-8, .col-12 { grid-column: span 2; }
   .shell { padding: 16px; }
-  /* .topbar mord jusqu'aux bords de .shell (marge négative) : doit suivre le
-     padding réduit ci-dessus, sinon elle déborde de l'écran (16px de bleed
-     pour 16px de padding shell, au lieu des 24px de la règle de base). */
-  .topbar { margin: -16px -16px 20px; padding: 12px 16px; }
+  /* .topbar et .dash-toolbar mordent jusqu'aux bords de .shell (marge
+     négative) : doivent suivre le padding réduit ci-dessus, sinon elles
+     débordent de l'écran (16px de bleed pour 16px de padding shell, au lieu
+     des 24px de la règle de base). */
+  .topbar { margin: -16px -16px 0; padding: 12px 16px; }
+  .dash-toolbar { margin: 0 -16px 20px; padding: 8px 16px; }
   /* Filtres (Rôle/Équipes/Sales/Période) : passent à la ligne dans leur pilule
      plutôt que de déborder de l'écran, et leurs menus déroulants restent dans
      la largeur de l'écran (right:0 les faisait sinon parfois dépasser). */
@@ -331,11 +348,14 @@ body {
 }
 .clickable:hover .tile-expand { opacity: 1; }
 
-/* ===== MODALE ===== */
+/* ===== MODALE =====
+   Overlay aligné sur celui du planning (planning/frontend/index.html,
+   .modal-overlay) : même opacité/flou des deux côtés, sinon une modale se
+   "sent" différemment en passant d'un onglet à l'autre. */
 .modal-overlay {
   position: fixed; inset: 0; z-index: 100;
-  background: rgba(2, 6, 15, 0.78);
-  backdrop-filter: blur(4px);
+  background: rgba(2, 6, 15, 0.5);
+  backdrop-filter: blur(6px);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
   animation: fadeIn 0.15s ease;
@@ -508,8 +528,12 @@ body {
    REFONTE DESIGN — Command Center polish
    ========================================== */
 
-/* --- Header 3 zones --- */
-.topbar { align-items: flex-end; margin-bottom: 22px; }
+/* --- Header 3 zones ---
+   margin-bottom retiré : .topbar est directement suivie de .dash-toolbar
+   (pas de gap entre les deux bandes, comme header+toolbar côté planning) ;
+   l'espacement avant la grille de KPIs vient maintenant du margin-bottom
+   de .dash-toolbar. */
+.topbar { align-items: flex-end; }
 .topbar-left { display: block; }
 .context-line {
   display: flex; align-items: center; gap: 10px;
@@ -601,7 +625,7 @@ body {
 /* --- Responsive header --- */
 @media (max-width: 1100px) {
   .topbar { flex-direction: column; align-items: stretch; gap: 14px; }
-  .topbar-right { flex-wrap: wrap; }
+  .dash-toolbar { flex-wrap: wrap; }
   .topbar-divider { display: none; }
 }
 
@@ -1183,14 +1207,19 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
    écraser par une règle "de base" ajoutée plus haut par la suite.
    Sur desktop .topbar-controls-panel est en display:contents : ses enfants
    (controls-group, divider, status-cluster) se comportent exactement comme
-   avant, comme s'ils étaient posés directement dans .topbar-right. Le bouton
+   avant, comme s'ils étaient posés directement dans .dash-toolbar. Le bouton
    burger reste caché. Sur mobile, le panneau devient un menu déroulant caché
    par défaut, et le burger devient visible pour l'ouvrir/fermer. */
 .burger-btn { display: none; }
 .topbar-controls-panel { display: contents; }
 
 @media (max-width: 640px) {
-  .topbar-right { position: relative; width: 100%; justify-content: flex-end; }
+  /* .topbar-controls-panel.open est en position:absolute plus bas : il lui
+     faut un ancêtre positionné pour s'ancrer dessous — c'est maintenant
+     .dash-toolbar (avant : .topbar-right, qui n'existe plus). Quand le
+     panneau est fermé, seul le burger reste dans le flux normal, d'où le
+     justify-content:flex-end pour le coller à droite. */
+  .dash-toolbar { position: relative; justify-content: flex-end; }
   .burger-btn {
     display: inline-flex; align-items: center; justify-content: center;
     width: 38px; height: 38px; flex-shrink: 0;
