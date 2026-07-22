@@ -563,13 +563,18 @@ body {
   color: var(--text); border-radius: 7px; padding: 3px 10px;
   font-size: 11px; font-weight: 700; text-transform: none;
 }
+/* Hauteur calée sur .toolbar/.search-input côté planning (mesuré en live :
+   32px de contenu) — avant, le padding 4px du groupe + 8px du period-btn
+   donnait 43px de haut ici contre ~32px côté planning, ce qui rendait cette
+   bande visiblement plus épaisse/plus lourde que son équivalent planning
+   (recherche + chips), même une fois les couleurs/bordures alignées. */
 .controls-group {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 13px; padding: 4px;
+  border-radius: 13px; padding: 3px;
 }
 .controls-group .period-btn {
-  border: none; background: transparent; border-radius: 9px; padding: 8px 12px;
+  border: none; background: transparent; border-radius: 9px; padding: 6px 12px;
 }
 .controls-group .period-btn:hover { background: var(--panel-2); border: none; }
 .controls-group .period-btn.filter-active { background: rgba(37, 99, 235, 0.16); }
