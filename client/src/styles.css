@@ -864,6 +864,20 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   background: rgba(255, 255, 255, 0.6); flex-shrink: 0;
 }
 
+/* ===== Badge objectif de CA mensuel (alerte de rythme) ===== */
+.objective-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 10px; padding: 4px 10px;
+  border-radius: 999px; font-size: 11px; font-weight: 800;
+  font-variant-numeric: tabular-nums; width: fit-content;
+}
+.objective-badge.ok { background: rgba(34, 197, 94, 0.22); color: #DCFCE7; }
+.objective-badge.warn { background: rgba(245, 158, 11, 0.25); color: #FEF3C7; }
+.objective-badge.danger { background: rgba(239, 68, 68, 0.25); color: #FEE2E2; }
+.objective-badge.muted {
+  background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.7);
+}
+
 /* ===== Badges % d'évolution ===== */
 .kpi-delta {
   margin-left: auto;

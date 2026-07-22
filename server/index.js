@@ -8,17 +8,18 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { getCalls, prewarmCalls, refreshRecent } from './aircall.js';
-import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv, getNewsletterRdv } from './calendly.js';
+import { getCalls, prewarmCalls, refreshRecent, getCacheStats as getAircallCacheStats } from './aircall.js';
+import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv, getNewsletterRdv, getCacheStats as getCalendlyCacheStats } from './calendly.js';
 import { getNewsletterStats } from './mailjet.js';
 import {
   getSignatures,
   getRevenue,
   getPropals,
   getPropalsComptes,
+  getCacheStats as getSalesforceCacheStats,
 } from './salesforce.js';
 import { resolveRange, comparisonRange, previousQuarterStart } from './dateRange.js';
-import { getBdc } from './docusign.js';
+import { getBdc, getCacheStats as getDocusignCacheStats } from './docusign.js';
 import { getRawUsers } from './aircall.js';
 import { getRawHosts } from './calendly.js';
 import { SALES } from './roster.js';
@@ -47,6 +48,10 @@ const PASSWORD = process.env.DASHBOARD_PASSWORD || 'change-moi';
 // accepté en parallèle comme filet de sécurité temporaire pendant la bascule
 // (accès admin complet), à retirer une fois les comptes commerciaux validés.
 const { verifyCommercialLogin, getCommercialById } = (await import('../planning/backend/auth.js')).default;
+// Handle SQLite brut, réutilisé uniquement pour un ping de santé (SELECT 1) sur
+// /api/admin/cache — détecte un disque persistant Render non monté / hors service
+// avant que ça ne se voie comme une erreur confuse ailleurs dans l'appli.
+const { db: planningDb } = (await import('../planning/backend/db.js')).default;
 // ── ÉQUIPES + RÉGLAGES ADMIN : mêmes modules partagés que le planning (SQLite
 // persisté), pour n'avoir qu'un seul backend admin quelle que soit la page
 // depuis laquelle on les modifie (remplace teamsStore.js et settings.js,
@@ -291,6 +296,10 @@ async function collectData(preset, range) {
     salesforge: pick(6, { total: 0, detail: [] }),
     bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
     propalsComptes: pick(8, { total: 0, detail: [] }),
+    // Objectif de CA mensuel (alerte de seuil sur la tuile CA, cf. client) —
+    // exposé à TOUT compte connecté (pas juste admin) puisque c'est juste un
+    // repère informatif, contrairement au reste de la console admin.
+    settings: { monthlyRevenueObjective: getReportSettings().monthlyRevenueObjective },
     errors: Object.keys(errors).length ? errors : null,
   };
 }
@@ -469,14 +478,43 @@ app.get('/api/admin/settings', requireAdmin, (req, res) => {
   res.json({ ...getReportSettings(), scheduler: getSchedulerState() });
 });
 
-// Endpoint léger pour le pinger (UptimeRobot) : maintient le service éveillé
+// Endpoint léger pour le pinger (UptimeRobot) : maintient le service éveillé.
+// Volontairement RAPIDE et SANS appel externe (Salesforce/Aircall/etc.) : un
+// ping de santé qui dépendrait d'une API tierce lente donnerait de faux
+// "down" et réveillerait pour rien. On y ajoute juste mémoire/uptime en
+// process (gratuit) pour repérer une dérive mémoire avant le crash OOM
+// (cf. incident déjà rencontré sur ce service).
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, at: new Date().toISOString() });
+  const mem = process.memoryUsage();
+  res.json({
+    ok: true,
+    at: new Date().toISOString(),
+    uptimeSec: Math.round(process.uptime()),
+    memory: { rssMb: Math.round(mem.rss / 1048576), heapUsedMb: Math.round(mem.heapUsed / 1048576) },
+  });
 });
 
-// Diagnostic : état du cache du dashboard (âge des snapshots, erreurs éventuelles)
+// Diagnostic complet (réservé admin) : âge/couverture de TOUS les caches
+// (dashboard + les caches bruts par connecteur, cf. server/rawDataCache.js)
+// + un ping SQLite pour vérifier que le disque persistant du planning répond.
 app.get('/api/admin/cache', requireAdmin, (req, res) => {
-  res.json({ entries: dashboardCache.stats() });
+  let planningDbOk = true;
+  let planningDbError = null;
+  try {
+    planningDb.prepare('SELECT 1').get();
+  } catch (e) {
+    planningDbOk = false;
+    planningDbError = String(e?.message || e);
+  }
+  res.json({
+    entries: dashboardCache.stats(), // legacy : conservé pour compat avec un éventuel appelant existant
+    dashboard: dashboardCache.stats(),
+    aircall: getAircallCacheStats(),
+    salesforce: getSalesforceCacheStats(),
+    calendly: getCalendlyCacheStats(),
+    docusign: getDocusignCacheStats(),
+    planningDb: { ok: planningDbOk, error: planningDbError },
+  });
 });
 
 app.post('/api/admin/settings', requireAdmin, (req, res) => {

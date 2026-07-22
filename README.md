@@ -98,6 +98,25 @@ Si tu bascules l'URL Render du planning, mets à jour l'URL du webhook Salesforc
 
 ---
 
+## Vérifications avant de pousser
+
+Une CI GitHub Actions (`.github/workflows/ci.yml`) tourne sur chaque push/PR
+vers `main` : vérifie la syntaxe de tous les fichiers serveur, build le client
+React (aurait détecté le bug `Module not found: Can't resolve './calendly.js'`
+déjà rencontré), puis démarre le serveur et vérifie que `/api/health` répond.
+En local, les mêmes vérifications sont disponibles via :
+
+```bash
+npm run check   # syntaxe de tous les fichiers server/ + planning/backend/
+npm run smoke   # démarre le serveur (clés API factices) et vérifie /api/health
+```
+
+Diagnostic des caches en prod (réservé admin) : `GET /api/admin/cache` (depuis
+un compte admin connecté) renvoie l'âge/couverture de chaque cache —
+dashboard, Aircall, Salesforce, Calendly, DocuSign — et un ping SQLite sur la
+base du planning. `GET /api/health` reste le endpoint léger pour le pinger
+(UptimeRobot), avec juste mémoire/uptime en plus.
+
 ## Sécurité
 
 - Les clés vivent **uniquement** dans les variables d'environnement Render (ou le `.env` local), jamais dans le code.

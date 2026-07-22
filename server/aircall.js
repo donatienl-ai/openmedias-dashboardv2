@@ -200,6 +200,20 @@ function selectCalls(from, to) {
   return callsCache.calls.filter((c) => c.at >= from && c.at <= to);
 }
 
+/** Diagnostic (route /api/admin/cache) : état du cache brut des calls. */
+export function getCacheStats() {
+  return {
+    calls: {
+      from: callsCache.from || null,
+      to: callsCache.to || null,
+      count: callsCache.calls.length,
+      truncated: callsCache.truncated,
+      ageMs: callsCache.fetchedAt ? Date.now() - callsCache.fetchedAt : null,
+      fresh: cacheIsFresh(),
+    },
+  };
+}
+
 /**
  * AMORÇAGE (lancement) : précharge les calls bruts sur une large fenêtre
  * (typiquement depuis le début du trimestre précédent jusqu'à maintenant).

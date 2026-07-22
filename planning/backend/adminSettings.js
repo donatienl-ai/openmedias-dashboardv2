@@ -28,6 +28,10 @@ const DEFAULTS = {
   reportAuto: process.env.REPORT_AUTO === 'true',
   reportTime: /^\d{2}:\d{2}$/.test(process.env.REPORT_TIME || '') ? process.env.REPORT_TIME : '08:00',
   reportDays: [1, 2, 3, 4, 5],
+  // Objectif de CA mensuel (€) : 0 = pas d'objectif défini (alerte de seuil
+  // désactivée sur la tuile CA du dashboard). Réglable par un admin depuis le
+  // dashboard (clic sur le badge objectif) ou via cette même table.
+  monthlyRevenueObjective: Math.max(0, parseInt(process.env.MONTHLY_REVENUE_OBJECTIVE || '0', 10) || 0),
 };
 
 // Seed unique : au premier démarrage sur la base persistée, on reprend soit les
@@ -42,6 +46,13 @@ try {
     insert.run('reportAuto', DEFAULTS.reportAuto ? '1' : '0');
     insert.run('reportTime', DEFAULTS.reportTime);
     insert.run('reportDays', JSON.stringify(DEFAULTS.reportDays));
+    insert.run('monthlyRevenueObjective', String(DEFAULTS.monthlyRevenueObjective));
+  }
+  // Migration douce : une base déjà seedée AVANT l'ajout de ce champ n'a pas
+  // la ligne — on l'ajoute sans toucher au reste des réglages déjà en place.
+  const hasObjective = db.prepare("SELECT COUNT(*) as n FROM dashboard_settings WHERE key = 'monthlyRevenueObjective'").get();
+  if (hasObjective.n === 0) {
+    db.prepare('INSERT INTO dashboard_settings (key,value) VALUES (?,?)').run('monthlyRevenueObjective', String(DEFAULTS.monthlyRevenueObjective));
   }
 } catch (e) {}
 
@@ -58,6 +69,7 @@ function getReportSettings() {
     reportAuto: map.reportAuto === '1',
     reportTime: /^\d{2}:\d{2}$/.test(map.reportTime || '') ? map.reportTime : '08:00',
     reportDays: Array.isArray(reportDays) ? reportDays : DEFAULTS.reportDays,
+    monthlyRevenueObjective: Math.max(0, parseInt(map.monthlyRevenueObjective, 10) || 0),
   };
 }
 
@@ -74,6 +86,10 @@ function updateReportSettings(patch = {}) {
   if (Array.isArray(patch.reportDays)) {
     const days = [...new Set(patch.reportDays.map((n) => parseInt(n, 10)).filter((n) => n >= 0 && n <= 6))];
     set('reportDays', JSON.stringify(days));
+  }
+  if (patch.monthlyRevenueObjective !== undefined) {
+    const n = Math.max(0, parseInt(patch.monthlyRevenueObjective, 10) || 0);
+    set('monthlyRevenueObjective', String(n));
   }
   return getReportSettings();
 }

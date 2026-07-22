@@ -1,0 +1,35 @@
+name: CI
+
+# Garde-fou avant Render : ce qui aurait détecté le bug déjà rencontré
+# ("Module not found: Can't resolve './calendly.js'") avant qu'il n'arrive en
+# prod. Tourne sur chaque push et chaque pull request vers main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Même version que NODE_VERSION sur Render (render.yaml) — better-sqlite3
+      # (module natif) casse sur des Node trop récents.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+          cache: 'npm'
+
+      - name: Installe les dépendances serveur
+        run: npm install
+
+      - name: Vérifie la syntaxe de tous les fichiers serveur
+        run: npm run check
+
+      - name: Build du client React (aurait détecté le bug calendly.js)
+        run: npm run build
+
+      - name: Smoke test — le serveur démarre-t-il et répond-il ?
+        run: npm run smoke

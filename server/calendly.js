@@ -4,6 +4,7 @@
 // ==========================================
 import fetch from 'node-fetch';
 import { matchSale, buildFullList } from './roster.js';
+import { createWideningCache } from './rawDataCache.js';
 
 function authHeader() {
   return `Bearer ${process.env.CALENDLY_TOKEN || ''}`;
@@ -33,33 +34,12 @@ async function fetchWithRetry(url, maxRetries = 5) {
   throw new Error('Calendly failed (429): rate limit dépassé après plusieurs tentatives');
 }
 
-// Cache court des scans d'events : "RDV pris" et "SalesForge" balayent la même
-// fenêtre → on évite de tout re-télécharger deux fois dans la même requête.
-const scanCache = new Map(); // clé: `${min}|${max}` -> { ts, events }
-const SCAN_TTL = 60 * 1000;
-
-// Purge les entrées expirées. Sans ça, chaque nouvelle fenêtre (les presets
-// relatifs bougent dans le temps) crée une entrée jamais libérée, avec tous les
-// events Calendly en payload -> la RAM monte jusqu'à l'OOM (SIGABRT 134) sur
-// Render puis redémarrage. Ce cache ne sert qu'à dédupliquer dans une même
-// requête, donc on peut purger agressivement.
-function pruneScanCache() {
-  const now = Date.now();
-  for (const [k, v] of scanCache) {
-    if (now - v.ts >= SCAN_TTL) scanCache.delete(k);
-  }
-}
-
 /**
- * Récupère les scheduled events dont le START_TIME est dans [minStart, maxStart].
- * Pagine via l'URL next_page fournie par Calendly (ne JAMAIS reconstruire avec le token).
+ * Pagine TOUS les scheduled events dont le START_TIME est dans [minStart, maxStart].
+ * Pas de cache ici : la mise en cache (fenêtre élargissable + allègement des
+ * records) est gérée par `eventsCache` ci-dessous.
  */
-async function fetchEventsByStart(minStart, maxStart) {
-  pruneScanCache();
-  const cacheKey = `${minStart}|${maxStart}`;
-  const hit = scanCache.get(cacheKey);
-  if (hit && Date.now() - hit.ts < SCAN_TTL) return hit.events;
-
+async function fetchEventsRaw(minStart, maxStart) {
   let url = `https://api.calendly.com/scheduled_events?organization=${encodeURIComponent(ORG())}&status=active&min_start_time=${encodeURIComponent(minStart)}&max_start_time=${encodeURIComponent(maxStart)}&count=100`;
   let all = [];
   let safety = 0;
@@ -69,20 +49,48 @@ async function fetchEventsByStart(minStart, maxStart) {
     all = all.concat(data.collection || []);
     url = data.pagination?.next_page || null;
   }
-  scanCache.set(cacheKey, { ts: Date.now(), events: all });
   return all;
 }
 
-function isR2(event) {
-  return (event.name || '').trim().toLowerCase().startsWith('retour');
-}
-function hostName(event) {
+// --- Cache des events BRUTS (fenêtre élargissable) ---------------------------
+// Remplace l'ancien `scanCache` (dédup 60s, une entrée PAR fenêtre exacte
+// demandée) par le même principe qu'Aircall : UNE seule fenêtre, allégée, qui
+// s'élargit au fil des requêtes. Une sous-période déjà couverte ne rappelle
+// jamais l'API — avant, ouvrir "ce mois" puis "cette semaine" relançait deux
+// scans complets ; maintenant le 2e est un filtrage en mémoire.
+//
+// Garde-fou mémoire (cf. incident OOM déjà rencontré ici) : ce cache ne garde
+// QUE les champs utiles (uri, name, hostRaw, createdAt), jamais l'objet brut
+// Calendly complet — et une seule fenêtre existe à la fois (pas d'entrée par
+// clé de plage qui grossirait indéfiniment).
+//
+// TTL court (5 min, comme le cache dashboard global) : un event peut être
+// annulé après avoir été mis en cache (l'API ne renvoie que les events
+// `status=active`), donc on ne garde pas cette fenêtre trop longtemps pour
+// éviter d'afficher un RDV en fait annulé entre-temps.
+function hostNameRaw(event) {
   return event.event_memberships?.[0]?.user_name || 'Inconnu';
 }
-function groupByHost(events) {
+
+const eventsCache = createWideningCache({
+  ttlMs: parseInt(process.env.CALENDLY_CACHE_TTL_MS || '300000', 10),
+  fetchWindow: (fromMs, toMs) => fetchEventsRaw(new Date(fromMs).toISOString(), new Date(toMs).toISOString()),
+  mapRecord: (e) => ({
+    at: e.start_time ? new Date(e.start_time).getTime() : 0,
+    name: e.name || '',
+    hostRaw: hostNameRaw(e),
+    createdAt: e.created_at || null,
+    uri: e.uri || null,
+  }),
+});
+
+function isR2(record) {
+  return (record.name || '').trim().toLowerCase().startsWith('retour');
+}
+function groupByHost(records) {
   const map = new Map();
-  for (const e of events) {
-    const name = matchSale(hostName(e)) || 'Inconnu';
+  for (const r of records) {
+    const name = matchSale(r.hostRaw) || 'Inconnu';
     const entry = map.get(name) || { count: 0 };
     entry.count += 1;
     map.set(name, entry);
@@ -94,41 +102,49 @@ function groupByHost(events) {
  * R1/R2 "qui ONT LIEU" dans la plage (filtre sur start_time).
  */
 export async function getRdvInRange({ start, end }) {
-  const events = await fetchEventsByStart(start.toISOString(), end.toISOString());
-  const r1 = events.filter((e) => !isR2(e));
-  const r2 = events.filter((e) => isR2(e));
+  const records = await eventsCache.get(start.getTime(), end.getTime());
+  const r1 = records.filter((r) => !isR2(r));
+  const r2 = records.filter((r) => isR2(r));
   return {
     r1: { total: r1.length, detail: groupByHost(r1) },
     r2: { total: r2.length, detail: groupByHost(r2) },
   };
 }
 
+/** Fenêtre de scan large utilisée par les fonctions "pris" (created_at) : voir getRdvBookedInRange. */
+function scanWindowFor(start) {
+  const scanStart = new Date(start);
+  scanStart.setDate(scanStart.getDate() - 7);
+  const scanEnd = new Date(start);
+  scanEnd.setDate(scanEnd.getDate() + 365);
+  return { scanStart, scanEnd };
+}
+
+function filterCreatedInRange(records, start, end) {
+  return records.filter((r) => {
+    if (!r.createdAt) return false;
+    const c = new Date(r.createdAt);
+    return c >= start && c <= end;
+  });
+}
+
 /**
  * R1/R2 "PRIS" dans la plage (filtre sur created_at).
  * Calendly ne permet pas de filtrer directement sur created_at via l'API,
- * donc on récupère une large fenêtre d'events à venir + récents, puis on filtre
+ * donc on récupère une large fenêtre d'events à venir + récents (via le cache
+ * élargissable, donc sans redemander ce qui a déjà été vu), puis on filtre
  * côté code sur created_at dans la plage.
  *
  * Fenêtre de scan : events dont le start_time va de (start - 7j) à (start + 365j).
  * Ça couvre les RDV pris dans la plage qui ont lieu plus tard.
  */
 export async function getRdvBookedInRange({ start, end }) {
-  // On scanne large car un RDV "pris" aujourd'hui peut avoir lieu dans plusieurs mois.
-  const scanStart = new Date(start);
-  scanStart.setDate(scanStart.getDate() - 7);
-  const scanEnd = new Date(start);
-  scanEnd.setDate(scanEnd.getDate() + 365);
+  const { scanStart, scanEnd } = scanWindowFor(start);
+  const records = await eventsCache.get(scanStart.getTime(), scanEnd.getTime());
+  const createdInRange = filterCreatedInRange(records, start, end);
 
-  const events = await fetchEventsByStart(scanStart.toISOString(), scanEnd.toISOString());
-
-  const createdInRange = events.filter((e) => {
-    if (!e.created_at) return false;
-    const c = new Date(e.created_at);
-    return c >= start && c <= end;
-  });
-
-  const r1 = createdInRange.filter((e) => !isR2(e));
-  const r2 = createdInRange.filter((e) => isR2(e));
+  const r1 = createdInRange.filter((r) => !isR2(r));
+  const r2 = createdInRange.filter((r) => isR2(r));
   return {
     r1: { total: r1.length, detail: groupByHost(r1) },
     r2: { total: r2.length, detail: groupByHost(r2) },
@@ -143,9 +159,9 @@ export async function getRdvBookedInRange({ start, end }) {
  * Récupère l'utm_source de l'invitee d'un event (1 appel API par event).
  * Renvoie '' si erreur sur cet event (on ne fait pas planter tout le calcul).
  */
-async function getInviteeUtmSource(event) {
+async function getInviteeUtmSource(record) {
   try {
-    const data = await fetchWithRetry(`${event.uri}/invitees?count=1`);
+    const data = await fetchWithRetry(`${record.uri}/invitees?count=1`);
     const invitee = data.collection?.[0];
     return (invitee?.tracking?.utm_source || '').toLowerCase().trim();
   } catch {
@@ -163,17 +179,9 @@ async function getInviteeUtmSource(event) {
  * avec retry automatique si Calendly rate-limite.
  */
 export async function getSalesforgeRdv({ start, end }) {
-  const scanStart = new Date(start);
-  scanStart.setDate(scanStart.getDate() - 7);
-  const scanEnd = new Date(start);
-  scanEnd.setDate(scanEnd.getDate() + 365);
-
-  const events = await fetchEventsByStart(scanStart.toISOString(), scanEnd.toISOString());
-  const createdInRange = events.filter((e) => {
-    if (!e.created_at) return false;
-    const c = new Date(e.created_at);
-    return c >= start && c <= end;
-  });
+  const { scanStart, scanEnd } = scanWindowFor(start);
+  const records = await eventsCache.get(scanStart.getTime(), scanEnd.getTime());
+  const createdInRange = filterCreatedInRange(records, start, end);
 
   // Garde-fou : au-delà de ~2500 RDV créés, le scan des invitees (1 appel/RDV)
   // prendrait plusieurs minutes et exploserait les quotas → on refuse proprement.
@@ -185,16 +193,16 @@ export async function getSalesforgeRdv({ start, end }) {
 
   // Invitees par paquets parallèles de 10
   const BATCH = 10;
-  const salesforgeEvents = [];
+  const salesforgeRecords = [];
   for (let i = 0; i < createdInRange.length; i += BATCH) {
     const batch = createdInRange.slice(i, i + BATCH);
     const sources = await Promise.all(batch.map(getInviteeUtmSource));
     sources.forEach((src, j) => {
-      if (src === 'salesforge') salesforgeEvents.push(batch[j]);
+      if (src === 'salesforge') salesforgeRecords.push(batch[j]);
     });
   }
 
-  return { total: salesforgeEvents.length, detail: groupByHost(salesforgeEvents) };
+  return { total: salesforgeRecords.length, detail: groupByHost(salesforgeRecords) };
 }
 
 // Managers dont on veut les RDV NL (noms exacts du roster)
@@ -206,17 +214,9 @@ const NL_MANAGERS = ['Lisa Neveu', 'Paul Jouannet', 'David CHEA', 'Quentin PUREN
  * Retourné groupé par manager (Lisa, Paul, David, Quentin) uniquement.
  */
 export async function getNewsletterRdv({ start, end }) {
-  const scanStart = new Date(start);
-  scanStart.setDate(scanStart.getDate() - 7);
-  const scanEnd = new Date(start);
-  scanEnd.setDate(scanEnd.getDate() + 365);
-
-  const events = await fetchEventsByStart(scanStart.toISOString(), scanEnd.toISOString());
-  const createdInRange = events.filter((e) => {
-    if (!e.created_at) return false;
-    const c = new Date(e.created_at);
-    return c >= start && c <= end;
-  });
+  const { scanStart, scanEnd } = scanWindowFor(start);
+  const records = await eventsCache.get(scanStart.getTime(), scanEnd.getTime());
+  const createdInRange = filterCreatedInRange(records, start, end);
 
   if (createdInRange.length > 2500) {
     throw new Error(
@@ -226,20 +226,20 @@ export async function getNewsletterRdv({ start, end }) {
 
   // Récupère les utm_source par paquets de 10
   const BATCH = 10;
-  const nlEvents = [];
+  const nlRecords = [];
   for (let i = 0; i < createdInRange.length; i += BATCH) {
     const batch = createdInRange.slice(i, i + BATCH);
     const sources = await Promise.all(batch.map(getInviteeUtmSource));
     sources.forEach((src, j) => {
-      if (src === 'newsletter') nlEvents.push(batch[j]);
+      if (src === 'newsletter') nlRecords.push(batch[j]);
     });
   }
 
   // Grouper par manager (NL_MANAGERS uniquement)
   const counts = {};
   NL_MANAGERS.forEach((m) => { counts[m] = 0; });
-  for (const e of nlEvents) {
-    const name = matchSale(hostName(e));
+  for (const r of nlRecords) {
+    const name = matchSale(r.hostRaw);
     if (name && NL_MANAGERS.includes(name)) counts[name]++;
   }
 
@@ -253,13 +253,18 @@ export async function getNewsletterRdv({ start, end }) {
  * sur start_time), avec volume et résultat du matching roster.
  */
 export async function getRawHosts({ start, end }) {
-  const events = await fetchEventsByStart(start.toISOString(), end.toISOString());
+  const records = await eventsCache.get(start.getTime(), end.getTime());
   const map = new Map();
-  for (const e of events) {
-    const raw = e.event_memberships?.[0]?.user_name || '(sans hôte)';
+  for (const r of records) {
+    const raw = r.hostRaw || '(sans hôte)';
     map.set(raw, (map.get(raw) || 0) + 1);
   }
   return [...map.entries()]
     .map(([name, count]) => ({ name, count, matchedTo: matchSale(name) }))
     .sort((a, b) => b.count - a.count);
+}
+
+/** Diagnostic (route /api/admin/cache) : état du cache brut des events. */
+export function getCacheStats() {
+  return { events: eventsCache.stats() };
 }

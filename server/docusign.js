@@ -6,6 +6,7 @@
 import fetch from 'node-fetch';
 import crypto from 'crypto';
 import { matchSale, buildFullList } from './roster.js';
+import { createWideningCache } from './rawDataCache.js';
 
 // Hôte OAuth : account.docusign.com (prod) / account-d.docusign.com (demo)
 const OAUTH_HOST = () => process.env.DOCUSIGN_OAUTH_HOST || 'account.docusign.com';
@@ -19,6 +20,10 @@ function b64url(input) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 /** Construit et signe le JWT (RS256) avec la clé privée RSA de l'app. */
@@ -54,9 +59,9 @@ function makeJwt() {
  * Authentifie via JWT Grant, puis découvre le compte (base_uri + account_id)
  * via /oauth/userinfo. Cache 50 min.
  */
-async function getAuth() {
+async function getAuth(forceRefresh = false) {
   const now = Date.now();
-  if (cached && now < cachedExpiry) return cached;
+  if (!forceRefresh && cached && now < cachedExpiry) return cached;
 
   const jwt = makeJwt();
   const res = await fetch(`https://${OAUTH_HOST()}/oauth/token`, {
@@ -105,9 +110,15 @@ async function getAuth() {
  * (sent | completed) dans la plage.
  * Pagination MANUELLE via start_position (le format de nextUri varie selon
  * les comptes et provoquait des 404 sur les grosses périodes).
+ *
+ * Retry (point qui manquait totalement avant) :
+ *  - 401 → ré-authentifie une fois puis retente la même page.
+ *  - 429 / 5xx → backoff exponentiel (respecte Retry-After si présent),
+ *    jusqu'à 5 tentatives — DocuSign applique un rate limit par burst
+ *    (contrairement au quota journalier Salesforce), donc retenter a du sens ici.
  */
-async function listEnvelopes({ start, end }, fromToStatus) {
-  const { token, baseUri, accountId } = await getAuth();
+async function listEnvelopesRaw({ start, end }, fromToStatus) {
+  let { token, baseUri, accountId } = await getAuth();
   const base =
     `${baseUri}/restapi/v2.1/accounts/${accountId}/envelopes` +
     `?from_date=${encodeURIComponent(start.toISOString())}` +
@@ -116,12 +127,30 @@ async function listEnvelopes({ start, end }, fromToStatus) {
 
   let all = [];
   let startPos = 0;
-  let safety = 0;
-  while (safety < 100) {
-    safety += 1;
-    const res = await fetch(`${base}&start_position=${startPos}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+  let pageSafety = 0;
+
+  while (pageSafety < 100) {
+    pageSafety += 1;
+    let attempt = 0;
+    let res;
+    for (;;) {
+      res = await fetch(`${base}&start_position=${startPos}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401 && attempt === 0) {
+        attempt += 1;
+        ({ token, baseUri, accountId } = await getAuth(true));
+        continue;
+      }
+      if ((res.status === 429 || res.status >= 500) && attempt < 5) {
+        attempt += 1;
+        const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+        const backoff = Math.min(30000, 500 * 2 ** attempt);
+        await sleep(retryAfter > 0 ? retryAfter * 1000 : backoff);
+        continue;
+      }
+      break;
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`DocuSign envelopes failed (${res.status}): ${text}`);
@@ -138,17 +167,49 @@ async function listEnvelopes({ start, end }, fromToStatus) {
   return all;
 }
 
-/** Groupe des enveloppes par expéditeur (matché au roster) → liste complète. */
-function groupBySender(envelopes) {
+/** Groupe des records par expéditeur (matché au roster) → liste complète. */
+function groupBySender(records) {
   const map = new Map();
-  for (const e of envelopes) {
-    const name = matchSale(e.sender?.userName) || 'Inconnu';
+  for (const r of records) {
+    const name = matchSale(r.senderRaw) || 'Inconnu';
     const entry = map.get(name) || { count: 0 };
     entry.count += 1;
     map.set(name, entry);
   }
   return buildFullList(map);
 }
+
+// --- Caches BRUTS (fenêtre élargissable, voir server/rawDataCache.js) --------
+// Corrige le point relevé : contrairement à Aircall, DocuSign n'avait aucun
+// cache — chaque plage "custom" retapait l'API en direct.
+//
+// TTL volontairement COURT (5 min par défaut, comme les statuts mutables
+// côté Salesforce) : le champ `status` d'une enveloppe "sent" change dans le
+// temps (sent → delivered → completed), et sert à calculer les BDC "en
+// attente". Une fenêtre gardée trop longtemps afficherait un BDC comme encore
+// en attente alors qu'il vient d'être signé. Réglable via
+// DOCUSIGN_CACHE_TTL_MS si besoin d'un compromis différent.
+const DOCUSIGN_CACHE_TTL_MS = parseInt(process.env.DOCUSIGN_CACHE_TTL_MS || '300000', 10);
+
+function mapEnvelope(dateField) {
+  return (e) => ({
+    at: e[dateField] ? new Date(e[dateField]).getTime() : (e.statusChangedDateTime ? new Date(e.statusChangedDateTime).getTime() : 0),
+    senderRaw: e.sender?.userName || null,
+    status: String(e.status || '').toLowerCase(),
+  });
+}
+
+const sentEnvelopesCache = createWideningCache({
+  ttlMs: DOCUSIGN_CACHE_TTL_MS,
+  fetchWindow: (fromMs, toMs) => listEnvelopesRaw({ start: new Date(fromMs), end: new Date(toMs) }, 'sent'),
+  mapRecord: mapEnvelope('sentDateTime'),
+});
+
+const completedEnvelopesCache = createWideningCache({
+  ttlMs: DOCUSIGN_CACHE_TTL_MS,
+  fetchWindow: (fromMs, toMs) => listEnvelopesRaw({ start: new Date(fromMs), end: new Date(toMs) }, 'completed'),
+  mapRecord: mapEnvelope('completedDateTime'),
+});
 
 /**
  * BDC envoyés + signés + en attente sur la période.
@@ -158,16 +219,19 @@ function groupBySender(envelopes) {
  *                est encore sent/delivered (= pipeline de relance)
  */
 export async function getBdc({ start, end }) {
-  const [sentEnvs, signedEnvs] = await Promise.all([
-    listEnvelopes({ start, end }, 'sent'),
-    listEnvelopes({ start, end }, 'completed'),
+  const [sentRecords, completedRecords] = await Promise.all([
+    sentEnvelopesCache.get(start.getTime(), end.getTime()),
+    completedEnvelopesCache.get(start.getTime(), end.getTime()),
   ]);
-  const pendingEnvs = sentEnvs.filter((e) =>
-    ['sent', 'delivered'].includes(String(e.status || '').toLowerCase())
-  );
+  const pendingRecords = sentRecords.filter((r) => ['sent', 'delivered'].includes(r.status));
   return {
-    sent: { total: sentEnvs.length, detail: groupBySender(sentEnvs) },
-    signed: { total: signedEnvs.length, detail: groupBySender(signedEnvs) },
-    pending: { total: pendingEnvs.length, detail: groupBySender(pendingEnvs) },
+    sent: { total: sentRecords.length, detail: groupBySender(sentRecords) },
+    signed: { total: completedRecords.length, detail: groupBySender(completedRecords) },
+    pending: { total: pendingRecords.length, detail: groupBySender(pendingRecords) },
   };
+}
+
+/** Diagnostic (route /api/admin/cache) : état des 2 caches bruts DocuSign. */
+export function getCacheStats() {
+  return { sent: sentEnvelopesCache.stats(), completed: completedEnvelopesCache.stats() };
 }

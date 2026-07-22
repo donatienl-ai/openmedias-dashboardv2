@@ -8,7 +8,9 @@
     "start": "node --max-old-space-size=1024 server/index.js",
     "dev": "node --watch server/index.js",
     "build": "cd client && npm install && npm run build",
-    "postinstall": "cd client && npm install && npm run build"
+    "postinstall": "cd client && npm install && npm run build",
+    "check": "node scripts/check-syntax.mjs",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "engines": {
     "node": "20.x"

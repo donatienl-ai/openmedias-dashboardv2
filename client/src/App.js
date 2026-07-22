@@ -388,203 +388,13 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
   );
 }
 
-// ---------- CONSOLE ADMIN CACHÉE (Ctrl+Shift+A) ----------
-function AdminConsole({ open, password, onClose, period, rangeLabel }) {
-  const [theme, setTheme] = useState('light');
-  const [cronPreset, setCronPreset] = useState('today');
-  const [auto, setAuto] = useState(false);
-  const [time, setTime] = useState('08:00');
-  const [days, setDays] = useState([1, 2, 3, 4, 5]);
-  const [sched, setSched] = useState(null);
-  const [logins, setLogins] = useState([]);
-  const [to, setTo] = useState('');
-
-  // Rend le user-agent lisible ("Chrome · Windows")
-  const uaShort = (ua) => {
-    const browser = /Edg\//.test(ua) ? 'Edge'
-      : /OPR\//.test(ua) ? 'Opera'
-      : /Chrome\//.test(ua) ? 'Chrome'
-      : /Safari\//.test(ua) && /Version\//.test(ua) ? 'Safari'
-      : /Firefox\//.test(ua) ? 'Firefox' : 'Navigateur';
-    const os = /Windows/.test(ua) ? 'Windows'
-      : /Mac OS X/.test(ua) ? 'macOS'
-      : /iPhone|iPad/.test(ua) ? 'iOS'
-      : /Android/.test(ua) ? 'Android'
-      : /Linux/.test(ua) ? 'Linux' : '';
-    return os ? `${browser} · ${os}` : browser;
-  };
-  const [status, setStatus] = useState(null); // {ok, msg}
-  const [busy, setBusy] = useState(false);
-
-  // Charge les réglages serveur à l'ouverture
-  useEffect(() => {
-    if (!open) return;
-    setStatus(null);
-    fetch('api/admin/settings', { headers: credHeaders(password) })
-      .then((r) => r.json())
-      .then((s) => {
-        setTheme(s.reportTheme || 'light'); setTo(s.reportTo || '');
-        setCronPreset(s.reportPreset || 'today');
-        setAuto(!!s.reportAuto); setTime(s.reportTime || '08:00');
-        setDays(Array.isArray(s.reportDays) ? s.reportDays : [1, 2, 3, 4, 5]);
-        setSched(s.scheduler || null);
-      })
-      .catch(() => {});
-    fetch('api/admin/logins', { headers: credHeaders(password) })
-      .then((r) => r.json())
-      .then((d) => setLogins(d.events || []))
-      .catch(() => {});
-  }, [open, password]);
-
-  if (!open) return null;
-
-  const payload = () => ({
-    reportTheme: theme, reportTo: to, reportPreset: cronPreset,
-    reportAuto: auto, reportTime: time, reportDays: days,
-  });
-
-  const save = async () => {
-    setBusy(true); setStatus(null);
-    try {
-      const r = await fetch('api/admin/settings', {
-        method: 'POST',
-        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(payload()),
-      });
-      if (!r.ok) throw new Error('Sauvegarde refusée');
-      const saved = await r.json();
-      localStorage.setItem('om_admin_settings', JSON.stringify(saved));
-      setStatus({ ok: true, msg: 'Réglages sauvegardés ✓' });
-    } catch (e) {
-      setStatus({ ok: false, msg: String(e.message || e) });
-    } finally { setBusy(false); }
-  };
-
-  const sendTest = async () => {
-    setBusy(true); setStatus({ ok: true, msg: 'Génération + envoi en cours… (10-30s)' });
-    try {
-      // On sauvegarde d'abord pour tester les réglages affichés
-      await fetch('api/admin/settings', {
-        method: 'POST',
-        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(payload()),
-      });
-      localStorage.setItem('om_admin_settings', JSON.stringify(payload()));
-      // Le test suit la période actuellement sélectionnée sur le dashboard
-      const r = await fetch('api/admin/send-test', {
-        method: 'POST',
-        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ preset: period?.preset || 'today', start: period?.start, end: period?.end }),
-      });
-      const d = await r.json();
-      if (!r.ok || !d.sent) throw new Error(d.error || 'Échec de l\'envoi');
-      const extra = [
-        d.messageId ? `ID ${d.messageId}` : null,
-        d.mailjetStatus ? `statut Mailjet: ${d.mailjetStatus}` : null,
-        d.keyPrefix ? `clé ${d.keyPrefix}…` : null,
-      ].filter(Boolean).join(' · ');
-      setStatus({ ok: true, msg: `Reporting envoyé à ${d.to.join(', ')} ✓${extra ? ` (${extra})` : ''}` });
-    } catch (e) {
-      setStatus({ ok: false, msg: String(e.message || e) });
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <span className="modal-title">🛠 Console admin</span>
-          <button className="modal-close" onClick={onClose} aria-label="Fermer">✕</button>
-        </div>
-        <div className="modal-body">
-          <div className="set-hint">
-            Console cachée (Ctrl/Cmd + Maj + A). Réglages du reporting email envoyé par le dashboard.
-          </div>
-
-          <div className="adm-label">Thème de l'email</div>
-          <div className="adm-themes">
-            <button className={`adm-theme ${theme === 'light' ? 'active' : ''}`} onClick={() => setTheme('light')}>☀️ Clair</button>
-            <button className={`adm-theme ${theme === 'dark' ? 'active' : ''}`} onClick={() => setTheme('dark')}>🌙 Sombre</button>
-          </div>
-
-          <label className="set-row" style={{ marginTop: 4 }}>
-            <span className="set-name">Envoi automatique du reporting</span>
-            <input type="checkbox" className="set-check" checked={auto} onChange={() => setAuto((v) => !v)} />
-            <span className="set-switch" />
-          </label>
-
-          <div className="adm-label">Heure d'envoi (Europe/Paris)</div>
-          <input
-            type="time"
-            className="adm-input adm-time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-          />
-
-          <div className="adm-label">Jours d'envoi</div>
-          <div className="adm-days">
-            {[['L', 1], ['M', 2], ['M', 3], ['J', 4], ['V', 5], ['S', 6], ['D', 0]].map(([lbl, val], idx) => (
-              <button
-                key={idx}
-                className={`adm-day ${days.includes(val) ? 'active' : ''}`}
-                onClick={() => setDays((d) => (d.includes(val) ? d.filter((x) => x !== val) : [...d, val]))}
-              >
-                {lbl}
-              </button>
-            ))}
-          </div>
-
-          <div className="adm-label">Période du reporting automatique</div>
-          <div className="adm-themes">
-            <button className={`adm-theme ${cronPreset === 'today' ? 'active' : ''}`} onClick={() => setCronPreset('today')}>Aujourd'hui</button>
-            <button className={`adm-theme ${cronPreset === 'yesterday' ? 'active' : ''}`} onClick={() => setCronPreset('yesterday')}>Hier</button>
-          </div>
-
-          <div className="adm-label">Destinataires (séparés par des virgules)</div>
-          <textarea
-            className="adm-input"
-            rows={2}
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="prenom@openmedias.fr, autre@openmedias.fr"
-          />
-
-          <div className="adm-actions">
-            <button className="adm-btn ghost" onClick={save} disabled={busy}>Sauvegarder</button>
-            <button className="adm-btn primary" onClick={sendTest} disabled={busy}>
-              {busy ? 'Envoi…' : `📬 Envoyer un test (${rangeLabel || "Aujourd'hui"})`}
-            </button>
-          </div>
-          {status && <div className={`adm-status ${status.ok ? 'ok' : 'ko'}`}>{status.msg}</div>}
-          {sched && (sched.lastAutoSendAt || sched.lastAutoError) && (
-            <div className="adm-sched">
-              {sched.lastAutoSendAt && <>Dernier envoi auto : {new Date(sched.lastAutoSendAt).toLocaleString('fr-FR')}</>}
-              {sched.lastAutoError && <span className="ko"> · Dernière erreur : {sched.lastAutoError}</span>}
-            </div>
-          )}
-
-          <div className="adm-label" style={{ marginTop: 18 }}>
-            Connexions récentes {logins.length > 0 && `(${logins.length})`}
-          </div>
-          {logins.length === 0 ? (
-            <div className="adm-sched">Aucune connexion enregistrée depuis le dernier redémarrage.</div>
-          ) : (
-            <div className="adm-log">
-              {logins.slice(0, 25).map((l, idx) => (
-                <div className="adm-log-row" key={idx}>
-                  <span className={`adm-log-dot ${l.ok ? 'ok' : 'ko'}`} title={l.ok ? 'Connexion réussie' : 'Mot de passe incorrect'} />
-                  <span className="adm-log-time">{new Date(l.at).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                  <span className="adm-log-ua">{uaShort(l.ua)}</span>
-                  <span className="adm-log-ip">{l.ip}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+// L'ancienne "Console admin cachée" (Ctrl/Cmd+Maj+A) a été retirée : elle ne
+// faisait plus que dupliquer le bloc "OpenDashboard — Reporting automatique"
+// déjà présent, VISIBLE, dans Paramètres planning (dash-admin-card), suite à
+// la fusion des deux backends admin. Un même réglage ne doit avoir qu'un seul
+// endroit pour le changer — sans quoi les deux copies risquent de diverger
+// (l'une montrée, l'autre éditée par erreur). Accès désormais unique via le
+// bouton "⚙️ Paramètres" (visible pour les comptes admin, cf. topbar).
 
 // ---------- PARAMÈTRES ADMIN (équipes + sales visibles) ----------
 function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, teams = [], onTeamsChanged }) {
@@ -1143,7 +953,6 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const [roleFilter, setRoleFilter] = useState(null);   // 'managers' | 'sales' | null
   const [showSettings, setShowSettings] = useState(false);
   const [bdcView, setBdcView] = useState('pending'); // 'sent' | 'signed' | 'pending'
-  const [showAdmin, setShowAdmin] = useState(false);
   const [showTv, setShowTv] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // menu ☰ mobile (filtres/actions du header)
   const [nlData, setNlData] = useState(null);
@@ -1160,20 +969,6 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     } catch { /* silencieux : on garde la dernière liste connue */ }
   }, [password]);
   useEffect(() => { loadTeams(); }, [loadTeams]);
-
-  // Console admin cachée : Ctrl/Cmd + Maj + A (réservée aux comptes admin — le
-  // backend la protège de toute façon, mais autant ne pas l'ouvrir pour rien).
-  useEffect(() => {
-    if (!isAdmin) return;
-    const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-        e.preventDefault();
-        setShowAdmin((v) => !v);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isAdmin]);
 
   // Resynchronise les réglages admin sauvegardés vers le serveur
   // (la mémoire serveur est volatile sur Render free)
@@ -1375,6 +1170,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const monthRev = fBlock(d.monthRevenue || { totalAmount: 0, detail: [] }, true);
   const monthSig = fBlock(d.monthSignatures || { total: 0, totalAmount: 0, detail: [] }, true);
 
+  // ===== Alerte de seuil : objectif de CA mensuel (0 = pas d'objectif défini) =====
+  // Rythme attendu = objectif au prorata du nombre de jours déjà écoulés dans
+  // le mois (ex : au 10e jour d'un mois de 30, on "devrait" être à 33%).
+  // Seuils : ≥90% du rythme = ok, ≥70% = attention, en-dessous = alerte.
+  const monthlyObjective = Number(d.settings?.monthlyRevenueObjective) || 0;
+  const now = new Date();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const expectedByNow = monthlyObjective > 0 ? monthlyObjective * (now.getDate() / daysInMonth) : 0;
+  const objectivePct = expectedByNow > 0 ? Math.round((monthRev.totalAmount / expectedByNow) * 100) : null;
+  const objectiveStatus = objectivePct === null ? null : objectivePct >= 90 ? 'ok' : objectivePct >= 70 ? 'warn' : 'danger';
+
   // ===== % d'évolution vs période de comparaison (6 KPIs, filtres appliqués) =====
   const cmp = d.compare || null;
   const pct = (cur, prev) => (prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null);
@@ -1406,6 +1212,74 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       ? (teams.find((t) => t.id === teamFilter)?.label || '')
       : null;
   const filterLabel = [baseLabel, roleLabel].filter(Boolean).join(' · ') || null;
+
+  // Export CSV (ouvrable dans Excel/Sheets) de la vue courante : un fichier
+  // "long format" (une ligne par KPI × commercial), pour ceux qui veulent
+  // sortir un chiffre en réunion sans repasser par le reporting email.
+  // Respecte les mêmes filtres/masquages que ce qui est affiché à l'écran.
+  const exportCsv = () => {
+    const sections = [
+      ['Calls', calls, false],
+      ['R1 tenus', rdvT.r1, false],
+      ['R2 tenus', rdvT.r2, false],
+      ['R1 pris', rdvB.r1, false],
+      ['R2 pris', rdvB.r2, false],
+      ['Propals pistes', propals, false],
+      ['Propals comptes', propalsComptes, false],
+      ['Signatures', sig, true],
+      ['CA', rev, true],
+      ['RDV SalesForge', sf, false],
+      ['BDC envoyés', bdc.sent, false],
+      ['BDC signés', bdc.signed, false],
+      ['BDC en attente', bdc.pending, false],
+    ];
+    // Colonnes texte entre guillemets (échappés) ; colonnes numériques SANS
+    // guillemets, sinon Excel les importe comme du texte au lieu de nombres
+    // (impossible de sommer/grapher la colonne ensuite).
+    const str = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [[str('KPI'), str('Commercial'), str('Compteur'), str('Montant (€)')].join(';')];
+    for (const [label, block, withAmount] of sections) {
+      for (const row of (block?.detail || [])) {
+        if (!row.count && !row.amount) continue; // lignes à 0 omises pour ne pas polluer l'export
+        const montant = withAmount ? Math.round(row.amount || 0) : '';
+        lines.push([str(label), str(row.name), row.count || 0, montant].join(';'));
+      }
+    }
+    // BOM UTF-8 : sans lui, Excel affiche mal les accents à l'ouverture directe du CSV.
+    const csv = String.fromCharCode(0xfeff) + lines.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const slug = (filterLabel || 'global').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    a.href = url;
+    a.download = `openmedias-dashboard_${d.range?.preset || 'periode'}_${slug}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // Réglage de l'objectif de CA mensuel (admin) — même pattern léger que
+  // "addMyself" (window.prompt) plutôt qu'une nouvelle modale pour un seul champ.
+  const editMonthlyObjective = async () => {
+    const input = window.prompt(
+      "Objectif de CA mensuel (€), pour l'alerte de rythme sur la tuile CA. 0 pour désactiver l'alerte.",
+      String(monthlyObjective || '')
+    );
+    if (input === null) return;
+    const n = Math.max(0, parseInt(input.replace(/[^\d]/g, ''), 10) || 0);
+    try {
+      const r = await fetch('api/admin/settings', {
+        method: 'POST',
+        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ monthlyRevenueObjective: n }),
+      });
+      if (!r.ok) throw new Error('Échec de la sauvegarde');
+      load(); // recharge le dashboard pour refléter le nouvel objectif
+    } catch (e) {
+      window.alert(String(e.message || e));
+    }
+  };
 
   // ouvre une modale
   const openModal = (title, rows, isAmount, accent, cmpRows) =>
@@ -1522,6 +1396,9 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
                 📺
               </button>
+              <button className="theme-btn" onClick={exportCsv} title="Exporter cette vue en CSV (Excel/Sheets)">
+                📥
+              </button>
               {isAdmin && (
                 <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
                   ⚙️
@@ -1595,6 +1472,30 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <div className="sub">{isToday ? 'cumul signé' : rangeLabel.toLowerCase()}</div>
           {!isThisMonth && (
             <div className="hero-month"><span className="hero-month-dot" />ce mois · {fmt(monthRev.totalAmount)} €</div>
+          )}
+          {objectiveStatus && (
+            <div
+              className={`objective-badge ${objectiveStatus}`}
+              onClick={isAdmin ? editMonthlyObjective : undefined}
+              style={isAdmin ? { cursor: 'pointer' } : undefined}
+              title={
+                isAdmin
+                  ? `Objectif du mois : ${fmt(monthlyObjective)}€ — clique pour modifier`
+                  : `Objectif du mois : ${fmt(monthlyObjective)}€`
+              }
+            >
+              🎯 {objectivePct}% du rythme visé
+            </div>
+          )}
+          {!objectiveStatus && isAdmin && (
+            <div
+              className="objective-badge muted"
+              onClick={editMonthlyObjective}
+              style={{ cursor: 'pointer' }}
+              title="Définir un objectif de CA mensuel"
+            >
+              🎯 Définir un objectif
+            </div>
           )}
         </div>
 
@@ -1831,14 +1732,6 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           onClose={() => setNlModal(null)}
         />
       )}
-
-      <AdminConsole
-        open={showAdmin}
-        password={password}
-        onClose={() => setShowAdmin(false)}
-        period={period}
-        rangeLabel={rangeLabel}
-      />
 
       {showTv && (
         <TvView
