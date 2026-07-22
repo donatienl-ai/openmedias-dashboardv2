@@ -23,6 +23,15 @@
 
   --font-display: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Rayon + ombre partagés avec planning/frontend/index.html (mêmes noms,
+     mêmes valeurs) — avant, chaque fichier définissait ses propres nombres
+     en dur (border-radius: 16px ici, var(--radius) là-bas), ce qui rendait
+     tout alignement fragile/manuel. Valeurs dark par défaut ; surchargées
+     en light juste en dessous, comme côté planning. */
+  --radius: 16px; --radius-sm: 10px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
+  --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -119,6 +128,10 @@ body {
   flex-wrap: wrap; gap: 16px; min-height: 68px;
   margin: -24px -24px 0; padding: 14px 24px;
   background: var(--panel); border-bottom: 1px solid var(--border);
+  /* Ombre légère sous la barre plutôt qu'un simple filet — "flotte"
+     au-dessus du contenu façon barre d'outils macOS, même traitement que
+     .dash-toolbar et header/.toolbar côté planning. */
+  box-shadow: 0 2px 12px rgba(16, 26, 46, 0.04);
   position: sticky; top: 0; z-index: 50;
 }
 .topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -161,6 +174,7 @@ body {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   margin: 0 -24px 24px; padding: 10px 24px;
   background: var(--panel); border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 12px rgba(16, 26, 46, 0.04);
 }
 .maj { font-size: 11px; color: var(--text-muted); }
 .refresh-btn {
@@ -189,10 +203,12 @@ body {
 .tile {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius);
   padding: 18px 20px;
   position: relative;
   overflow: hidden;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s ease;
 }
 .tile-head {
   display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
@@ -671,13 +687,16 @@ body {
   --bluer2: #0891B2;
   --violet: #2563EB;
   --amber: #D97706;
+  /* Mêmes valeurs que [data-theme="light"] côté planning. */
+  --radius: 18px; --radius-sm: 12px;
+  --shadow: 0 1px 2px rgba(16,26,46,0.04), 0 10px 28px rgba(16,26,46,0.06);
+  --shadow-lg: 0 24px 64px rgba(16,26,46,0.18);
 }
 
 /* Ajustements fins du light */
 [data-theme="light"] body { background-color: var(--bg); }
 [data-theme="light"] .login-error { color: #DC2626; }
 [data-theme="light"] .err-pill { color: #B91C1C; background: #FEF2F2; border-color: #FECACA; }
-[data-theme="light"] .tile { box-shadow: 0 1px 2px rgba(22, 22, 60, 0.04); }
 [data-theme="light"] .clickable:hover { box-shadow: 0 12px 28px rgba(22, 22, 60, 0.12); }
 [data-theme="light"] .login-card { box-shadow: 0 30px 80px rgba(22, 22, 60, 0.18); }
 [data-theme="light"] .modal { box-shadow: 0 40px 100px rgba(22, 22, 60, 0.25); }
