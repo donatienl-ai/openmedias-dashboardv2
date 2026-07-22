@@ -1044,6 +1044,11 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
     switchView('parametres');
     window.history.replaceState({},'',window.location.pathname);
   }
+  // Le header vient de changer de taille (badge de rôle, boutons admin-only/
+  // edit-only révélés ci-dessus) : recale le panneau "À programmer" dessus.
+  // Le ResizeObserver (voir plus bas) devrait suffire seul, mais un appel
+  // explicite ici évite tout flash visuel le temps qu'il se déclenche.
+  if(typeof positionSidePanels==='function')positionSidePanels();
 }
 // SSO depuis OpenDashboard (ou session déjà ouverte sur cette page) : si un
 // commercialId est déjà en localStorage, on retente une session directement
@@ -1140,10 +1145,22 @@ async function bootstrapLogin(){
 }
 bootstrapLogin();
 
-// Mesure la hauteur réelle header + barre d'onglets Dashboard/Planning, pour
-// que le panneau flottant "À programmer" (position fixed) se cale toujours
-// juste en dessous au lieu de passer derrière (cf. valeur figée précédente,
-// devenue fausse le jour où la barre d'onglets a été ajoutée au-dessus).
+// Mesure la hauteur réelle du header, pour que le panneau flottant "À
+// programmer" (position fixed) se cale toujours juste en dessous au lieu de
+// passer dessous/derrière.
+//
+// Pourquoi ça recassait encore malgré ce correctif : `header.style.display`
+// et son contenu changent APRÈS ce premier appel — le header est caché
+// derrière l'écran de PIN/login au chargement (donc mesuré à 0 ou à sa
+// hauteur "déconnecté"), et des boutons admin-only/edit-only (Paramètres,
+// Reporting, +Ajouter...) n'apparaissent qu'une fois `activateSession()`
+// exécutée, ce qui change sa hauteur réelle. Les écouteurs resize/load ne
+// se redéclenchent pas pour autant : le panneau restait calé sur l'ANCIENNE
+// hauteur (trop petite), donc visuellement sous le header une fois connecté.
+//
+// Fix robuste : un ResizeObserver sur le header lui-même recalcule à CHAQUE
+// changement de sa taille réelle (login, apparition des boutons admin,
+// passage du menu burger, etc.), sans avoir à traquer chaque appelant.
 function positionSidePanels(){
   const header=document.querySelector('header');
   if(!header)return;
@@ -1153,6 +1170,10 @@ function positionSidePanels(){
 window.addEventListener('resize',positionSidePanels);
 window.addEventListener('load',positionSidePanels);
 positionSidePanels();
+if(window.ResizeObserver){
+  const header=document.querySelector('header');
+  if(header)new ResizeObserver(positionSidePanels).observe(header);
+}
 let RESP_EDIT_LIST = ['Lola','Eva','Flavie'];
 async function refreshEquipesList(){
   if(role!=='edit')return;
