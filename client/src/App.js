@@ -1427,8 +1427,15 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               </button>
             )}
             {isAdmin && (
+              /* ✉️ ne s'affiche pas sur certaines combinaisons OS/police (ex:
+                 Chrome/Windows) et rend une case vide (confirmé en prod le
+                 22/07 — cf. bouton correspondant dans planning/frontend/
+                 index.html, ICON_MAIL, déjà corrigé pour la même raison). */
               <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
-                ✉️
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="M3 7l9 6 9-6" />
+                </svg>
               </button>
             )}
             <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
