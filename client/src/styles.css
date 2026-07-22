@@ -89,7 +89,7 @@ body {
    planning (planning/frontend/index.html) pour une apparence identique des
    deux côtés du portail. */
 .app-switch {
-  display: inline-flex; align-items: center; gap: 2px; margin-bottom: 10px;
+  display: inline-flex; align-items: center; gap: 2px;
   background: var(--panel-2); border: 1px solid var(--border); border-radius: 13px; padding: 4px;
 }
 .app-switch-btn {
@@ -122,6 +122,12 @@ body {
   position: sticky; top: 0; z-index: 50;
 }
 .topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+/* Regroupe mark+text avec leur PROPRE gap (11px), identique à .header-brand
+   côté planning — sans ce sous-groupe, le gap de 16px de .topbar-left
+   s'appliquait aussi entre la barre d'accent et le texte, ce qui les
+   espaçait plus que côté planning (11px) malgré des tailles par ailleurs
+   identiques. */
+.brand-block { display: flex; align-items: center; gap: 11px; }
 /* Barre d'accent + séparateurs verticaux : mêmes tailles que .header-mark/
    .header-sep côté planning, pour la même "signature" visuelle de header. */
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }

@@ -1329,14 +1329,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="brand-sep" />
           {/* Bloc marque compact (barre d'accent + eyebrow/titre empilés sur
-              2 lignes SERRÉES), même structure que .header-brand côté
+              2 lignes SERRÉES), même structure ET même gap (11px, voir
+              .brand-block) que .header-brand côté
               planning — au lieu d'empiler eyebrow/titre/date sur 3 lignes
               PLEINE LARGEUR façon "hero", ce qui rendait ce header 2 à 3 fois
               plus haut que celui du planning pour la même info. */}
-          <div className="brand-mark" />
-          <div className="brand-text">
-            <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
-            <div className="brand-title">Performance Commerciale</div>
+          <div className="brand-block">
+            <div className="brand-mark" />
+            <div className="brand-text">
+              <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
+              <div className="brand-title">Performance Commerciale</div>
+            </div>
           </div>
           <div className="brand-sep" />
           <div className="context-line">
