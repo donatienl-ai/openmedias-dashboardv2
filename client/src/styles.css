@@ -105,10 +105,21 @@ body {
   .app-switch-btn { flex: 1; text-align: center; }
 }
 
-/* ===== TOPBAR ===== */
+/* ===== TOPBAR =====
+   Même traitement que le header du planning (planning/frontend/index.html) :
+   barre sticky, fond + bordure basse, padding 14px/24px. Avant, cette barre
+   flottait juste sur le fond de page sans démarcation ni fond propre — ce qui
+   donnait une impression de style différent en passant d'un onglet à
+   l'autre, même si la taille des boutons était déjà alignée. Le "bleed" en
+   marge négative compense le padding de .shell pour que la barre morde
+   jusqu'aux bords de ce conteneur (voir l'override mobile plus bas, qui
+   doit suivre le padding réduit de .shell à 620px). */
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 20px; flex-wrap: wrap; gap: 16px;
+  flex-wrap: wrap; gap: 16px;
+  margin: -24px -24px 24px; padding: 14px 24px;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 50;
 }
 .topbar-left { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
 .brand-eyebrow {
@@ -292,6 +303,10 @@ body {
   .grid { grid-template-columns: repeat(2, 1fr); }
   .col-2, .col-3, .col-4, .col-5, .col-6, .col-7, .col-8, .col-12 { grid-column: span 2; }
   .shell { padding: 16px; }
+  /* .topbar mord jusqu'aux bords de .shell (marge négative) : doit suivre le
+     padding réduit ci-dessus, sinon elle déborde de l'écran (16px de bleed
+     pour 16px de padding shell, au lieu des 24px de la règle de base). */
+  .topbar { margin: -16px -16px 20px; padding: 12px 16px; }
   /* Filtres (Rôle/Équipes/Sales/Période) : passent à la ligne dans leur pilule
      plutôt que de déborder de l'écran, et leurs menus déroulants restent dans
      la largeur de l'écran (right:0 les faisait sinon parfois dépasser). */
