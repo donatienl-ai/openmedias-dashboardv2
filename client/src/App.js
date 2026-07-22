@@ -1433,10 +1433,16 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               </svg>
             </button>
             {isAdmin && (
+              /* Curseurs de réglages plutôt qu'un engrenage à rayons — la
+                 première version (cercle + 8 rayons) était identique au
+                 soleil du bouton thème juste à côté, comme deux soleils dans
+                 la même rangée. */
               <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3.2" />
-                  <path d="M12 2.5v3M12 18.5v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2.5 12h3M18.5 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
+                  <line x1="4" y1="7" x2="20" y2="7" />
+                  <circle cx="9" cy="7" r="2" />
+                  <line x1="4" y1="17" x2="20" y2="17" />
+                  <circle cx="15" cy="17" r="2" />
                 </svg>
               </button>
             )}
