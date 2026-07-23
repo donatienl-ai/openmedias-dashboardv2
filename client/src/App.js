@@ -1415,35 +1415,15 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
-            {/* Cluster d'icônes ré-harmonisé en SVG trait fin (style Apple/
-                SF Symbols) — avant, un mélange d'emoji colorées à côté de
-                l'enveloppe déjà corrigée en SVG créait une incohérence
-                visuelle (une icône "propre" au milieu de glyphes emoji). */}
             <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="13" rx="2" />
-                <path d="M8 21h8M12 17v4" />
-              </svg>
+              📺
             </button>
             <button className="theme-btn" onClick={exportCsv} title="Exporter cette vue en CSV (Excel/Sheets)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 3v11" />
-                <path d="M7 10l5 5 5-5" />
-                <path d="M5 21h14" />
-              </svg>
+              📥
             </button>
             {isAdmin && (
-              /* Curseurs de réglages plutôt qu'un engrenage à rayons — la
-                 première version (cercle + 8 rayons) était identique au
-                 soleil du bouton thème juste à côté, comme deux soleils dans
-                 la même rangée. */
               <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="4" y1="7" x2="20" y2="7" />
-                  <circle cx="9" cy="7" r="2" />
-                  <line x1="4" y1="17" x2="20" y2="17" />
-                  <circle cx="15" cy="17" r="2" />
-                </svg>
+                ⚙️
               </button>
             )}
             {isAdmin && (
@@ -1459,16 +1439,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               </button>
             )}
             <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
-              {theme === 'dark' ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="4.5" />
-                  <path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" />
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 14.5A8.5 8.5 0 1110.5 4a7 7 0 009.5 10.5z" />
-                </svg>
-              )}
+              {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             {emailMsg && <span className="maj">{emailMsg}</span>}
             {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}

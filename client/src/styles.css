@@ -88,8 +88,17 @@ body {
 .login-btn:active { transform: scale(0.98); }
 .login-error { margin-top: 14px; font-size: 13px; color: #FCA5A5; text-align: center; }
 
-/* ===== SHELL ===== */
-.shell { min-height: 100vh; padding: 24px; max-width: 1600px; margin: 0 auto; }
+/* ===== SHELL =====
+   Avant : max-width:1600px + margin:auto centrait TOUTE l'appli (header
+   compris, via le bleed en marge négative de .topbar/.dash-toolbar) dans
+   une colonne fixe sur les écrans larges — mesuré en direct : sur un écran
+   de 1875px, ça laissait ~130-145px de fond gris de chaque côté du header,
+   qui ne va donc PAS jusqu'au bord de la fenêtre. Planning (body/#app,
+   planning/frontend/index.html) n'a aucune limite de largeur : plein écran
+   dans tous les cas. Retiré ici pour un vrai plein-largeur des deux côtés
+   — la différence de largeur de header entre les deux onglets, sur un
+   écran large, en venait très probablement. */
+.shell { min-height: 100vh; padding: 24px; }
 
 /* ===== APP SWITCH (navigation majeure Dashboard / Planning) =====
    Intégré directement dans la topbar (topbar-left), plutôt qu'une bande à
@@ -579,21 +588,21 @@ body {
   color: var(--text); border-radius: 7px; padding: 3px 10px;
   font-size: 11px; font-weight: 700; text-transform: none;
 }
-/* Hauteur calée sur .toolbar/.search-input côté planning (mesuré en live :
-   32px de contenu) — avant, le padding 4px du groupe + 8px du period-btn
-   donnait 43px de haut ici contre ~32px côté planning, ce qui rendait cette
-   bande visiblement plus épaisse/plus lourde que son équivalent planning
-   (recherche + chips), même une fois les couleurs/bordures alignées. */
+/* Filtres (Rôle/Équipes/Sales/Aujourd'hui) alignés sur le style planning :
+   là-bas, recherche + chips + dropdown sont des contrôles INDIVIDUELS posés
+   directement dans la barre (pas de conteneur qui les regroupe en un seul
+   "bloc"). Ici, .controls-group les enfermait dans une pilule à double
+   épaisseur façon sélecteur segmenté iOS — un objet visuel que planning n'a
+   jamais eu pour son équivalent. Neutralisé : plus de fond/bordure/padding
+   de groupe, chaque period-btn retombe sur son style standalone habituel
+   (déjà utilisé pour "Aujourd'hui" hors groupe) et devient sa propre pilule,
+   comme les chips de planning. */
 .controls-group {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 13px; padding: 3px;
+  display: inline-flex; align-items: center; gap: 8px;
 }
-.controls-group .period-btn {
-  border: none; background: transparent; border-radius: 9px; padding: 6px 12px;
+.controls-group .period-btn.filter-active {
+  border-color: var(--om-blue); background: rgba(37, 99, 235, 0.12);
 }
-.controls-group .period-btn:hover { background: var(--panel-2); border: none; }
-.controls-group .period-btn.filter-active { background: rgba(37, 99, 235, 0.16); }
 .topbar-divider {
   width: 1px; height: 26px; background: var(--border); margin: 0 12px;
   align-self: center;
