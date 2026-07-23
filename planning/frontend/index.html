@@ -896,11 +896,10 @@ td { padding: 10px 14px; font-size: 13px; }
 
     <div class="param-card">
       <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Équipes de vente</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Détermine ce que voit un compte "manager" sur OpenDashboard (les chiffres de son équipe).</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Un manager ne voit sur OpenDashboard que ses propres chiffres + ceux des commerciaux de son équipe.</div>
       <div id="sales-teams-list" class="param-chip-list"></div>
-      <div class="form-row" style="margin-top:12px;align-items:flex-end">
-        <div class="form-group"><label class="form-label">Nouvelle équipe de vente</label><input class="form-input" id="param-nouvelle-sales-team" placeholder="Ex: Équipe Lisa" onkeydown="if(event.key==='Enter')addSalesTeam()"></div>
-        <button class="btn-secondary" onclick="addSalesTeam()">+ Ajouter</button>
+      <div style="margin-top:12px">
+        <button class="btn-secondary" onclick="openCreateSalesTeamModal()">+ Créer une équipe</button>
       </div>
     </div>
 
@@ -2902,21 +2901,101 @@ async function toggleDashTeamMember(teamId,name){
   }catch(e){ showToast(String(e.message||e),'warning'); }
 }
 
+// Manager affiché directement sur la fiche équipe (t.manager_nom, joint côté
+// serveur) — avant, cette info ne se lisait qu'en allant chercher le rôle de
+// chaque compte dans la liste "Comptes" plus bas, rien ne la montrait ici.
 function renderSalesTeamsList(){
   const el=document.getElementById('sales-teams-list');
   el.innerHTML=salesTeamsCache.length?salesTeamsCache.map(t=>
-    `<div class="param-chip">${t.label}<button onclick="deleteSalesTeam('${t.id}','${t.label.replace(/'/g,"\\'")}')" title="Supprimer">✕</button></div>`
+    `<div class="param-chip" style="cursor:pointer" onclick="openEditSalesTeamModal('${t.id}')" title="Modifier">
+      ${t.label}${t.manager_nom?` <span style="opacity:0.65;font-weight:400">— ${t.manager_nom}</span>`:''}
+      <button onclick="event.stopPropagation();deleteSalesTeam('${t.id}','${t.label.replace(/'/g,"\\'")}')" title="Supprimer">✕</button>
+    </div>`
   ).join(''):'<div style="font-size:12px;color:var(--text-muted)">Aucune équipe de vente créée pour l\'instant.</div>';
 }
-async function addSalesTeam(){
-  const input=document.getElementById('param-nouvelle-sales-team');
-  const label=input.value.trim();
-  if(!label)return;
-  const r=await fetch(`${API}/admin/sales-teams`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({label})});
-  if(!r.ok){showToast('Erreur','warning');return;}
-  input.value='';
+
+// Liste de cases à cocher pour choisir les commerciaux d'une équipe — ne
+// propose que les comptes actifs, avec leur équipe actuelle en info (repris
+// dans une nouvelle équipe = détaché de l'ancienne, comme le fait déjà
+// updateCommercialTeam pour une réassignation individuelle).
+function salesTeamMembersChecklist(selectedIds){
+  const sel=new Set(selectedIds||[]);
+  const actifs=commerciauxCache.filter(c=>c.actif);
+  if(!actifs.length)return '<div style="font-size:12px;color:var(--text-muted)">Aucun compte actif.</div>';
+  return actifs.map(c=>`
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px">
+      <input type="checkbox" value="${c.id}" class="sales-team-member-cb" ${sel.has(c.id)?'checked':''}>
+      ${c.nom}${c.team_label?` <span style="color:var(--text-muted);font-size:11px">(${c.team_label})</span>`:''}
+    </label>
+  `).join('');
+}
+function readSalesTeamMemberIds(){
+  return [...document.querySelectorAll('.sales-team-member-cb:checked')].map(cb=>Number(cb.value));
+}
+function managerOptionsHtml(selectedId){
+  const actifs=commerciauxCache.filter(c=>c.actif);
+  return `<option value="">— aucun manager —</option>`+actifs.map(c=>
+    `<option value="${c.id}" ${selectedId===c.id?'selected':''}>${c.nom}</option>`
+  ).join('');
+}
+function openCreateSalesTeamModal(){
+  document.getElementById('modal-title').textContent='Créer une équipe de vente';
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML=`
+    <div class="form-group"><label class="form-label">Nom de l'équipe</label><input class="form-input" id="newteam-label" placeholder="Ex: Équipe Lisa"></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Manager</label><select class="form-select" id="newteam-manager">${managerOptionsHtml(null)}</select></div>
+    <div class="form-group" style="margin-top:10px">
+      <label class="form-label">Commerciaux de l'équipe</label>
+      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px">${salesTeamMembersChecklist([])}</div>
+    </div>
+  `;
+  document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="closeModal()">Annuler</button>
+    <button class="btn-primary" onclick="confirmCreateSalesTeam()">Créer l'équipe</button>
+  `;
+}
+async function confirmCreateSalesTeam(){
+  const label=document.getElementById('newteam-label').value.trim();
+  if(!label){showToast("Nom d'équipe requis",'warning');return;}
+  const managerId=document.getElementById('newteam-manager').value||null;
+  const memberIds=readSalesTeamMemberIds();
+  const r=await fetch(`${API}/admin/sales-teams`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({label,managerId:managerId?Number(managerId):null,memberIds})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){showToast(d.error||'Erreur','warning');return;}
+  closeModal();
   await loadParametres();
   showToast('Équipe de vente créée ✓','success');
+}
+function openEditSalesTeamModal(teamId){
+  const t=salesTeamsCache.find(x=>x.id===teamId);
+  if(!t)return;
+  const currentMembers=commerciauxCache.filter(c=>c.actif && c.team_id===teamId).map(c=>c.id);
+  document.getElementById('modal-title').textContent=`Modifier "${t.label}"`;
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML=`
+    <div class="form-group"><label class="form-label">Nom de l'équipe</label><input class="form-input" id="newteam-label" value="${t.label}"></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Manager</label><select class="form-select" id="newteam-manager">${managerOptionsHtml(t.manager_id||null)}</select></div>
+    <div class="form-group" style="margin-top:10px">
+      <label class="form-label">Commerciaux de l'équipe</label>
+      <div style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px">${salesTeamMembersChecklist(currentMembers)}</div>
+    </div>
+  `;
+  document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="closeModal()">Annuler</button>
+    <button class="btn-primary" onclick="confirmEditSalesTeam('${teamId}')">Enregistrer</button>
+  `;
+}
+async function confirmEditSalesTeam(teamId){
+  const label=document.getElementById('newteam-label').value.trim();
+  if(!label){showToast("Nom d'équipe requis",'warning');return;}
+  const managerId=document.getElementById('newteam-manager').value||null;
+  const memberIds=readSalesTeamMemberIds();
+  const r=await fetch(`${API}/admin/sales-teams/${teamId}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({label,managerId:managerId?Number(managerId):null,memberIds})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok){showToast(d.error||'Erreur','warning');return;}
+  closeModal();
+  await loadParametres();
+  showToast('Équipe de vente mise à jour ✓','success');
 }
 async function deleteSalesTeam(id,label){
   if(!confirm(`Supprimer "${label}" ? Les comptes rattachés seront détachés (pas supprimés).`))return;

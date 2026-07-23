@@ -93,6 +93,12 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
+// Migration : manager désigné de l'équipe (FK logique vers commercial_users.id,
+// pas de vraie contrainte SQL — même convention que commercial_users.team_id).
+// Avant, "qui manage l'équipe X" ne se déduisait qu'implicitement du fait
+// qu'un compte role='manager' partageait le même team_id qu'elle ; rien ne le
+// rendait explicite ni visible depuis la fiche équipe elle-même.
+try { db.exec('ALTER TABLE sales_teams ADD COLUMN manager_id INTEGER'); } catch(e) {}
 // Seed unique (première fusion) : reprend les 4 équipes qui existaient jusque-là
 // uniquement en mémoire côté dashboard (server/teamsStore.js), pour ne pas perdre
 // la config existante — table vide = jamais seedée.

@@ -986,11 +986,21 @@ app.get('/api/admin/sales-teams', requireEdit, (req, res) => {
   res.json(salesTeams.listSalesTeams());
 });
 app.post('/api/admin/sales-teams', requireEdit, (req, res) => {
-  try { res.status(201).json(salesTeams.createSalesTeam(req.body.label)); }
+  try {
+    const { label, managerId, memberIds } = req.body;
+    res.status(201).json(salesTeams.createSalesTeam(label, managerId || null, Array.isArray(memberIds) ? memberIds : []));
+  }
   catch (e) { res.status(400).json({ error: String(e.message || e) }); }
 });
 app.patch('/api/admin/sales-teams/:id', requireEdit, (req, res) => {
-  try { res.json(salesTeams.renameSalesTeam(req.params.id, req.body.label)); }
+  try {
+    const { label, managerId, memberIds } = req.body;
+    res.json(salesTeams.updateSalesTeam(req.params.id, {
+      label,
+      managerId: managerId === undefined ? undefined : (managerId || null),
+      memberIds: Array.isArray(memberIds) ? memberIds : undefined,
+    }));
+  }
   catch (e) { res.status(400).json({ error: String(e.message || e) }); }
 });
 app.delete('/api/admin/sales-teams/:id', requireEdit, (req, res) => {

@@ -23,22 +23,89 @@ function uniqueId(base) {
   return id;
 }
 
+// manager_nom joint pour affichage direct sur la fiche équipe (avant, "qui
+// manage cette équipe" ne se lisait qu'en allant chercher le rôle de chaque
+// compte dans la liste "Comptes" — rien ne le montrait sur la carte équipe).
 function listSalesTeams() {
-  return db.prepare('SELECT * FROM sales_teams ORDER BY label ASC').all();
+  return db.prepare(`
+    SELECT st.*, cu.nom as manager_nom
+    FROM sales_teams st
+    LEFT JOIN commercial_users cu ON cu.id = st.manager_id
+    ORDER BY st.label ASC
+  `).all();
 }
 
-// Comptes (commerciaux + managers) rattachés à une équipe.
+// Comptes (commerciaux + manager) rattachés à une équipe — le manager designé
+// (team.manager_id) partage aussi ce team_id par convention (posé à la
+// création/édition ci-dessous), donc il apparaît ici comme un membre de plus.
+// C'est volontaire : c'est ce même mécanisme que server/index.js utilise pour
+// scoper un manager à SES perfs + celles de ses commerciaux (voir
+// scopeByCommercial.js) — ne pas l'exclure ici casserait ce scoping.
 function getTeamMembers(teamId) {
   if (!teamId) return [];
   return db.prepare(`SELECT id, nom, email, role FROM commercial_users WHERE team_id=? AND actif=1`).all(teamId);
 }
 
-function createSalesTeam(label) {
+// managerId : compte désigné manager de l'équipe (passe role='manager' +
+// team_id sur ce compte). memberIds : commerciaux à rattacher (team_id
+// seulement, rôle inchangé). Tout en une transaction pour ne pas laisser
+// l'équipe créée sans ses rattachements si une étape échoue en cours de route.
+function createSalesTeam(label, managerId, memberIds) {
   const clean = String(label || '').trim();
   if (!clean) throw new Error("Nom d'équipe requis");
   const id = uniqueId(slugify(clean));
-  db.prepare('INSERT INTO sales_teams (id,label) VALUES (?,?)').run(id, clean);
-  return { id, label: clean };
+  const run = db.transaction(() => {
+    db.prepare('INSERT INTO sales_teams (id,label,manager_id) VALUES (?,?,?)').run(id, clean, managerId || null);
+    if (managerId) {
+      db.prepare("UPDATE commercial_users SET team_id=?, role='manager' WHERE id=?").run(id, managerId);
+    }
+    if (Array.isArray(memberIds)) {
+      for (const mid of memberIds) {
+        if (mid === managerId) continue; // déjà rattaché juste au-dessus, pas de doublon de traitement
+        db.prepare('UPDATE commercial_users SET team_id=? WHERE id=?').run(id, mid);
+      }
+    }
+  });
+  run();
+  return { id, label: clean, manager_id: managerId || null };
+}
+
+// label/managerId/memberIds tous optionnels (undefined = inchangé) — permet
+// de renommer seul (comme avant) ou de ré-assigner manager/membres après coup
+// sans repasser par la fiche "Comptes" compte par compte.
+function updateSalesTeam(id, { label, managerId, memberIds } = {}) {
+  const team = db.prepare('SELECT * FROM sales_teams WHERE id=?').get(id);
+  if (!team) throw new Error('Équipe introuvable');
+  const run = db.transaction(() => {
+    if (label !== undefined) {
+      const clean = String(label || '').trim();
+      if (!clean) throw new Error("Nom d'équipe requis");
+      db.prepare('UPDATE sales_teams SET label=? WHERE id=?').run(clean, id);
+    }
+    if (managerId !== undefined) {
+      // Si l'équipe avait déjà un autre manager, il n'est plus automatiquement
+      // rattaché à cette équipe (sinon deux managers y resteraient collés).
+      if (team.manager_id && team.manager_id !== managerId) {
+        db.prepare("UPDATE commercial_users SET team_id=NULL WHERE id=? AND team_id=?").run(team.manager_id, id);
+      }
+      db.prepare('UPDATE sales_teams SET manager_id=? WHERE id=?').run(managerId || null, id);
+      if (managerId) {
+        db.prepare("UPDATE commercial_users SET team_id=?, role='manager' WHERE id=?").run(id, managerId);
+      }
+    }
+    if (Array.isArray(memberIds)) {
+      const finalManagerId = managerId !== undefined ? managerId : team.manager_id;
+      for (const mid of memberIds) {
+        if (mid === finalManagerId) continue;
+        db.prepare('UPDATE commercial_users SET team_id=? WHERE id=?').run(id, mid);
+      }
+    }
+  });
+  run();
+  return db.prepare(`
+    SELECT st.*, cu.nom as manager_nom FROM sales_teams st
+    LEFT JOIN commercial_users cu ON cu.id = st.manager_id WHERE st.id=?
+  `).get(id);
 }
 
 function renameSalesTeam(id, label) {
@@ -79,6 +146,6 @@ function setAccountTeam(commercialId, teamId) {
 }
 
 module.exports = {
-  listSalesTeams, getTeamMembers, createSalesTeam, renameSalesTeam, deleteSalesTeam,
+  listSalesTeams, getTeamMembers, createSalesTeam, updateSalesTeam, renameSalesTeam, deleteSalesTeam,
   findAccountByRosterName, setAccountTeam,
 };
