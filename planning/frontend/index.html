@@ -1283,6 +1283,9 @@ function switchView(v){
   if(v==='reporting')loadReporting();
   if(v==='parametres')loadParametres();
   if(v==='bdc')bdcOnShow();
+  // Favicon dynamique : roue crantée sur Paramètres, sinon fruit du mois
+  // (repris par renderCalendar au retour sur Calendrier, cf. plus haut).
+  setFaviconEmoji(v==='parametres'?'⚙️':FRUITS_MOIS[currentDate.getMonth()]);
   closePlanningMenu();
 }
 // Menu burger mobile (voir bloc RESPONSIVE MOBILE en fin de <style>) : ouvre/
