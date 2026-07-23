@@ -112,6 +112,67 @@ app.post('/api/auth/set-password', (req, res) => {
   res.json({ role: 'sales', accountRole: user.role || 'commercial', commercial_id: user.id, nom: user.nom, email: user.email });
 });
 
+// Mot de passe oublié (self-service) — réutilise exactement le même mécanisme
+// que l'invitation de bienvenue (reset_token/reset_token_expires + lien
+// ?invite=TOKEN, déjà géré côté front par checkInviteToken()/pin-card-invite) :
+// un seul écran "choisis ton nouveau mot de passe" pour les deux usages, au
+// lieu d'en construire un second qui ferait doublon.
+// Réponse volontairement générique dans tous les cas (compte trouvé ou non) :
+// ne pas laisser deviner si un email existe dans la base (énumération de comptes).
+app.post('/api/auth/forgot-password', (req, res) => {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const genericMsg = 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.';
+  if (!email) return res.status(400).json({ error: 'Email requis' });
+  const user = db.prepare('SELECT * FROM commercial_users WHERE lower(email)=? AND actif=1').get(email);
+  if (!user) return res.json({ success: true, message: genericMsg }); // même réponse, compte inexistant
+  const token = crypto.randomBytes(32).toString('hex');
+  // Expiration courte (2h) — plus resserrée que l'invitation de bienvenue (7 jours),
+  // qui doit rester valable le temps qu'un nouveau compte pense à l'ouvrir.
+  const expires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  db.prepare('UPDATE commercial_users SET reset_token=?, reset_token_expires=? WHERE id=?').run(token, expires, user.id);
+  const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  const lien = `${baseUrl}/planning/?invite=${token}`;
+  const prenom = user.nom.split(' ')[0];
+  const html = `
+  <div style="background:#f3f4f6;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+    <table role="presentation" style="max-width:480px;width:100%;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb">
+      <tr>
+        <td style="background:#2563EB;padding:28px 32px">
+          <div style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.3px">Planning <span style="font-weight:400;opacity:0.85">Diffusion</span></div>
+          <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#bfdbfe;font-weight:700;margin-top:4px">OpenMedias</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:32px 32px 8px;color:#111827">
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.6">Bonjour ${prenom},</p>
+          <p style="margin:0 0 24px;font-size:15px;line-height:1.6">
+            Une réinitialisation de mot de passe a été demandée pour ton compte OpenMedias.
+            Si ce n'est pas toi, tu peux ignorer cet email sans risque — ton mot de passe actuel reste valable.
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 32px 32px;text-align:center">
+          <a href="${lien}" style="display:inline-block;background:#2563EB;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:13px 28px;border-radius:9px">
+            Choisir un nouveau mot de passe
+          </a>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 32px 28px">
+          <div style="height:1px;background:#e5e7eb;margin-bottom:20px"></div>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#9ca3af">
+            Ce lien est valable 2 heures et ne peut être utilisé qu'une seule fois.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </div>`;
+  reports.sendMailOnly(`Réinitialisation de ton mot de passe OpenMedias`, html, [user.email])
+    .catch((e) => console.error('[FORGOT-PASSWORD] échec envoi email:', e.message));
+  res.json({ success: true, message: genericMsg });
+});
+
 // Restaure une session déjà ouverte (SSO OpenDashboard ↔ OpenPlanning, ou retour
 // sur cette page) sans redemander les identifiants — le front appelle cette
 // route avec le x-commercial-id déjà connu (localStorage) au chargement.

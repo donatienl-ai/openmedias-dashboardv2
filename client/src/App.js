@@ -41,6 +41,36 @@ function Login({ onSuccess }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Repliés dans un seul disclosure (voir plus bas) : avant, le switch
+  // "Mot de passe unique (admin)" (bouton souligné) et le lien "Accès édito
+  // par code" (lien souligné à l'opacité différente) étaient posés l'un sous
+  // l'autre sans traitement commun, comme deux échappatoires sans lien visuel.
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
+  // Mot de passe oublié : mini-formulaire (email seul) plutôt qu'un écran à
+  // part — endpoint monté sous /planning (routeur planning/backend/router.js,
+  // partagé avec les comptes du planning), d'où le chemin absolu ci-dessous
+  // au lieu du chemin relatif 'api/...' utilisé pour les routes propres à ce
+  // serveur racine.
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotMsg, setForgotMsg] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+
+  const submitForgot = async () => {
+    if (!forgotEmail.trim()) { setForgotMsg('Email requis.'); return; }
+    setForgotLoading(true); setForgotMsg('');
+    try {
+      const res = await fetch('/planning/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setForgotMsg(data.message || 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.');
+    } catch {
+      setForgotMsg('Erreur réseau.');
+    } finally { setForgotLoading(false); }
+  };
 
   const submit = async () => {
     setLoading(true); setError('');
@@ -64,9 +94,38 @@ function Login({ onSuccess }) {
     } finally { setLoading(false); }
   };
 
+  if (showForgot) {
+    return (
+      <div className="login-wrap">
+        <div className="login-card">
+          <div className="brand-mark" style={{ marginBottom: 14 }} />
+          <div className="login-eyebrow">OpenMedias · Sales Dashboard</div>
+          <div className="login-title">Mot de passe<br />oublié</div>
+          <input
+            className="login-input" type="email" placeholder="Email du compte"
+            value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && submitForgot()} autoFocus
+          />
+          <button className="login-btn" onClick={submitForgot} disabled={forgotLoading}>
+            {forgotLoading ? 'Envoi…' : 'Envoyer le lien'}
+          </button>
+          {forgotMsg && <div className="login-hint">{forgotMsg}</div>}
+          <button
+            className="login-link-btn"
+            onClick={() => { setShowForgot(false); setForgotMsg(''); setForgotEmail(''); }}
+            style={{ marginTop: 14 }}
+          >
+            ← Retour à la connexion
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="login-wrap">
       <div className="login-card">
+        <div className="brand-mark" style={{ marginBottom: 14 }} />
         <div className="login-eyebrow">OpenMedias · Sales Dashboard</div>
         <div className="login-title">Performance<br />Commerciale</div>
         {mode === 'commercial' ? (
@@ -94,19 +153,40 @@ function Login({ onSuccess }) {
           {loading ? 'Connexion…' : 'Accéder au dashboard'}
         </button>
         {error && <div className="login-error">{error}</div>}
+        {mode === 'commercial' && (
+          <button
+            className="login-link-btn"
+            onClick={() => { setShowForgot(true); setError(''); }}
+            style={{ marginTop: 12 }}
+          >
+            Mot de passe oublié ?
+          </button>
+        )}
+        {/* Options de secours (mot de passe unique admin, ancien accès par
+            code) repliées dans un seul disclosure au même traitement visuel
+            — avant, un bouton souligné et un lien souligné à une autre
+            opacité cohabitaient sans rien qui les présente comme la même
+            catégorie "solutions de repli". */}
         <button
-          className="login-switch-mode"
-          onClick={() => { setMode((m) => (m === 'commercial' ? 'legacy' : 'commercial')); setError(''); }}
-          style={{ marginTop: 12, background: 'none', border: 'none', textDecoration: 'underline', cursor: 'pointer', fontSize: 12, opacity: 0.7 }}
+          className="login-link-btn"
+          onClick={() => setShowMoreOptions((o) => !o)}
+          style={{ marginTop: mode === 'commercial' ? 6 : 12 }}
         >
-          {mode === 'commercial' ? 'Mot de passe unique (admin)' : 'Compte commercial (email)'}
+          Autres options de connexion {showMoreOptions ? '▴' : '▾'}
         </button>
-        <a
-          href="/planning?pin=1"
-          style={{ display: 'block', marginTop: 6, fontSize: 11, opacity: 0.5, textDecoration: 'underline' }}
-        >
-          Accès édito par code (ancien système)
-        </a>
+        {showMoreOptions && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <button
+              className="login-link-btn"
+              onClick={() => { setMode((m) => (m === 'commercial' ? 'legacy' : 'commercial')); setError(''); }}
+            >
+              {mode === 'commercial' ? 'Mot de passe unique (admin)' : 'Compte commercial (email)'}
+            </button>
+            <a className="login-link-btn" href="/planning?pin=1">
+              Accès édito par code (ancien système)
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1797,7 +1877,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 // ---------- ROOT ----------
 export default function App() {
   const [password, setPassword] = useState(null); // `password` = objet credential (voir credHeaders/isAdminCred plus haut)
-  const [theme, setTheme] = useState(() => localStorage.getItem('om_theme') || 'dark');
+  // Clé localStorage partagée avec planning/frontend/index.html ('theme',
+  // pas 'om_theme') — avant, chaque app avait sa propre clé ET son propre
+  // défaut (dashboard sombre, planning clair), donc changer le thème d'un
+  // côté n'affectait jamais l'autre et la première impression différait
+  // selon le point d'entrée (relevé dans l'audit UX). Même clé + même défaut
+  // (clair) des deux côtés maintenant ; localStorage est bien partagé entre
+  // "/" et "/planning" (même origine).
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
 
   useEffect(() => {
     const saved = sessionStorage.getItem('om_cred');
@@ -1846,7 +1933,7 @@ export default function App() {
   // Applique le thème sur <html> et mémorise la préférence
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('om_theme', theme);
+    localStorage.setItem('theme', theme);
   }, [theme]);
 
   const toggleTheme = useCallback(() => setTheme((t) => (t === 'dark' ? 'light' : 'dark')), []);

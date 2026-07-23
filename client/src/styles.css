@@ -78,6 +78,9 @@ body {
   font-family: var(--font-body); outline: none; transition: border-color 0.2s;
 }
 .login-input:focus { border-color: var(--om-blue); }
+/* Contraste relevé (--text-muted était trop pâle pour un placeholder qu'on
+   doit pouvoir lire confortablement sur un champ vide). */
+.login-input::placeholder { color: var(--text-soft); opacity: 1; }
 .login-btn {
   width: 100%; margin-top: 16px; background: var(--om-blue); color: #fff;
   border: none; border-radius: 12px; padding: 14px; font-size: 15px;
@@ -86,7 +89,22 @@ body {
 }
 .login-btn:hover { background: var(--om-blue-light); }
 .login-btn:active { transform: scale(0.98); }
+.login-btn:disabled { opacity: 0.65; cursor: wait; }
 .login-error { margin-top: 14px; font-size: 13px; color: #FCA5A5; text-align: center; }
+.login-hint {
+  margin-top: 14px; font-size: 13px; color: var(--text-soft); text-align: center; line-height: 1.5;
+}
+/* Un seul traitement pour toutes les options secondaires de l'écran de
+   connexion (mot de passe oublié, autres modes de connexion) — avant,
+   certaines étaient des <button> et d'autres des <a>, avec des opacités
+   différentes (0.7 / 0.5) sans logique visuelle commune. */
+.login-link-btn {
+  display: block; width: 100%; text-align: center;
+  background: none; border: none; color: var(--text-soft);
+  text-decoration: underline; cursor: pointer; font-size: 12px;
+  font-family: var(--font-body); padding: 0;
+}
+.login-link-btn:hover { color: var(--text); }
 
 /* ===== SHELL =====
    Avant : max-width:1600px + margin:auto centrait TOUTE l'appli (header

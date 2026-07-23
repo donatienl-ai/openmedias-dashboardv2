@@ -79,6 +79,12 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .param-row .pr-email { color: var(--text-dim); min-width: 180px; }
 .param-row .pr-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 .param-row select.form-select { width: auto; font-size: 12px; padding: 5px 24px 5px 8px; background-position: right 10px center, right 5px center; }
+/* Étiquette permanente au-dessus de chaque select (Rôle / Équipe de vente /
+   Équipe édito) — avant, seul un `title` au survol distinguait ces 3 menus
+   posés côte à côte, il fallait deviner ou survoler chacun pour comprendre
+   à quoi il correspond (relevé dans l'audit UX). */
+.pr-field { display: flex; flex-direction: column; gap: 2px; }
+.pr-field-label { font-size: 9px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
 .list-filter-row th { padding: 4px 8px 10px; font-weight: 400; }
 .list-filter-input { font-size: 11px !important; padding: 5px 8px !important; width: 100%; min-width: 70px; }
 .list-filter-reset { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; white-space: nowrap; margin-left: 8px; }
@@ -376,6 +382,13 @@ td { padding: 10px 14px; font-size: 13px; }
 .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); }
 .kpi-eyebrow { display: flex; align-items: center; gap: 7px; font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; color: var(--text-dim); margin-bottom: 10px; }
 .kpi-eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
+/* Titres de section Paramètres — même structure que .kpi-eyebrow (puce +
+   libellé) mais sans MAJUSCULES/letter-spacing : posé en haut de 6-7 cartes
+   empilées sur la même page, la version toute-capitales devenait lourde à
+   la longue (relevé dans l'audit UX). Casse normale + un peu plus de poids
+   suffit à structurer sans "crier". */
+.param-section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--text); }
+.param-section-title .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
 .kpi-val { font-family: 'Sora', sans-serif; font-size: 32px; font-weight: 800; letter-spacing: -0.8px; font-variant-numeric: tabular-nums; }
 .kpi-lbl { font-size: 11px; color: var(--text-muted); font-weight: 600; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
 .media-table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
@@ -554,7 +567,8 @@ td { padding: 10px 14px; font-size: 13px; }
   .param-row { flex-direction: column; align-items: stretch; }
   .param-row .pr-name, .param-row .pr-email { min-width: 0; width: 100%; }
   .param-row .pr-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
-  .param-row .pr-actions select.form-select { flex: 1 1 110px; }
+  .param-row .pr-actions .pr-field { flex: 1 1 110px; }
+  .param-row .pr-actions .pr-field select.form-select { width: 100%; }
 }
 </style>
 </head>
@@ -588,7 +602,28 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
     <button class="btn-primary" style="width:100%;margin-top:18px" onclick="commercialLoginSubmit()">Connexion</button>
     <div class="pin-error" id="commercial-login-error"></div>
-    <div class="login-switch"><a href="#" onclick="toggleLoginMode(event)">← Je suis édito</a></div>
+    <div class="login-switch" style="display:flex;justify-content:space-between">
+      <a href="#" onclick="toggleLoginMode(event)">← Je suis édito</a>
+      <a href="#" onclick="showForgotPassword(event)">Mot de passe oublié ?</a>
+    </div>
+  </div>
+
+  <!-- Mot de passe oublié : demande l'email, envoie un lien de réinitialisation
+       s'il correspond à un compte (réponse toujours identique côté serveur,
+       voir /api/auth/forgot-password — pas de fuite sur l'existence d'un
+       compte). Le lien reçu par email atterrit ensuite sur pin-card-invite,
+       déjà en place pour le flow d'invitation — pas de nouvel écran à créer
+       pour la partie "choisir le nouveau mot de passe". -->
+  <div class="pin-card" id="pin-card-forgot" style="display:none">
+    <div class="pin-logo">Planning <span>Diffusion</span></div>
+    <div class="pin-sub">Mot de passe oublié</div>
+    <div style="text-align:left;margin-top:24px">
+      <div class="form-group"><label class="form-label">Email du compte</label><input class="form-input" type="email" id="forgot-email" autocomplete="username" onkeydown="if(event.key==='Enter')forgotPasswordSubmit()"></div>
+    </div>
+    <button class="btn-primary" style="width:100%;margin-top:18px" onclick="forgotPasswordSubmit()">Envoyer le lien</button>
+    <div class="pin-error" id="forgot-error"></div>
+    <div class="info-banner neutral" id="forgot-success" style="display:none;margin-top:14px;text-align:left"></div>
+    <div class="login-switch"><a href="#" onclick="hideForgotPassword(event)">← Retour à la connexion</a></div>
   </div>
 
   <div class="pin-card" id="pin-card-invite" style="display:none">
@@ -847,7 +882,7 @@ td { padding: 10px 14px; font-size: 13px; }
     <div class="report-grid" id="report-kpis"></div>
     <div class="media-table-card" id="report-table"></div>
     <div style="margin-top:24px">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Envoyer un rapport par email</div>
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Envoyer un rapport par email</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-secondary" onclick="sendReportEmail('mensuel',this)">📧 Rapport mensuel</button>
         <button class="btn-secondary" onclick="sendReportEmail('hebdo',this)">📧 Rapport hebdo</button>
@@ -861,7 +896,7 @@ td { padding: 10px 14px; font-size: 13px; }
     <div class="report-header"><h2 style="font-size:16px;font-weight:700">⚙️ Paramètres</h2></div>
 
     <div class="param-card">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Visibilité côté commercial</div>
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Visibilité côté commercial</div>
       <div class="form-row" style="align-items:flex-end">
         <div class="form-group" style="max-width:220px">
           <label class="form-label">Horizon max (mois dans le futur)</label>
@@ -872,7 +907,7 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
 
     <div class="param-card">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Importer/rattraper une Opportunité Salesforce</div>
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Importer/rattraper une Opportunité Salesforce</div>
       <div class="set-hint" style="font-size:12px;color:var(--text-muted);margin-bottom:12px">
         Colle l'Id ou le lien complet d'une Opportunité Salesforce pour forcer sa création dans le planning
         si le webhook n'a jamais tourné (cold start, repassage Fermée Perdue → Fermée Gagnée, etc.).
@@ -885,7 +920,7 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
 
     <div class="param-card">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Équipes édito</div>
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Équipes édito</div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Pour l'assignation "resp. édito" des émissions — sans rapport avec les équipes de vente ci-dessous.</div>
       <div id="equipes-list" class="param-chip-list"></div>
       <div class="form-row" style="margin-top:12px;align-items:flex-end">
@@ -895,7 +930,7 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
 
     <div class="param-card">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Équipes de vente</div>
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Équipes de vente</div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Un manager ne voit sur OpenDashboard que ses propres chiffres + ceux des commerciaux de son équipe.</div>
       <div id="sales-teams-list" class="param-chip-list"></div>
       <div style="margin-top:12px">
@@ -904,14 +939,14 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
 
     <div class="param-card">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Comptes (accès OpenDashboard + OpenPlanning)</div>
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>Comptes (accès OpenDashboard + OpenPlanning)</div>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn-secondary" onclick="loadSalesforceCommerciaux()">🔄 Depuis Salesforce (commerciaux)</button>
         <button class="btn-secondary" onclick="openManualAccountModal()">✍️ Créer manuellement (édito, communication...)</button>
       </div>
       <div id="sf-commerciaux-list" class="param-table" style="display:none"></div>
       <div class="param-sep"></div>
-      <div class="kpi-eyebrow" style="margin:14px 0 10px"><span class="dot" style="background:var(--green)"></span>Comptes créés</div>
+      <div class="param-section-title" style="margin:14px 0 10px"><span class="dot" style="background:var(--green)"></span>Comptes créés</div>
       <div id="commerciaux-list" class="param-table"></div>
     </div>
 
@@ -920,7 +955,7 @@ td { padding: 10px 14px; font-size: 13px; }
          seul endroit de gestion admin, quelle que soit la page de départ.
          Réservé aux comptes rôle "admin" (display:none par défaut). -->
     <div class="param-card" id="dash-admin-card" style="display:none">
-      <div class="kpi-eyebrow" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>📊 OpenDashboard — Reporting automatique</div>
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>📊 OpenDashboard — Reporting automatique</div>
       <div class="form-row" style="align-items:flex-end;flex-wrap:wrap;gap:12px">
         <div class="form-group">
           <label class="form-label">Thème de l'email</label>
@@ -953,11 +988,11 @@ td { padding: 10px 14px; font-size: 13px; }
       <div id="dash-report-status" style="font-size:12px;margin-top:8px"></div>
 
       <div class="param-sep"></div>
-      <div class="kpi-eyebrow" style="margin:14px 0 10px"><span class="dot" style="background:var(--accent)"></span>Connexions récentes</div>
+      <div class="param-section-title" style="margin:14px 0 10px"><span class="dot" style="background:var(--accent)"></span>Connexions récentes</div>
       <div id="dash-logins-list" class="param-table"></div>
 
       <div class="param-sep"></div>
-      <div class="kpi-eyebrow" style="margin:14px 0 10px"><span class="dot" style="background:var(--accent)"></span>Groupements d'affichage (filtres, TV)</div>
+      <div class="param-section-title" style="margin:14px 0 10px"><span class="dot" style="background:var(--accent)"></span>Groupements d'affichage (filtres, TV)</div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
         Utilisés pour regrouper les commerciaux dans les filtres et la vue TV du dashboard —
         même table que "Équipes de vente" ci-dessus, un compte étant nécessaire pour rattacher quelqu'un à un groupe.
@@ -1020,6 +1055,13 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
   // lui — donc on ne masque l'onglet que si ce n'est pas un admin.
   const hideDashboardTab=(role==='edit'&&!isAccountAdmin)||role==='com';
   document.getElementById('app-tab-dashboard').style.display = hideDashboardTab ? 'none' : '';
+  // Édito (non-admin) et communication n'ont accès qu'à Planning : masquer le
+  // bouton Dashboard seul laissait une barre pleine largeur avec un unique
+  // pavé actif et beaucoup de vide à droite — donnait l'impression d'un
+  // élément à moitié cassé plutôt que d'un choix voulu (Paramètres reste de
+  // toute façon caché pour ces rôles, admin-only). Toute la barre disparaît
+  // dans ce cas ; rien à choisir puisqu'il n'y a qu'une seule destination.
+  document.querySelector('.app-switch').style.display = hideDashboardTab ? 'none' : '';
   // Réglages spécifiques au dashboard (reporting, connexions, groupements
   // d'affichage) : réservés aux comptes admin, seuls comptes autorisés côté
   // serveur sur ces routes (requireAdmin).
@@ -1105,6 +1147,37 @@ async function commercialLoginSubmit(){
 function entrerCommeCommercial(d){
   activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole});
   init();
+}
+
+// Mot de passe oublié : bascule vers un 3e écran (email seul) qui appelle
+// /api/auth/forgot-password — même réponse générique que le compte existe ou
+// non, donc rien à distinguer ici, on affiche toujours le même message succès.
+function showForgotPassword(event){
+  if(event)event.preventDefault();
+  document.getElementById('pin-card-commercial').style.display='none';
+  document.getElementById('pin-card-forgot').style.display='';
+  document.getElementById('forgot-error').textContent='';
+  document.getElementById('forgot-success').style.display='none';
+  document.getElementById('forgot-email').value='';
+  document.getElementById('forgot-email').focus();
+}
+function hideForgotPassword(event){
+  if(event)event.preventDefault();
+  document.getElementById('pin-card-forgot').style.display='none';
+  document.getElementById('pin-card-commercial').style.display='';
+}
+async function forgotPasswordSubmit(){
+  const email=document.getElementById('forgot-email').value.trim();
+  const errEl=document.getElementById('forgot-error');
+  const okEl=document.getElementById('forgot-success');
+  errEl.textContent='';okEl.style.display='none';
+  if(!email){errEl.textContent='Email requis.';return;}
+  try{
+    const r=await fetch(`${API}/auth/forgot-password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
+    const d=await r.json().catch(()=>({}));
+    okEl.textContent=d.message||'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.';
+    okEl.style.display='';
+  }catch{errEl.textContent='Erreur réseau.';}
 }
 
 // Lien d'invitation reçu par email (?invite=TOKEN) : le commercial choisit son
@@ -3155,12 +3228,12 @@ function renderCommerciauxList(){
     <div class="param-row">
       <span class="pr-name">${c.nom}</span><span class="pr-email">${c.email}</span>
       <div class="pr-actions">
-        <select class="form-select" title="Rôle" onchange="updateCommercialRole(${c.id},this.value)">${roleOptionsHtml(c.role||'commercial')}</select>
-        <select class="form-select" title="Équipe de vente" onchange="updateCommercialTeam(${c.id},this.value)">${salesTeamOptionsHtml(c.team_id)}</select>
-        <select class="form-select" title="Équipe édito" onchange="updateCommercialEquipe(${c.id},this.value)">
+        <div class="pr-field"><span class="pr-field-label">Rôle</span><select class="form-select" title="Rôle" onchange="updateCommercialRole(${c.id},this.value)">${roleOptionsHtml(c.role||'commercial')}</select></div>
+        <div class="pr-field"><span class="pr-field-label">Équipe de vente</span><select class="form-select" title="Équipe de vente" onchange="updateCommercialTeam(${c.id},this.value)">${salesTeamOptionsHtml(c.team_id)}</select></div>
+        <div class="pr-field"><span class="pr-field-label">Équipe édito</span><select class="form-select" title="Équipe édito" onchange="updateCommercialEquipe(${c.id},this.value)">
           <option value="">— équipe édito —</option>
           ${equipesCache.map(e=>`<option value="${e.id}" ${c.equipe_edito_id===e.id?'selected':''}>${e.nom}</option>`).join('')}
-        </select>
+        </select></div>
         <button class="btn-icon" title="${c.actif?'Désactiver':'Réactiver'}" onclick="toggleCommercialActif(${c.id},${c.actif?0:1})">${c.actif?'🟢':'⚪'}</button>
         <button class="btn-icon" title="Renvoyer l'email d'invitation (définir mot de passe)" onclick="resendInvite(${c.id},'${c.nom.replace(/'/g,"\\'")}')">${ICON_MAIL}</button>
         <button class="btn-icon" title="Réinitialiser le mot de passe manuellement" onclick="resetCommercialPassword(${c.id})">🔑</button>
