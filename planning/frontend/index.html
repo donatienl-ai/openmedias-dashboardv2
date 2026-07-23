@@ -90,10 +90,11 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .list-filter-reset { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; white-space: nowrap; margin-left: 8px; }
 /* Filtres multi-sélection de la vue Liste (Média, Semaine, Format, Resp. édito, Statut) —
    permet de cocher plusieurs valeurs à la fois au lieu d'un select mono-valeur. */
-.ms-filter { position: relative; }
 .ms-filter-btn { text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ms-filter-btn.ms-filter-active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
-.ms-filter-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 170px; max-width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); z-index: 200; max-height: 260px; overflow-y: auto; padding: 6px; }
+/* Menu unique en position:fixed (repositionné en JS au clic), placé hors du
+   tableau pour ne pas être rogné par le overflow:hidden de .table-card. */
+.ms-filter-menu { min-width: 170px; max-width: 260px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); z-index: 500; max-height: 260px; overflow-y: auto; padding: 6px; }
 .ms-filter-item { display: flex; align-items: center; gap: 8px; padding: 6px 6px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 6px; white-space: nowrap; }
 .ms-filter-item:hover { background: var(--surface2); }
 .ms-filter-item input { flex-shrink: 0; }
@@ -763,36 +764,31 @@ td { padding: 10px 14px; font-size: 13px; }
           <th><input class="form-input list-filter-input" id="lf-entreprise" placeholder="Filtrer…" oninput="applyListFilters()"></th>
           <th>
             <div class="ms-filter" id="msf-media">
-              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-media-btn" onclick="toggleMsFilter('media')">Tous</button>
-              <div class="ms-filter-menu" id="msf-media-menu" style="display:none"></div>
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-media-btn" onclick="toggleMsFilter('media',event)">Tous</button>
             </div>
           </th>
           <th>
             <div class="ms-filter" id="msf-semaine">
-              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-semaine-btn" onclick="toggleMsFilter('semaine')">Toutes</button>
-              <div class="ms-filter-menu" id="msf-semaine-menu" style="display:none"></div>
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-semaine-btn" onclick="toggleMsFilter('semaine',event)">Toutes</button>
             </div>
           </th>
           <th>
             <div class="ms-filter" id="msf-format">
-              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-format-btn" onclick="toggleMsFilter('format')">Tous</button>
-              <div class="ms-filter-menu" id="msf-format-menu" style="display:none"></div>
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-format-btn" onclick="toggleMsFilter('format',event)">Tous</button>
             </div>
           </th>
           <th><input class="form-input list-filter-input" id="lf-secteur" placeholder="Filtrer…" oninput="applyListFilters()"></th>
           <th><input class="form-input list-filter-input" id="lf-commercial" placeholder="Filtrer…" oninput="applyListFilters()"></th>
           <th>
             <div class="ms-filter" id="msf-resp">
-              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-resp-btn" onclick="toggleMsFilter('resp')">Tous</button>
-              <div class="ms-filter-menu" id="msf-resp-menu" style="display:none"></div>
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-resp-btn" onclick="toggleMsFilter('resp',event)">Tous</button>
             </div>
           </th>
           <th class="admin-only" style="display:none"></th>
           <th class="admin-only" style="display:none"></th>
           <th>
             <div class="ms-filter" id="msf-statut">
-              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-statut-btn" onclick="toggleMsFilter('statut')">Tous</button>
-              <div class="ms-filter-menu" id="msf-statut-menu" style="display:none"></div>
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-statut-btn" onclick="toggleMsFilter('statut',event)">Tous</button>
             </div>
           </th>
         </tr>
@@ -801,6 +797,7 @@ td { padding: 10px 14px; font-size: 13px; }
       </table>
     </div>
   </div>
+  <div class="ms-filter-menu" id="ms-filter-shared-menu" style="display:none;position:fixed"></div>
 
   <div class="view" id="view-bdc">
     <div class="bdc-editor">
@@ -2036,8 +2033,36 @@ function refreshMsFilterButtons(){
   });
 }
 
+/* Un seul menu partagé, sorti du tableau et positionné en fixed : le tableau
+   (.table-card) a overflow:hidden pour ses coins arrondis, ce qui rognait les
+   anciens popovers imbriqués dans chaque <th>. */
+let msFilterOpenKey=null;
+
+function closeMsFilterMenu(){
+  msFilterOpenKey=null;
+  const menu=document.getElementById('ms-filter-shared-menu');
+  menu.style.display='none';
+}
+
+function positionMsFilterMenu(btn){
+  const menu=document.getElementById('ms-filter-shared-menu');
+  const rect=btn.getBoundingClientRect();
+  const menuWidth=Math.max(170,rect.width);
+  let left=rect.left;
+  if(left+menuWidth>window.innerWidth-8)left=window.innerWidth-menuWidth-8;
+  if(left<8)left=8;
+  let top=rect.bottom+4;
+  menu.style.left=`${left}px`;
+  menu.style.top=`${top}px`;
+  menu.style.width=`${menuWidth}px`;
+  const menuRect=menu.getBoundingClientRect();
+  if(menuRect.bottom>window.innerHeight-8){
+    menu.style.top=`${Math.max(8,rect.top-menuRect.height-4)}px`;
+  }
+}
+
 function renderMsFilterMenu(key){
-  const menu=document.getElementById(`msf-${key}-menu`);
+  const menu=document.getElementById('ms-filter-shared-menu');
   const opts=msFilterOptionsFor(key);
   const sel=msFilters[key];
   if(!opts.length){
@@ -2052,14 +2077,16 @@ function renderMsFilterMenu(key){
   `).join('')+(sel.size?`<div class="ms-filter-sep"></div><button type="button" class="ms-filter-clear" onclick="clearMsFilter('${key}')">Tout désélectionner</button>`:'');
 }
 
-function toggleMsFilter(key){
-  const menu=document.getElementById(`msf-${key}-menu`);
-  const willOpen=menu.style.display==='none';
-  document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
-  if(willOpen){
-    renderMsFilterMenu(key);
-    menu.style.display='block';
-  }
+function toggleMsFilter(key,event){
+  const willOpen=msFilterOpenKey!==key;
+  closeMsFilterMenu();
+  if(!willOpen)return;
+  msFilterOpenKey=key;
+  const btn=(event&&event.currentTarget)||document.getElementById(`msf-${key}-btn`);
+  renderMsFilterMenu(key);
+  const menu=document.getElementById('ms-filter-shared-menu');
+  menu.style.display='block';
+  positionMsFilterMenu(btn);
 }
 
 function toggleMsFilterValue(key,value){
@@ -2073,13 +2100,17 @@ function toggleMsFilterValue(key,value){
 function clearMsFilter(key){
   msFilters[key].clear();
   refreshMsFilterButtons();
-  document.getElementById(`msf-${key}-menu`).style.display='none';
+  closeMsFilterMenu();
   applyListFilters();
 }
 
 document.addEventListener('click',e=>{
-  if(!e.target.closest('.ms-filter'))document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
+  if(!e.target.closest('.ms-filter')&&!e.target.closest('#ms-filter-shared-menu'))closeMsFilterMenu();
 });
+window.addEventListener('resize',()=>{ if(msFilterOpenKey)closeMsFilterMenu(); });
+document.addEventListener('scroll',e=>{
+  if(msFilterOpenKey&&e.target && e.target.closest && e.target.closest('.table-card'))closeMsFilterMenu();
+},true);
 
 function applyListFilters(){
   const fEntreprise=document.getElementById('lf-entreprise').value.trim().toLowerCase();
@@ -2129,7 +2160,7 @@ function applyListFilters(){
 function resetListFilters(){
   ['lf-entreprise','lf-secteur','lf-commercial'].forEach(id=>document.getElementById(id).value='');
   Object.keys(msFilters).forEach(key=>msFilters[key].clear());
-  document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
+  closeMsFilterMenu();
   refreshMsFilterButtons();
   applyListFilters();
 }
