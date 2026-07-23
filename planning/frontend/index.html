@@ -88,6 +88,19 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .list-filter-row th { padding: 4px 8px 10px; font-weight: 400; }
 .list-filter-input { font-size: 11px !important; padding: 5px 8px !important; width: 100%; min-width: 70px; }
 .list-filter-reset { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; white-space: nowrap; margin-left: 8px; }
+/* Filtres multi-sélection de la vue Liste (Média, Semaine, Format, Resp. édito, Statut) —
+   permet de cocher plusieurs valeurs à la fois au lieu d'un select mono-valeur. */
+.ms-filter { position: relative; }
+.ms-filter-btn { text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-filter-btn.ms-filter-active { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.ms-filter-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 170px; max-width: 240px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); z-index: 200; max-height: 260px; overflow-y: auto; padding: 6px; }
+.ms-filter-item { display: flex; align-items: center; gap: 8px; padding: 6px 6px; font-size: 12px; font-weight: 500; cursor: pointer; border-radius: 6px; white-space: nowrap; }
+.ms-filter-item:hover { background: var(--surface2); }
+.ms-filter-item input { flex-shrink: 0; }
+.ms-filter-sep { height: 1px; background: var(--border-soft); margin: 4px 2px; }
+.ms-filter-clear { display: block; width: 100%; background: none; border: none; color: var(--accent); font-size: 11px; font-weight: 600; text-align: left; padding: 6px; cursor: pointer; border-radius: 6px; }
+.ms-filter-clear:hover { background: var(--surface2); }
+.ms-filter-empty { padding: 8px 6px; font-size: 11px; color: var(--text-muted); }
 .sortable-th { cursor: pointer; user-select: none; }
 .sortable-th:hover { color: var(--accent); }
 .sort-arrow { display: inline-block; margin-left: 4px; font-size: 10px; color: var(--accent); }
@@ -748,21 +761,40 @@ td { padding: 10px 14px; font-size: 13px; }
         </tr>
         <tr class="list-filter-row">
           <th><input class="form-input list-filter-input" id="lf-entreprise" placeholder="Filtrer…" oninput="applyListFilters()"></th>
-          <th><select class="form-select list-filter-input" id="lf-media" onchange="applyListFilters()"><option value="">Tous</option></select></th>
-          <th><select class="form-select list-filter-input" id="lf-semaine" onchange="applyListFilters()"><option value="">Toutes</option></select></th>
-          <th><select class="form-select list-filter-input" id="lf-format" onchange="applyListFilters()"><option value="">Tous</option></select></th>
+          <th>
+            <div class="ms-filter" id="msf-media">
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-media-btn" onclick="toggleMsFilter('media')">Tous</button>
+              <div class="ms-filter-menu" id="msf-media-menu" style="display:none"></div>
+            </div>
+          </th>
+          <th>
+            <div class="ms-filter" id="msf-semaine">
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-semaine-btn" onclick="toggleMsFilter('semaine')">Toutes</button>
+              <div class="ms-filter-menu" id="msf-semaine-menu" style="display:none"></div>
+            </div>
+          </th>
+          <th>
+            <div class="ms-filter" id="msf-format">
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-format-btn" onclick="toggleMsFilter('format')">Tous</button>
+              <div class="ms-filter-menu" id="msf-format-menu" style="display:none"></div>
+            </div>
+          </th>
           <th><input class="form-input list-filter-input" id="lf-secteur" placeholder="Filtrer…" oninput="applyListFilters()"></th>
           <th><input class="form-input list-filter-input" id="lf-commercial" placeholder="Filtrer…" oninput="applyListFilters()"></th>
-          <th><select class="form-select list-filter-input" id="lf-resp" onchange="applyListFilters()"><option value="">Tous</option><option value="_none">Non assignées</option></select></th>
+          <th>
+            <div class="ms-filter" id="msf-resp">
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-resp-btn" onclick="toggleMsFilter('resp')">Tous</button>
+              <div class="ms-filter-menu" id="msf-resp-menu" style="display:none"></div>
+            </div>
+          </th>
           <th class="admin-only" style="display:none"></th>
           <th class="admin-only" style="display:none"></th>
-          <th><select class="form-select list-filter-input" id="lf-statut" onchange="applyListFilters()">
-            <option value="">Tous</option>
-            <option value="a_assigner">À assigner</option>
-            <option value="bdc_attente">BDC en attente</option>
-            <option value="confirme">Confirmé</option>
-            <option value="annule">Annulé</option>
-          </select></th>
+          <th>
+            <div class="ms-filter" id="msf-statut">
+              <button type="button" class="form-select list-filter-input ms-filter-btn" id="msf-statut-btn" onclick="toggleMsFilter('statut')">Tous</button>
+              <div class="ms-filter-menu" id="msf-statut-menu" style="display:none"></div>
+            </div>
+          </th>
         </tr>
         </thead>
         <tbody id="list-tbody"></tbody>
@@ -1954,55 +1986,119 @@ async function renderList(){
   if(searchQuery)url+=`&search=${encodeURIComponent(searchQuery)}`;
   if(bdcFilterActive)url+=`&statut=bdc_attente`;
   listAllCache=await fetch(url,{headers:{role}}).then(r=>r.json());
-  populateListFilterOptions();
+  refreshMsFilterButtons();
   applyListFilters();
 }
 
-function populateListFilterOptions(){
-  const mediaSel=document.getElementById('lf-media');
-  if(mediaSel.options.length<=1){
-    mediaSel.innerHTML='<option value="">Tous</option>'+meta.medias.map(m=>`<option value="${m}">${m}</option>`).join('');
-  }
-  const respSel=document.getElementById('lf-resp');
-  const respCurrent=respSel.value;
-  respSel.innerHTML='<option value="">Tous</option><option value="_none">Non assignées</option>'+RESP_EDIT_LIST.map(r=>`<option value="${r}">${r}</option>`).join('');
-  respSel.value=respCurrent;
-  const allFormats=[...new Set(listAllCache.map(e=>e.format).filter(Boolean))].sort();
-  const formatSel=document.getElementById('lf-format');
-  const formatCurrent=formatSel.value;
-  formatSel.innerHTML='<option value="">Tous</option>'+allFormats.map(f=>`<option value="${f}">${f}</option>`).join('');
-  formatSel.value=formatCurrent;
+/* ── Filtres multi-sélection de la vue Liste ──────────────────────────
+   Chaque filtre catégoriel (Média, Semaine, Format, Resp. édito, Statut)
+   est un Set de valeurs sélectionnées ; un Set vide = "Tous" (pas de filtre). */
+const msFilters={media:new Set(),semaine:new Set(),format:new Set(),resp:new Set(),statut:new Set()};
+const msFilterDefaultLabel={media:'Tous',semaine:'Toutes',format:'Tous',resp:'Tous',statut:'Tous'};
 
-  const weekSel=document.getElementById('lf-semaine');
-  const weekCurrent=weekSel.value;
-  const weeks=[...new Set(listAllCache.filter(e=>e.date_diffusion).map(e=>mondayOfWeek(e.date_diffusion)))].sort();
-  weekSel.innerHTML='<option value="">Toutes</option>'+weeks.map(w=>{
-    const fin=new Date(w+'T00:00:00'); fin.setDate(fin.getDate()+4);
-    return `<option value="${w}">Sem. du ${formatDateFR(w)} au ${formatDateFR(fmtDate(fin))}</option>`;
-  }).join('');
-  weekSel.value=weekCurrent;
+function msFilterOptionsFor(key){
+  if(key==='media')return meta.medias.map(m=>({value:m,label:m}));
+  if(key==='format')return [...new Set(listAllCache.map(e=>e.format).filter(Boolean))].sort().map(f=>({value:f,label:f}));
+  if(key==='resp')return [{value:'_none',label:'Non assignées'},...RESP_EDIT_LIST.map(r=>({value:r,label:r}))];
+  if(key==='statut')return [
+    {value:'a_assigner',label:'À assigner'},
+    {value:'bdc_attente',label:'BDC en attente'},
+    {value:'confirme',label:'Confirmé'},
+    {value:'annule',label:'Annulé'},
+  ];
+  if(key==='semaine'){
+    const weeks=[...new Set(listAllCache.filter(e=>e.date_diffusion).map(e=>mondayOfWeek(e.date_diffusion)))].sort();
+    return weeks.map(w=>{
+      const fin=new Date(w+'T00:00:00'); fin.setDate(fin.getDate()+4);
+      return {value:w,label:`Sem. du ${formatDateFR(w)} au ${formatDateFR(fmtDate(fin))}`};
+    });
+  }
+  return [];
 }
+
+function msFilterButtonLabel(key){
+  const sel=msFilters[key];
+  if(sel.size===0)return msFilterDefaultLabel[key];
+  const opts=msFilterOptionsFor(key);
+  if(sel.size===1){
+    const v=[...sel][0];
+    return opts.find(o=>o.value===v)?.label||v;
+  }
+  return `${sel.size} sélectionnés`;
+}
+
+function refreshMsFilterButtons(){
+  Object.keys(msFilters).forEach(key=>{
+    const btn=document.getElementById(`msf-${key}-btn`);
+    if(!btn)return;
+    btn.textContent=msFilterButtonLabel(key);
+    btn.classList.toggle('ms-filter-active',msFilters[key].size>0);
+  });
+}
+
+function renderMsFilterMenu(key){
+  const menu=document.getElementById(`msf-${key}-menu`);
+  const opts=msFilterOptionsFor(key);
+  const sel=msFilters[key];
+  if(!opts.length){
+    menu.innerHTML='<div class="ms-filter-empty">Aucune option</div>';
+    return;
+  }
+  menu.innerHTML=opts.map(o=>`
+    <label class="ms-filter-item">
+      <input type="checkbox" value="${o.value}" ${sel.has(o.value)?'checked':''} onchange="toggleMsFilterValue('${key}','${o.value}')">
+      <span>${o.label}</span>
+    </label>
+  `).join('')+(sel.size?`<div class="ms-filter-sep"></div><button type="button" class="ms-filter-clear" onclick="clearMsFilter('${key}')">Tout désélectionner</button>`:'');
+}
+
+function toggleMsFilter(key){
+  const menu=document.getElementById(`msf-${key}-menu`);
+  const willOpen=menu.style.display==='none';
+  document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
+  if(willOpen){
+    renderMsFilterMenu(key);
+    menu.style.display='block';
+  }
+}
+
+function toggleMsFilterValue(key,value){
+  const sel=msFilters[key];
+  if(sel.has(value))sel.delete(value);else sel.add(value);
+  refreshMsFilterButtons();
+  renderMsFilterMenu(key);
+  applyListFilters();
+}
+
+function clearMsFilter(key){
+  msFilters[key].clear();
+  refreshMsFilterButtons();
+  document.getElementById(`msf-${key}-menu`).style.display='none';
+  applyListFilters();
+}
+
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.ms-filter'))document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
+});
 
 function applyListFilters(){
   const fEntreprise=document.getElementById('lf-entreprise').value.trim().toLowerCase();
-  const fMedia=document.getElementById('lf-media').value;
-  const fFormat=document.getElementById('lf-format').value;
   const fSecteur=document.getElementById('lf-secteur').value.trim().toLowerCase();
   const fCommercial=document.getElementById('lf-commercial').value.trim().toLowerCase();
-  const fResp=document.getElementById('lf-resp').value;
-  const fStatut=document.getElementById('lf-statut').value;
-  const fSemaine=document.getElementById('lf-semaine').value;
 
   const filtered=listAllCache.filter(e=>{
     if(fEntreprise&&!(e.entreprise||'').toLowerCase().includes(fEntreprise))return false;
-    if(fMedia&&e.media!==fMedia)return false;
-    if(fSemaine&&(!e.date_diffusion||mondayOfWeek(e.date_diffusion)!==fSemaine))return false;
-    if(fFormat&&e.format!==fFormat)return false;
+    if(msFilters.media.size&&!msFilters.media.has(e.media))return false;
+    if(msFilters.semaine.size&&(!e.date_diffusion||!msFilters.semaine.has(mondayOfWeek(e.date_diffusion))))return false;
+    if(msFilters.format.size&&!msFilters.format.has(e.format))return false;
     if(fSecteur&&!(e.secteur||'').toLowerCase().includes(fSecteur))return false;
     if(fCommercial&&!(e.commercial||'').toLowerCase().includes(fCommercial))return false;
-    if(fResp==='_none'&&e.resp_edit)return false;
-    if(fResp&&fResp!=='_none'&&e.resp_edit!==fResp)return false;
-    if(fStatut&&e.statut!==fStatut)return false;
+    if(msFilters.resp.size){
+      const matchNone=msFilters.resp.has('_none')&&!e.resp_edit;
+      const matchNamed=e.resp_edit&&msFilters.resp.has(e.resp_edit);
+      if(!matchNone&&!matchNamed)return false;
+    }
+    if(msFilters.statut.size&&!msFilters.statut.has(e.statut))return false;
     return true;
   });
 
@@ -2032,7 +2128,9 @@ function applyListFilters(){
 
 function resetListFilters(){
   ['lf-entreprise','lf-secteur','lf-commercial'].forEach(id=>document.getElementById(id).value='');
-  ['lf-media','lf-semaine','lf-format','lf-resp','lf-statut'].forEach(id=>document.getElementById(id).value='');
+  Object.keys(msFilters).forEach(key=>msFilters[key].clear());
+  document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
+  refreshMsFilterButtons();
   applyListFilters();
 }
 
