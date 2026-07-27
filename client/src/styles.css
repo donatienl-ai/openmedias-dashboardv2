@@ -161,15 +161,17 @@ body {
   box-shadow: 0 2px 12px rgba(16, 26, 46, 0.04);
   position: sticky; top: 0; z-index: 50;
 }
-.topbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-/* Regroupe mark+text avec leur PROPRE gap (11px), identique à .header-brand
-   côté planning — sans ce sous-groupe, le gap de 16px de .topbar-left
-   s'appliquait aussi entre la barre d'accent et le texte, ce qui les
-   espaçait plus que côté planning (11px) malgré des tailles par ailleurs
-   identiques. */
+/* 24px (au lieu de 16px) : les groupes (onglets app-switch / bloc marque /
+   date+badges) respiraient trop peu les uns des autres — cf retour "plus
+   espacer les infos". Le sous-groupe .brand-block garde son propre gap plus
+   serré (11px) pour l'icône+texte, qui doivent rester visuellement soudés. */
+.topbar-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .brand-block { display: flex; align-items: center; gap: 11px; }
-/* Barre d'accent + séparateurs verticaux : mêmes tailles que .header-mark/
-   .header-sep côté planning, pour la même "signature" visuelle de header. */
+/* Icône emoji (📊) à la place de l'ancienne barre d'accent abstraite, pour
+   aligner la DA du header Dashboard sur les émojis déjà utilisés ailleurs
+   (onglet "📊 Dashboard", favicon) — .brand-mark reste utilisé tel quel sur
+   l'écran de connexion (barre verticale), volontairement inchangé. */
+.brand-icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
 .brand-sep { width: 1px; height: 30px; background: var(--border); flex-shrink: 0; }
 .brand-text { display: flex; flex-direction: column; gap: 1px; }
@@ -597,7 +599,7 @@ body {
    de .dash-toolbar. */
 .topbar { align-items: center; }
 .context-line {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 14px;
   font-size: 13px; color: var(--text-soft);
   text-transform: capitalize;
 }

@@ -1415,10 +1415,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               PLEINE LARGEUR façon "hero", ce qui rendait ce header 2 à 3 fois
               plus haut que celui du planning pour la même info. */}
           <div className="brand-block">
-            <div className="brand-mark" />
+            <div className="brand-icon" aria-hidden="true">📊</div>
             <div className="brand-text">
-              <div className="brand-eyebrow">OpenMedias · Sales Dashboard</div>
-              <div className="brand-title">Performance Commerciale</div>
+              <div className="brand-eyebrow">OpenMedias</div>
+              <div className="brand-title">OpenDashboard</div>
             </div>
           </div>
           <div className="brand-sep" />
