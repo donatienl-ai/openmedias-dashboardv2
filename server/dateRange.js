@@ -100,8 +100,27 @@ export function previousQuarterStart(now = new Date()) {
  */
 export function comparisonRange(preset, range) {
   switch (preset) {
-    case 'today':
+    case 'today': {
+      // "Aujourd'hui" ne contient que 00:00→maintenant (les heures futures
+      // du jour n'ont simplement pas encore de données) : le comparer à une
+      // journée ouvrée précédente ENTIÈRE (00:00→23:59:59.999) gonflait
+      // artificiellement toutes les baisses en cours de journée — ex. à 9h,
+      // 3 appels aujourd'hui vs 45 hier au complet affichait -93% alors que
+      // rien d'anormal ne s'est produit, la journée n'est juste pas finie.
+      // On plafonne donc la fin de la journée de comparaison à la même
+      // heure que "maintenant", comme le fait déjà this_week/this_month
+      // (span-matché) juste en dessous.
+      const now = new Date();
+      let d = addDays(range.start, -1);
+      while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, -1);
+      const cappedEnd = new Date(d);
+      cappedEnd.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+      return { start: startOfDay(d), end: cappedEnd };
+    }
     case 'yesterday': {
+      // "Hier" est déjà une journée complète des deux côtés (range.start/end
+      // couvrent hier en entier, terminé) : comparer à la journée ouvrée
+      // entière d'avant est légitime tel quel, pas de plafond à poser.
       let d = addDays(range.start, -1);
       while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, -1);
       return { start: startOfDay(d), end: endOfDay(d) };
