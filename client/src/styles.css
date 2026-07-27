@@ -161,15 +161,16 @@ body {
   box-shadow: 0 2px 12px rgba(16, 26, 46, 0.04);
   position: sticky; top: 0; z-index: 50;
 }
-/* Poussé à fond à droite (flex:1 + margin-left:auto), ça donnait deux blocs
-   isolés aux extrémités avec un grand vide mort au milieu — pas équilibré.
-   Revenu à un gap fixe, généreux mais raisonnable, qui garde les infos
-   groupées "à gauche" sans les recoller entre elles comme avant. */
-.topbar-left { display: flex; align-items: center; gap: 40px; flex-wrap: wrap; }
+/* Depuis qu'on a retiré le max-width de .shell, .topbar s'étire sur toute la
+   largeur d'un écran large — aucun gap fixe ne peut "équilibrer" un cluster
+   resté ancré à gauche (déjà essayé : poussé à fond à droite = deux îlots
+   avec un vide mort ; gap plat = tout collé à gauche). Vraie répartition en
+   3 zones (onglets / marque / date+badges) sur toute la largeur de la barre :
+   flex:1 pour que .topbar-left occupe la largeur, space-between pour étaler
+   les 3 zones. Le gap sert seulement de filet en cas de wrap sur mobile. */
+.topbar-left { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; flex: 1; }
 .brand-block { display: flex; align-items: center; gap: 11px; }
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
-.brand-sep { width: 1px; height: 30px; background: var(--border); flex-shrink: 0; }
-.topbar-meta { display: flex; align-items: center; gap: 14px; }
 .brand-text { display: flex; flex-direction: column; gap: 1px; }
 /* Tailles alignées sur .header-eyebrow/.header-logo du planning : avant,
    22px/9px en empilement "hero" pleine largeur rendait ce header 2 à 3 fois

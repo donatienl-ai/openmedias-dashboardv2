@@ -1407,13 +1407,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <button className="app-switch-btn" onClick={() => { window.location.href = '/planning?view=parametres'; }}>⚙️ Paramètres</button>
             )}
           </div>
-          <div className="brand-sep" />
           {/* Bloc marque compact (barre d'accent + eyebrow/titre empilés sur
-              2 lignes SERRÉES), même structure ET même gap (11px, voir
-              .brand-block) que .header-brand côté
-              planning — au lieu d'empiler eyebrow/titre/date sur 3 lignes
-              PLEINE LARGEUR façon "hero", ce qui rendait ce header 2 à 3 fois
-              plus haut que celui du planning pour la même info. */}
+              2 lignes SERRÉES). Plus de séparateurs verticaux ici : avec les 3
+              zones vraiment réparties sur la largeur (.topbar-left en
+              justify-content:space-between), un trait collé au bord d'une
+              zone qui a un grand vide de l'autre côté ne sépare plus rien. */}
           <div className="brand-block">
             <div className="brand-mark" />
             <div className="brand-text">
@@ -1421,17 +1419,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <div className="brand-title">OpenDashboard</div>
             </div>
           </div>
-          {/* Poussé à droite (margin-left:auto sur .topbar-meta) : avant, ce
-              groupe suivait juste le bloc marque et tout restait collé à
-              gauche, avec un grand vide inutilisé sur le reste de la barre. */}
-          <div className="topbar-meta">
-            <div className="brand-sep" />
-            <div className="context-line">
-              <span>{todayLabel()}</span>
-              {!isToday && <span className="period-chip">{rangeLabel}</span>}
-              {filterLabel && <span className="filter-badge">{filterLabel}</span>}
-              {hidden.size > 0 && <span className="hidden-chip">{hidden.size} masqué{hidden.size > 1 ? 's' : ''}</span>}
-            </div>
+          <div className="context-line">
+            <span>{todayLabel()}</span>
+            {!isToday && <span className="period-chip">{rangeLabel}</span>}
+            {filterLabel && <span className="filter-badge">{filterLabel}</span>}
+            {hidden.size > 0 && <span className="hidden-chip">{hidden.size} masqué{hidden.size > 1 ? 's' : ''}</span>}
           </div>
         </div>
       </div>
