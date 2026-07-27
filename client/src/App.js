@@ -1415,18 +1415,23 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               PLEINE LARGEUR façon "hero", ce qui rendait ce header 2 à 3 fois
               plus haut que celui du planning pour la même info. */}
           <div className="brand-block">
-            <div className="brand-icon" aria-hidden="true">📊</div>
+            <div className="brand-mark" />
             <div className="brand-text">
               <div className="brand-eyebrow">OpenMedias</div>
               <div className="brand-title">OpenDashboard</div>
             </div>
           </div>
-          <div className="brand-sep" />
-          <div className="context-line">
-            <span>{todayLabel()}</span>
-            {!isToday && <span className="period-chip">{rangeLabel}</span>}
-            {filterLabel && <span className="filter-badge">{filterLabel}</span>}
-            {hidden.size > 0 && <span className="hidden-chip">{hidden.size} masqué{hidden.size > 1 ? 's' : ''}</span>}
+          {/* Poussé à droite (margin-left:auto sur .topbar-meta) : avant, ce
+              groupe suivait juste le bloc marque et tout restait collé à
+              gauche, avec un grand vide inutilisé sur le reste de la barre. */}
+          <div className="topbar-meta">
+            <div className="brand-sep" />
+            <div className="context-line">
+              <span>{todayLabel()}</span>
+              {!isToday && <span className="period-chip">{rangeLabel}</span>}
+              {filterLabel && <span className="filter-badge">{filterLabel}</span>}
+              {hidden.size > 0 && <span className="hidden-chip">{hidden.size} masqué{hidden.size > 1 ? 's' : ''}</span>}
+            </div>
           </div>
         </div>
       </div>

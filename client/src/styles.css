@@ -167,13 +167,13 @@ body {
    serré (11px) pour l'icône+texte, qui doivent rester visuellement soudés. */
 .topbar-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .brand-block { display: flex; align-items: center; gap: 11px; }
-/* Icône emoji (📊) à la place de l'ancienne barre d'accent abstraite, pour
-   aligner la DA du header Dashboard sur les émojis déjà utilisés ailleurs
-   (onglet "📊 Dashboard", favicon) — .brand-mark reste utilisé tel quel sur
-   l'écran de connexion (barre verticale), volontairement inchangé. */
-.brand-icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
 .brand-sep { width: 1px; height: 30px; background: var(--border); flex-shrink: 0; }
+/* Groupe séparateur+date poussé à l'extrémité droite de la barre (au lieu de
+   suivre le bloc marque juste après, tout collé à gauche comme le reste) —
+   étale vraiment les infos sur la largeur de la topbar plutôt que de se fier
+   au seul gap entre éléments voisins. */
+.topbar-meta { display: flex; align-items: center; gap: 14px; margin-left: auto; }
 .brand-text { display: flex; flex-direction: column; gap: 1px; }
 /* Tailles alignées sur .header-eyebrow/.header-logo du planning : avant,
    22px/9px en empilement "hero" pleine largeur rendait ce header 2 à 3 fois
