@@ -161,14 +161,15 @@ body {
   box-shadow: 0 2px 12px rgba(16, 26, 46, 0.04);
   position: sticky; top: 0; z-index: 50;
 }
-/* Depuis qu'on a retiré le max-width de .shell, .topbar s'étire sur toute la
-   largeur d'un écran large — aucun gap fixe ne peut "équilibrer" un cluster
-   resté ancré à gauche (déjà essayé : poussé à fond à droite = deux îlots
-   avec un vide mort ; gap plat = tout collé à gauche). Vraie répartition en
-   3 zones (onglets / marque / date+badges) sur toute la largeur de la barre :
-   flex:1 pour que .topbar-left occupe la largeur, space-between pour étaler
-   les 3 zones. Le gap sert seulement de filet en cas de wrap sur mobile. */
-.topbar-left { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; flex: 1; }
+/* Après plusieurs essais à étaler .topbar-left sur toute la largeur (flex:1 +
+   space-between ou margin-left:auto), le vrai problème n'était pas
+   l'espacement : la barre affichait des infos redondantes (date, filtre actif)
+   déjà visibles ailleurs (PeriodSelector, FilterDropdown dans la barre du
+   dessous), donc il n'y avait tout simplement rien d'utile à répartir sur
+   toute la largeur. Cette info a été retirée d'ici (voir plus bas dans
+   App.js) ; .topbar-left redevient un simple groupe compact ancré à gauche,
+   comme .header-brand côté planning, qui n'a jamais eu ce problème. */
+.topbar-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .brand-block { display: flex; align-items: center; gap: 11px; }
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
 .brand-text { display: flex; flex-direction: column; gap: 1px; }
@@ -184,7 +185,6 @@ body {
   color: var(--text); letter-spacing: 0.4px; text-transform: uppercase;
   line-height: 1.25; white-space: nowrap;
 }
-.brand-date { font-size: 13px; color: var(--text-soft); text-transform: capitalize; }
 
 /* ===== TOOLBAR (filtres + actions) =====
    Même bande que .toolbar côté planning (planning/frontend/index.html) :
@@ -574,13 +574,6 @@ body {
   border-color: var(--om-blue);
   background: rgba(37, 99, 235, 0.12);
 }
-.filter-badge {
-  display: inline-block; margin-left: 10px;
-  background: var(--om-blue); color: #fff;
-  border-radius: 7px; padding: 3px 10px;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.3px;
-}
-
 /* ==========================================
    REFONTE DESIGN — Command Center polish
    ========================================== */
@@ -595,16 +588,6 @@ body {
    l'espacement avant la grille de KPIs vient maintenant du margin-bottom
    de .dash-toolbar. */
 .topbar { align-items: center; }
-.context-line {
-  display: flex; align-items: center; gap: 14px;
-  font-size: 13px; color: var(--text-soft);
-  text-transform: capitalize;
-}
-.period-chip {
-  background: var(--panel-2); border: 1px solid var(--border);
-  color: var(--text); border-radius: 7px; padding: 3px 10px;
-  font-size: 11px; font-weight: 700; text-transform: none;
-}
 /* Filtres (Rôle/Équipes/Sales/Aujourd'hui) alignés sur le style planning :
    là-bas, recherche + chips + dropdown sont des contrôles INDIVIDUELS posés
    directement dans la barre (pas de conteneur qui les regroupe en un seul

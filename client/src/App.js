@@ -1419,12 +1419,16 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <div className="brand-title">OpenDashboard</div>
             </div>
           </div>
-          <div className="context-line">
-            <span>{todayLabel()}</span>
-            {!isToday && <span className="period-chip">{rangeLabel}</span>}
-            {filterLabel && <span className="filter-badge">{filterLabel}</span>}
-            {hidden.size > 0 && <span className="hidden-chip">{hidden.size} masqué{hidden.size > 1 ? 's' : ''}</span>}
-          </div>
+          {/* La date/le filtre actif vivaient ici en double : le sélecteur de
+              période (PeriodSelector, dans la barre du dessous) affiche déjà
+              "Aujourd'hui"/la plage choisie, et les FilterDropdown Rôle/
+              Équipes/Sales affichent déjà le filtre actif dans leur propre
+              libellé — .context-line ne faisait que répéter la même info,
+              ce qui expliquait pourquoi rien ne s'arrangeait bien ici : il
+              n'y avait tout simplement rien d'utile à étaler dans cette
+              barre. Retiré entièrement ; seul le compteur "masqués" (la
+              seule info qui n'existe nulle part ailleurs) part avec les
+              filtres dans la barre du dessous. */}
         </div>
       </div>
 
@@ -1489,6 +1493,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               label={rangeLabel}
               onApply={(p) => setPeriod(p)}
             />
+            {/* Seule info de .context-line qui n'existait nulle part ailleurs
+                (contrairement à la date et au filtre actif, déjà visibles
+                via PeriodSelector et les FilterDropdown ci-dessus) — sa place
+                est ici, à côté des filtres qui déterminent justement qui est
+                affiché ou masqué. */}
+            {hidden.size > 0 && <span className="hidden-chip">{hidden.size} masqué{hidden.size > 1 ? 's' : ''}</span>}
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
