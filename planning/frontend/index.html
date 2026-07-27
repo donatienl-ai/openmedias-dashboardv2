@@ -1215,6 +1215,11 @@ async function forgotPasswordSubmit(){
   try{
     const r=await fetch(`${API}/auth/forgot-password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});
     const d=await r.json().catch(()=>({}));
+    // Avant : le message de succès s'affichait quel que soit le statut HTTP
+    // (r.ok jamais vérifié), donc une réponse 429 (limite de fréquence) ou
+    // 400 passait inaperçue — l'utilisateur croyait le lien envoyé alors que
+    // la demande avait été bloquée. On distingue maintenant l'échec.
+    if(!r.ok){ errEl.textContent=d.error||'Une erreur est survenue.'; return; }
     okEl.textContent=d.message||'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.';
     okEl.style.display='';
   }catch{errEl.textContent='Erreur réseau.';}

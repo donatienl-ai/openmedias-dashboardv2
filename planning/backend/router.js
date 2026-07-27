@@ -55,6 +55,36 @@ function requireCommercial(req, res, next) {
   next();
 }
 
+// ── LIMITEUR DE FRÉQUENCE (mémoire, sans dépendance externe) ──────────────────
+// Protège /api/auth/forgot-password, seul endpoint public non authentifié qui
+// déclenche un envoi d'email : sans limite, n'importe qui peut soit bombarder
+// la boîte mail d'un compte de liens de réinitialisation (en boucle sur le
+// même email), soit tester une liste d'emails pour essayer d'en deviner
+// (même si la réponse reste générique, une absence de limite laisse quand
+// même faire des milliers d'essais). Un seul process Node (pas de Redis
+// nécessaire) : une Map en mémoire suffit, avec purge paresseuse des entrées
+// expirées à chaque appel plutôt qu'un cron dédié.
+const rateLimitBuckets = new Map(); // clé -> { count, resetAt }
+function checkRateLimit(key, max, windowMs) {
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= max) return false;
+  bucket.count += 1;
+  return true;
+}
+// IP réelle derrière le proxy Render (pas de `trust proxy` global posé côté
+// host — on lit X-Forwarded-For nous-mêmes ici pour ne pas toucher au
+// comportement de req.ip ailleurs dans l'appli).
+function clientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
+
 // ── PONT COMPTES → RÔLE PIN (login unique) ────────────────────────────────────
 // Toutes les routes existantes vérifient `req.headers.role` (valeurs historiques
 // 'edit'/'com', posées par le PIN côté front). Plutôt que de retoucher chaque
@@ -123,6 +153,13 @@ app.post('/api/auth/forgot-password', (req, res) => {
   const email = String(req.body.email || '').toLowerCase().trim();
   const genericMsg = 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.';
   if (!email) return res.status(400).json({ error: 'Email requis' });
+  // Deux limites indépendantes : par IP (empêche de mitrailler des emails au
+  // hasard) et par email visé (empêche de bombarder UN compte précis, même
+  // depuis des IP différentes) — 5 essais / 15 min par IP, 3 / 15 min par email.
+  const FIFTEEN_MIN = 15 * 60 * 1000;
+  if (!checkRateLimit(`ip:${clientIp(req)}`, 5, FIFTEEN_MIN) || !checkRateLimit(`email:${email}`, 3, FIFTEEN_MIN)) {
+    return res.status(429).json({ error: 'Trop de tentatives. Réessaie dans quelques minutes.' });
+  }
   const user = db.prepare('SELECT * FROM commercial_users WHERE lower(email)=? AND actif=1').get(email);
   if (!user) return res.json({ success: true, message: genericMsg }); // même réponse, compte inexistant
   const token = crypto.randomBytes(32).toString('hex');

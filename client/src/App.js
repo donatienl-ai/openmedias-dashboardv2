@@ -66,7 +66,13 @@ function Login({ onSuccess }) {
         body: JSON.stringify({ email: forgotEmail.trim() }),
       });
       const data = await res.json().catch(() => ({}));
-      setForgotMsg(data.message || 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.');
+      // Avant : res.ok n'était jamais vérifié, donc une erreur (400, ou 429
+      // si la limite de fréquence est atteinte) affichait quand même le
+      // message de succès générique (data.message undefined -> fallback)
+      // au lieu de prévenir l'utilisateur que sa demande a été rejetée.
+      setForgotMsg(!res.ok
+        ? (data.error || 'Une erreur est survenue.')
+        : (data.message || 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.'));
     } catch {
       setForgotMsg('Erreur réseau.');
     } finally { setForgotLoading(false); }
