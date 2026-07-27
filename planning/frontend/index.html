@@ -651,7 +651,18 @@ td { padding: 10px 14px; font-size: 13px; }
     <div class="pin-error" id="invite-error"></div>
   </div>
 </div>
-
+<script>
+  // Anti-flash : quand on revient sur /planning depuis le dashboard (ou l'inverse)
+  // alors qu'une session existe déjà (commercialId en localStorage), tryAutoLogin()
+  // masque cet écran seulement une fois la réponse réseau de /api/auth/me revenue —
+  // le temps de cet aller-retour, l'écran de connexion s'affichait le temps d'un
+  // clignotement bien visible à chaque changement d'onglet. On le masque tout de
+  // suite ici (synchrone, avant peinture) ; bootstrapLogin() le réaffichera si
+  // l'auto-login échoue réellement (session expirée/compte désactivé).
+  if(localStorage.getItem('commercialId')){
+    document.getElementById('pin-screen').style.display='none';
+  }
+</script>
 
 <!-- APP -->
 <div id="app">
@@ -1245,6 +1256,10 @@ async function bootstrapLogin(){
   if(window._inviteToken)return;
   const ok = await tryAutoLogin();
   if(ok)return;
+  // L'auto-login a échoué (pas de session stockée, ou session expirée/compte
+  // désactivé) : si le script anti-flash ci-dessus l'avait masqué, il faut le
+  // réafficher pour que la personne puisse se reconnecter via /planning?pin=1.
+  document.getElementById('pin-screen').style.display='';
   const wantsPin = new URLSearchParams(window.location.search).get('pin')==='1';
   if(!wantsPin){
     window.location.href='/';

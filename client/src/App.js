@@ -1877,6 +1877,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 // ---------- ROOT ----------
 export default function App() {
   const [password, setPassword] = useState(null); // `password` = objet credential (voir credHeaders/isAdminCred plus haut)
+  // Tant que la vérification de session (sessionStorage / auto-login via
+  // commercialId) n'est pas terminée, on n'affiche ni l'écran de connexion ni
+  // le dashboard : avant ce correctif, `password` valait `null` pendant tout
+  // l'aller-retour réseau de /api/auth/me, donc <Login/> s'affichait puis
+  // disparaissait aussitôt — un clignotement bien visible à chaque passage de
+  // /planning vers "/". `checkingSession` évite ce flash (rendu vide le temps
+  // de la vérification, quasi instantané dans le cas courant).
+  const [checkingSession, setCheckingSession] = useState(true);
   // Clé localStorage partagée avec planning/frontend/index.html ('theme',
   // pas 'om_theme') — avant, chaque app avait sa propre clé ET son propre
   // défaut (dashboard sombre, planning clair), donc changer le thème d'un
@@ -1899,6 +1907,7 @@ export default function App() {
           return;
         }
         setPassword(cred);
+        setCheckingSession(false);
         return;
       } catch { /* session pré-fusion invalide, ignorée */ }
     }
@@ -1926,7 +1935,10 @@ export default function App() {
         .catch(() => {
           // Compte supprimé/désactivé depuis : on nettoie pour retomber sur l'écran de connexion.
           localStorage.removeItem('commercialId'); localStorage.removeItem('commercialNom');
-        });
+        })
+        .finally(() => setCheckingSession(false));
+    } else {
+      setCheckingSession(false);
     }
   }, []);
 
@@ -1962,6 +1974,7 @@ export default function App() {
     setPassword(null);
   }, []);
 
+  if (checkingSession) return null;
   if (!password) return <Login onSuccess={handleSuccess} />;
   return <Dashboard password={password} onLogout={handleLogout} theme={theme} onToggleTheme={toggleTheme} />;
 }
