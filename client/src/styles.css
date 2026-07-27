@@ -165,7 +165,12 @@ body {
    date+badges) respiraient trop peu les uns des autres — cf retour "plus
    espacer les infos". Le sous-groupe .brand-block garde son propre gap plus
    serré (11px) pour l'icône+texte, qui doivent rester visuellement soudés. */
-.topbar-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+/* flex:1 — sans ça, .topbar-left restait "shrink-to-fit" (large comme son
+   seul contenu) et le margin-left:auto de .topbar-meta n'avait aucun espace
+   à consommer à l'intérieur : rien ne se déplaçait visuellement malgré la
+   règle posée. Il fallait que .topbar-left occupe toute la largeur de
+   .topbar pour que cet espace existe. */
+.topbar-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; flex: 1; }
 .brand-block { display: flex; align-items: center; gap: 11px; }
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
 .brand-sep { width: 1px; height: 30px; background: var(--border); flex-shrink: 0; }
