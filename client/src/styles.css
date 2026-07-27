@@ -161,24 +161,15 @@ body {
   box-shadow: 0 2px 12px rgba(16, 26, 46, 0.04);
   position: sticky; top: 0; z-index: 50;
 }
-/* 24px (au lieu de 16px) : les groupes (onglets app-switch / bloc marque /
-   date+badges) respiraient trop peu les uns des autres — cf retour "plus
-   espacer les infos". Le sous-groupe .brand-block garde son propre gap plus
-   serré (11px) pour l'icône+texte, qui doivent rester visuellement soudés. */
-/* flex:1 — sans ça, .topbar-left restait "shrink-to-fit" (large comme son
-   seul contenu) et le margin-left:auto de .topbar-meta n'avait aucun espace
-   à consommer à l'intérieur : rien ne se déplaçait visuellement malgré la
-   règle posée. Il fallait que .topbar-left occupe toute la largeur de
-   .topbar pour que cet espace existe. */
-.topbar-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; flex: 1; }
+/* Poussé à fond à droite (flex:1 + margin-left:auto), ça donnait deux blocs
+   isolés aux extrémités avec un grand vide mort au milieu — pas équilibré.
+   Revenu à un gap fixe, généreux mais raisonnable, qui garde les infos
+   groupées "à gauche" sans les recoller entre elles comme avant. */
+.topbar-left { display: flex; align-items: center; gap: 40px; flex-wrap: wrap; }
 .brand-block { display: flex; align-items: center; gap: 11px; }
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
 .brand-sep { width: 1px; height: 30px; background: var(--border); flex-shrink: 0; }
-/* Groupe séparateur+date poussé à l'extrémité droite de la barre (au lieu de
-   suivre le bloc marque juste après, tout collé à gauche comme le reste) —
-   étale vraiment les infos sur la largeur de la topbar plutôt que de se fier
-   au seul gap entre éléments voisins. */
-.topbar-meta { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.topbar-meta { display: flex; align-items: center; gap: 14px; }
 .brand-text { display: flex; flex-direction: column; gap: 1px; }
 /* Tailles alignées sur .header-eyebrow/.header-logo du planning : avant,
    22px/9px en empilement "hero" pleine largeur rendait ce header 2 à 3 fois
