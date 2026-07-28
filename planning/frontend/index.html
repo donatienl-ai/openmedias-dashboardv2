@@ -1660,6 +1660,7 @@ function openEditSocialPostModal(id){
     <div class="form-group" style="margin-top:12px"><label class="form-label">Notes / légende</label><textarea class="form-input" id="social-notes" rows="3">${post.notes||''}</textarea></div>
   `;
   document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-danger" onclick="deleteSocialPost(${id})">Supprimer</button>
     <button class="btn-secondary" onclick="openSocialPreview(${id})">👁 Aperçu</button>
     <button class="btn-secondary" onclick="closeModal()">Annuler</button>
     <button class="btn-primary" onclick="confirmEditSocialPost(${id})">Enregistrer</button>
@@ -1682,14 +1683,40 @@ async function confirmEditSocialPost(id){
 async function deleteSocialPost(id){
   if(!confirm('Supprimer ce post du rétroplanning ?'))return;
   await fetch(`${API}/social-posts/${id}`,{method:'DELETE',headers:{role}});
+  closeModal();
   loadSocial();
   showToast('Post supprimé');
 }
 
-// ── Aperçu du rendu par réseau (mockup, pas d'image réelle uploadée) ─────────
+// ── Aperçu du rendu par réseau ────────────────────────────────────────────────
+// Le lien Drive collé dans le formulaire est un lien de PAGE ("/file/d/ID/view"),
+// pas une image directement affichable dans une balise <img>. On extrait l'ID
+// du fichier et on demande la miniature publique de Google Drive
+// (drive.google.com/thumbnail?id=...) — ça ne nécessite AUCUNE connexion de
+// compte Google ni côté Claude ni côté app : ça marche pour n'importe qui,
+// à la seule condition que le fichier soit partagé en "Tous les utilisateurs
+// disposant du lien" (Restreint = seules les personnes explicitement invitées
+// peuvent le voir, et Google refusera alors de servir la miniature — c'est
+// très probablement ce qui bloque l'aperçu ici, pas un souci de connexion
+// d'un compte quelconque). Si l'image ne charge pas (fichier restreint,
+// supprimé, ou lien qui n'est pas un fichier Drive), on retombe proprement
+// sur le placeholder avec un message explicite au lieu d'une image cassée.
+function driveFileId(url){
+  if(!url)return null;
+  const m=String(url).match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || String(url).match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  return m?m[1]:null;
+}
 function socialPreviewHtml(post){
   const caption=post.notes||post.title;
-  const mediaBox=`<div class="social-preview-media" style="height:${post.channel==='YouTube'?'180px':'220px'}">${post.channel==='YouTube'?'▶️':'🖼️'}</div>`;
+  const fileId=driveFileId(post.drive_link);
+  const mediaHeight=post.channel==='YouTube'?'180px':'220px';
+  const placeholderInner=post.channel==='YouTube'?'▶️':'🖼️';
+  const mediaBox=fileId
+    ? `<div class="social-preview-media" style="height:${mediaHeight};padding:0;overflow:hidden">
+         <img src="https://drive.google.com/thumbnail?id=${fileId}&sz=w1000" alt="${post.title}" style="width:100%;height:100%;object-fit:cover"
+           onerror="this.closest('.social-preview-media').innerHTML='${placeholderInner}<div style=\\'font-size:11px;margin-top:6px;padding:0 12px;text-align:center\\'>Aperçu indisponible — vérifie que le fichier est partagé (au moins « Tous les utilisateurs d\\'openmedias.fr ») et que tu es connecté·e à ton compte Google OpenMedias dans ce navigateur</div>';this.closest('.social-preview-media').style.flexDirection='column';">
+       </div>`
+    : `<div class="social-preview-media" style="height:${mediaHeight}">${placeholderInner}</div>`;
   const driveNote=post.drive_link?`<a class="social-preview-link" href="${post.drive_link}" target="_blank" rel="noopener">📎 Voir la pièce jointe (Drive)</a>`:'';
   if(post.channel==='Instagram'){
     return `<div class="social-preview-frame">
