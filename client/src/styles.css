@@ -171,6 +171,9 @@ body {
    comme .header-brand côté planning, qui n'a jamais eu ce problème. */
 .topbar-left { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .brand-block { display: flex; align-items: center; gap: 11px; }
+/* Icône du bloc marque de la topbar Dashboard (pas l'écran de connexion, qui
+   garde .brand-mark tel quel). */
+.brand-icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
 .brand-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--om-blue); flex-shrink: 0; }
 .brand-text { display: flex; flex-direction: column; gap: 1px; }
 /* Tailles alignées sur .header-eyebrow/.header-logo du planning : avant,

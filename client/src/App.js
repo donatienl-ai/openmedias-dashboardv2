@@ -1413,11 +1413,6 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <button className="app-switch-btn" onClick={() => { window.location.href = '/planning?view=parametres'; }}>⚙️ Paramètres</button>
             )}
           </div>
-          {/* Bloc marque compact (barre d'accent + eyebrow/titre empilés sur
-              2 lignes SERRÉES). Plus de séparateurs verticaux ici : avec les 3
-              zones vraiment réparties sur la largeur (.topbar-left en
-              justify-content:space-between), un trait collé au bord d'une
-              zone qui a un grand vide de l'autre côté ne sépare plus rien. */}
           <div className="brand-block">
             <div className="brand-mark" />
             <div className="brand-text">
@@ -1520,15 +1515,15 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               </button>
             )}
             {isAdmin && (
-              /* ✉️ ne s'affiche pas sur certaines combinaisons OS/police (ex:
-                 Chrome/Windows) et rend une case vide (confirmé en prod le
-                 22/07 — cf. bouton correspondant dans planning/frontend/
-                 index.html, ICON_MAIL, déjà corrigé pour la même raison). */
+              /* ✉️ ne s'affichait pas sur certaines combinaisons OS/police (ex:
+                 Chrome/Windows) et rendait une case vide (confirmé en prod le
+                 22/07), d'où le passage en SVG à l'époque — mais ça détonnait
+                 visuellement à côté des emojis ⚙️/🌙 voisins. 📧 reprend le
+                 style emoji sans reproduire le bug de rendu de ✉️ (à surveiller
+                 quand même : si un souci de rendu réapparaît sur un
+                 OS/navigateur donné, revenir au SVG ci-dessus en commentaire). */
               <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="5" width="18" height="14" rx="2" />
-                  <path d="M3 7l9 6 9-6" />
-                </svg>
+                📧
               </button>
             )}
             <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
