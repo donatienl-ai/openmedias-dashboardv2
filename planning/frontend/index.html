@@ -85,6 +85,14 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
    à quoi il correspond (relevé dans l'audit UX). */
 .pr-field { display: flex; flex-direction: column; gap: 2px; }
 .pr-field-label { font-size: 9px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; }
+/* Rétroplanning communication (v1) — canal + statut d'un post. */
+.social-channel { font-weight: 700; min-width: 90px; }
+.social-date { color: var(--text-dim); min-width: 90px; }
+.social-title { flex: 1 1 200px; }
+.social-status { border: none; border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.social-status.a_faire { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+.social-status.pret { background: var(--bdc-bg); color: var(--bdc-text); }
+.social-status.publie { background: var(--green-dim); color: var(--green); }
 .list-filter-row th { padding: 4px 8px 10px; font-weight: 400; }
 .list-filter-input { font-size: 11px !important; padding: 5px 8px !important; width: 100%; min-width: 70px; }
 .list-filter-reset { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; white-space: nowrap; margin-left: 8px; }
@@ -692,6 +700,10 @@ td { padding: 10px 14px; font-size: 13px; }
       <button class="nav-btn" onclick="switchView('list')" id="nav-list">Liste</button>
       <button class="nav-btn admin-only" onclick="switchView('reporting')" id="nav-reporting" style="display:none">Reporting</button>
       <button class="nav-btn" onclick="switchView('bdc')" id="nav-bdc" style="display:none">📄 BDC</button>
+      <!-- Rétroplanning communication : visible édito+communication (pas sales),
+           d'où .content-only plutôt que .edit-only (qui exclurait la communication)
+           ou .admin-only (qui exclurait aussi l'édito). -->
+      <button class="nav-btn content-only" onclick="switchView('social')" id="nav-social" style="display:none">📱 Réseaux sociaux</button>
     </nav>
     <!-- Menu burger : sur mobile, tout ce qui suit (navigation mois, actualiser,
          thème, déconnexion, +Ajouter, BDC...) est caché par défaut derrière ce
@@ -932,6 +944,21 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
   </div>
 
+  <div class="view" id="view-social">
+    <div class="report-header">
+      <h2 style="font-size:16px;font-weight:700">📱 Réseaux sociaux — rétroplanning</h2>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select class="form-select" id="social-filter-channel" onchange="renderSocialList()">
+          <option value="">Tous les canaux</option>
+        </select>
+        <button class="btn-primary" onclick="openCreateSocialPostModal()">+ Ajouter un post</button>
+      </div>
+    </div>
+    <div class="param-card">
+      <div class="param-table" id="social-posts-list"></div>
+    </div>
+  </div>
+
   <div class="view" id="view-parametres">
     <div class="report-header"><h2 style="font-size:16px;font-weight:700">⚙️ Paramètres</h2></div>
 
@@ -1125,6 +1152,8 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
     // CA/reporting/paramètres : réservés aux comptes admin, pas à l'édito
     // (qui gère la programmation mais n'a pas à voir les chiffres commerciaux).
     if(isAccountAdmin)document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
+    // Rétroplanning communication : édito ET communication (pas sales/commercial).
+    if(role==='edit'||role==='com')document.querySelectorAll('.content-only').forEach(el=>el.style.display='');
   }
   // Lien direct vers Paramètres depuis l'onglet du dashboard (/planning?view=parametres).
   if(isAccountAdmin && new URLSearchParams(window.location.search).get('view')==='parametres'){
@@ -1405,10 +1434,139 @@ function switchView(v){
   if(v==='reporting')loadReporting();
   if(v==='parametres')loadParametres();
   if(v==='bdc')bdcOnShow();
+  if(v==='social')loadSocial();
   // Favicon dynamique : roue crantée sur Paramètres, sinon fruit du mois
   // (repris par renderCalendar au retour sur Calendrier, cf. plus haut).
   setFaviconEmoji(v==='parametres'?'⚙️':FRUITS_MOIS[currentDate.getMonth()]);
   closePlanningMenu();
+}
+
+// ── RÉTROPLANNING COMMUNICATION (v1) ──────────────────────────────────────────
+// Calendrier de posts Instagram/LinkedIn/YouTube/Newsletter — nouveau projet,
+// séparé du planning de diffusion (emissions). Statuts simples : à faire ->
+// prêt -> publié, on affine après premier retour ("essaye un truc").
+let socialPostsCache=[];
+const SOCIAL_STATUS_LABEL={a_faire:'À faire',pret:'Prêt',publie:'Publié'};
+const SOCIAL_STATUS_ORDER=['a_faire','pret','publie'];
+const SOCIAL_CHANNEL_ICON={Instagram:'📷',LinkedIn:'💼',YouTube:'▶️',Newsletter:'✉️'};
+
+async function loadSocial(){
+  const channelSel=document.getElementById('social-filter-channel');
+  if(channelSel.options.length<=1){
+    channelSel.innerHTML='<option value="">Tous les canaux</option>'+(meta.channels||[]).map(c=>`<option value="${c}">${c}</option>`).join('');
+  }
+  socialPostsCache=await fetch(`${API}/social-posts`,{headers:{role}}).then(r=>r.json());
+  renderSocialList();
+}
+
+function renderSocialList(){
+  const filter=document.getElementById('social-filter-channel').value;
+  const el=document.getElementById('social-posts-list');
+  const posts=socialPostsCache
+    .filter(p=>!filter||p.channel===filter)
+    .sort((a,b)=>a.scheduled_date.localeCompare(b.scheduled_date));
+  if(!posts.length){
+    el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">Aucun post planifié pour l\'instant.</div>';
+    return;
+  }
+  el.innerHTML=posts.map(p=>`
+    <div class="param-row">
+      <span class="social-channel">${SOCIAL_CHANNEL_ICON[p.channel]||''} ${p.channel}</span>
+      <span class="social-date">${formatDateFR(p.scheduled_date)}</span>
+      <span class="social-title">${p.title}${p.assigned_to?` <span style="opacity:0.6;font-weight:400">— ${p.assigned_to}</span>`:''}</span>
+      <div class="pr-actions">
+        <button class="social-status ${p.status}" onclick="cycleSocialPostStatus(${p.id})" title="Cliquer pour changer le statut">${SOCIAL_STATUS_LABEL[p.status]}</button>
+        <button class="btn-secondary" onclick="openEditSocialPostModal(${p.id})" title="Modifier">✎</button>
+        <button class="btn-secondary" onclick="deleteSocialPost(${p.id})" title="Supprimer">✕</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function cycleSocialPostStatus(id){
+  const post=socialPostsCache.find(p=>p.id===id);
+  if(!post)return;
+  const next=SOCIAL_STATUS_ORDER[(SOCIAL_STATUS_ORDER.indexOf(post.status)+1)%SOCIAL_STATUS_ORDER.length];
+  const updated=await fetch(`${API}/social-posts/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role},body:JSON.stringify({status:next})}).then(r=>r.json());
+  const idx=socialPostsCache.findIndex(p=>p.id===id);
+  if(idx>=0)socialPostsCache[idx]=updated;
+  renderSocialList();
+}
+
+function socialChannelOptionsHtml(selected){
+  return (meta.channels||[]).map(c=>`<option value="${c}" ${c===selected?'selected':''}>${c}</option>`).join('');
+}
+function socialAssignedOptionsHtml(selected){
+  return '<option value="">— Non assigné —</option>'+RESP_EDIT_LIST.map(r=>`<option value="${r}" ${r===selected?'selected':''}>${r}</option>`).join('');
+}
+function socialStatusOptionsHtml(selected){
+  return SOCIAL_STATUS_ORDER.map(s=>`<option value="${s}" ${s===selected?'selected':''}>${SOCIAL_STATUS_LABEL[s]}</option>`).join('');
+}
+
+function openCreateSocialPostModal(){
+  document.getElementById('modal-title').textContent='Ajouter un post';
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML=`
+    <div class="form-group"><label class="form-label">Canal</label><select class="form-select" id="social-channel">${socialChannelOptionsHtml()}</select></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Titre</label><input class="form-input" id="social-title" placeholder="Ex : Teaser campagne rentrée"></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date"></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Assigné à</label><select class="form-select" id="social-assigned">${socialAssignedOptionsHtml()}</select></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes</label><textarea class="form-input" id="social-notes" rows="3" placeholder="Brief, lien vers les visuels…"></textarea></div>
+  `;
+  document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="closeModal()">Annuler</button>
+    <button class="btn-primary" onclick="confirmCreateSocialPost()">Ajouter</button>
+  `;
+}
+async function confirmCreateSocialPost(){
+  const channel=document.getElementById('social-channel').value;
+  const title=document.getElementById('social-title').value.trim();
+  const scheduledDate=document.getElementById('social-date').value;
+  const assignedTo=document.getElementById('social-assigned').value;
+  const notes=document.getElementById('social-notes').value.trim();
+  if(!title||!scheduledDate){showToast('Titre et date requis','error');return;}
+  await fetch(`${API}/social-posts`,{method:'POST',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,notes})});
+  closeModal();
+  loadSocial();
+  showToast('Post ajouté au rétroplanning');
+}
+
+function openEditSocialPostModal(id){
+  const post=socialPostsCache.find(p=>p.id===id);
+  if(!post)return;
+  document.getElementById('modal-title').textContent='Modifier le post';
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML=`
+    <div class="form-group"><label class="form-label">Canal</label><select class="form-select" id="social-channel">${socialChannelOptionsHtml(post.channel)}</select></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Titre</label><input class="form-input" id="social-title" value="${post.title}"></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date" value="${post.scheduled_date}"></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Assigné à</label><select class="form-select" id="social-assigned">${socialAssignedOptionsHtml(post.assigned_to)}</select></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Statut</label><select class="form-select" id="social-status">${socialStatusOptionsHtml(post.status)}</select></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes</label><textarea class="form-input" id="social-notes" rows="3">${post.notes||''}</textarea></div>
+  `;
+  document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="closeModal()">Annuler</button>
+    <button class="btn-primary" onclick="confirmEditSocialPost(${id})">Enregistrer</button>
+  `;
+}
+async function confirmEditSocialPost(id){
+  const channel=document.getElementById('social-channel').value;
+  const title=document.getElementById('social-title').value.trim();
+  const scheduledDate=document.getElementById('social-date').value;
+  const assignedTo=document.getElementById('social-assigned').value;
+  const status=document.getElementById('social-status').value;
+  const notes=document.getElementById('social-notes').value.trim();
+  if(!title||!scheduledDate){showToast('Titre et date requis','error');return;}
+  await fetch(`${API}/social-posts/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,status,notes})});
+  closeModal();
+  loadSocial();
+  showToast('Post mis à jour');
+}
+async function deleteSocialPost(id){
+  if(!confirm('Supprimer ce post du rétroplanning ?'))return;
+  await fetch(`${API}/social-posts/${id}`,{method:'DELETE',headers:{role}});
+  loadSocial();
+  showToast('Post supprimé');
 }
 // Menu burger mobile (voir bloc RESPONSIVE MOBILE en fin de <style>) : ouvre/
 // ferme le panneau qui regroupe navigation mois + actions (header-right) et

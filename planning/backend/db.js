@@ -58,6 +58,18 @@ db.exec(`
     actif INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS social_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel TEXT NOT NULL,
+    title TEXT NOT NULL,
+    notes TEXT,
+    scheduled_date TEXT NOT NULL,
+    status TEXT DEFAULT 'a_faire',
+    assigned_to TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migration: add montant column if missing
@@ -145,6 +157,16 @@ const FORMATS_PAR_MEDIA = {
 
 const MEDIAS = Object.keys(SLOTS_PAR_MEDIA);
 
+// ── RÉTROPLANNING COMMUNICATION (nouveau projet) ─────────────────────────────
+// Canaux de publication pour l'équipe communication (Instagram/LinkedIn/
+// YouTube/Newsletter) — même convention que MEDIAS ci-dessus (liste
+// hardcodée, exposée via /api/meta pour peupler le select du formulaire).
+const CHANNELS = ['Instagram', 'LinkedIn', 'YouTube', 'Newsletter'];
+// Statuts du rétroplanning — 3 états simples pour une v1 ("essaye un truc") :
+// à faire (pas commencé) -> prêt (rédigé/validé, en attente de publication)
+// -> publié (fait). Pas de workflow plus fin pour l'instant.
+const SOCIAL_POST_STATUSES = ['a_faire', 'pret', 'publie'];
+
 // Sous-picklist des titres regroupés sous "Médias spécialisés" (import Excel Donatien).
 // Chaque titre liste les formats qu'il accepte réellement, différents d'un titre à l'autre.
 const SOUS_MEDIAS_SPECIALISES = {
@@ -215,4 +237,4 @@ const SOUS_MEDIAS_SPECIALISES = {
 };
 const SOUS_MEDIAS_LIST = Object.keys(SOUS_MEDIAS_SPECIALISES);
 
-module.exports = { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST };
+module.exports = { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES };

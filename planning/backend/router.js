@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const cronBdc = require('node-cron');
-const { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST } = require('./db');
+const { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES } = require('./db');
 const { setupReports } = require('./reports');
 const salesforce = require('./salesforce');
 
@@ -43,6 +43,14 @@ function getHorizonMois() {
 
 function requireEdit(req, res, next) {
   if (req.headers.role !== 'edit') return res.status(403).json({ error: 'Accès refusé' });
+  next();
+}
+
+// Rétroplanning communication : doit être utilisable par la communication
+// elle-même (role==='com'), pas seulement édito/admin (role==='edit') —
+// requireEdit seul les exclurait, d'où ce middleware dédié.
+function requireContentTeam(req, res, next) {
+  if (req.headers.role !== 'edit' && req.headers.role !== 'com') return res.status(403).json({ error: 'Accès refusé' });
   next();
 }
 
@@ -996,7 +1004,62 @@ app.get('/api/reporting/semaine', (req, res) => {
 });
 
 // ── META ──────────────────────────────────────────────────────────────────────
-app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMois(), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST }));
+app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMois(), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST, channels: CHANNELS, socialPostStatuses: SOCIAL_POST_STATUSES }));
+
+// ── RÉTROPLANNING COMMUNICATION (nouveau projet, v1) ─────────────────────────
+// Calendrier de posts à publier (Instagram/LinkedIn/YouTube/Newsletter),
+// séparé des "emissions" (diffusion radio/TV) : simple liste avec statut,
+// consultable/éditable par édito + communication (requireContentTeam),
+// lecture seule pour le reste (pas de restriction en lecture pour l'instant,
+// cohérent avec /api/emissions qui n'exige pas non plus de rôle précis).
+app.get('/api/social-posts', (req, res) => {
+  res.json(db.prepare('SELECT * FROM social_posts ORDER BY scheduled_date ASC').all());
+});
+
+app.post('/api/social-posts', requireContentTeam, (req, res) => {
+  const channel = String(req.body.channel || '').trim();
+  const title = String(req.body.title || '').trim();
+  const scheduledDate = String(req.body.scheduledDate || '').trim();
+  const notes = req.body.notes ? String(req.body.notes).trim() : null;
+  const assignedTo = req.body.assignedTo ? String(req.body.assignedTo).trim() : null;
+  const status = SOCIAL_POST_STATUSES.includes(req.body.status) ? req.body.status : 'a_faire';
+  if (!CHANNELS.includes(channel)) return res.status(400).json({ error: 'Canal invalide' });
+  if (!title) return res.status(400).json({ error: 'Titre requis' });
+  if (!scheduledDate) return res.status(400).json({ error: 'Date requise' });
+  const r = db.prepare(
+    'INSERT INTO social_posts (channel, title, notes, scheduled_date, status, assigned_to) VALUES (?,?,?,?,?,?)'
+  ).run(channel, title, notes, scheduledDate, status, assignedTo);
+  res.status(201).json(db.prepare('SELECT * FROM social_posts WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.patch('/api/social-posts/:id', requireContentTeam, (req, res) => {
+  const post = db.prepare('SELECT * FROM social_posts WHERE id=?').get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post introuvable' });
+  const channel = req.body.channel !== undefined ? String(req.body.channel).trim() : post.channel;
+  const status = req.body.status !== undefined ? req.body.status : post.status;
+  if (!CHANNELS.includes(channel)) return res.status(400).json({ error: 'Canal invalide' });
+  if (!SOCIAL_POST_STATUSES.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
+  db.prepare(`
+    UPDATE social_posts SET
+      channel=?, title=COALESCE(?,title), notes=?, scheduled_date=COALESCE(?,scheduled_date),
+      status=?, assigned_to=?, updated_at=datetime('now')
+    WHERE id=?
+  `).run(
+    channel,
+    req.body.title !== undefined ? String(req.body.title).trim() : null,
+    req.body.notes !== undefined ? String(req.body.notes).trim() : post.notes,
+    req.body.scheduledDate !== undefined ? String(req.body.scheduledDate).trim() : null,
+    status,
+    req.body.assignedTo !== undefined ? String(req.body.assignedTo).trim() : post.assigned_to,
+    req.params.id
+  );
+  res.json(db.prepare('SELECT * FROM social_posts WHERE id=?').get(req.params.id));
+});
+
+app.delete('/api/social-posts/:id', requireContentTeam, (req, res) => {
+  db.prepare('DELETE FROM social_posts WHERE id=?').run(req.params.id);
+  res.json({ success: true });
+});
 
 // ── SEED ──────────────────────────────────────────────────────────────────────
 const seedFile = path.join(__dirname, 'seed_excel.sql');
