@@ -1016,8 +1016,18 @@ app.get('/api/social-posts', (req, res) => {
   res.json(db.prepare('SELECT * FROM social_posts ORDER BY scheduled_date ASC').all());
 });
 
+// Un post peut viser plusieurs réseaux à la fois (ex: même visuel posté sur
+// Instagram ET LinkedIn) — stocké en une seule colonne TEXT "channel" avec les
+// canaux séparés par virgule ("Instagram,LinkedIn"), plutôt qu'une table de
+// jointure séparée : plus simple pour ce volume, cohérent avec le style du
+// reste du fichier (pas de sur-ingénierie pour une v1).
+function parseChannels(input) {
+  const arr = Array.isArray(input) ? input : String(input || '').split(',');
+  return [...new Set(arr.map((c) => String(c).trim()).filter((c) => CHANNELS.includes(c)))];
+}
+
 app.post('/api/social-posts', requireContentTeam, (req, res) => {
-  const channel = String(req.body.channel || '').trim();
+  const channels = parseChannels(req.body.channel);
   const title = String(req.body.title || '').trim();
   const scheduledDate = String(req.body.scheduledDate || '').trim();
   const notes = req.body.notes ? String(req.body.notes).trim() : null;
@@ -1027,21 +1037,21 @@ app.post('/api/social-posts', requireContentTeam, (req, res) => {
   // — compressée côté client avant envoi, voir imageDataUrlFromFile() dans le front.
   const imageData = req.body.imageData ? String(req.body.imageData) : null;
   const status = SOCIAL_POST_STATUSES.includes(req.body.status) ? req.body.status : 'a_faire';
-  if (!CHANNELS.includes(channel)) return res.status(400).json({ error: 'Canal invalide' });
+  if (!channels.length) return res.status(400).json({ error: 'Sélectionne au moins un canal' });
   if (!title) return res.status(400).json({ error: 'Titre requis' });
   if (!scheduledDate) return res.status(400).json({ error: 'Date requise' });
   const r = db.prepare(
     'INSERT INTO social_posts (channel, title, notes, scheduled_date, status, assigned_to, drive_link, image_data) VALUES (?,?,?,?,?,?,?,?)'
-  ).run(channel, title, notes, scheduledDate, status, assignedTo, driveLink, imageData);
+  ).run(channels.join(','), title, notes, scheduledDate, status, assignedTo, driveLink, imageData);
   res.status(201).json(db.prepare('SELECT * FROM social_posts WHERE id=?').get(r.lastInsertRowid));
 });
 
 app.patch('/api/social-posts/:id', requireContentTeam, (req, res) => {
   const post = db.prepare('SELECT * FROM social_posts WHERE id=?').get(req.params.id);
   if (!post) return res.status(404).json({ error: 'Post introuvable' });
-  const channel = req.body.channel !== undefined ? String(req.body.channel).trim() : post.channel;
+  const channels = req.body.channel !== undefined ? parseChannels(req.body.channel) : parseChannels(post.channel);
   const status = req.body.status !== undefined ? req.body.status : post.status;
-  if (!CHANNELS.includes(channel)) return res.status(400).json({ error: 'Canal invalide' });
+  if (!channels.length) return res.status(400).json({ error: 'Sélectionne au moins un canal' });
   if (!SOCIAL_POST_STATUSES.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
   db.prepare(`
     UPDATE social_posts SET
@@ -1049,7 +1059,7 @@ app.patch('/api/social-posts/:id', requireContentTeam, (req, res) => {
       status=?, assigned_to=?, drive_link=?, image_data=?, updated_at=datetime('now')
     WHERE id=?
   `).run(
-    channel,
+    channels.join(','),
     req.body.title !== undefined ? String(req.body.title).trim() : null,
     req.body.notes !== undefined ? String(req.body.notes).trim() : post.notes,
     req.body.scheduledDate !== undefined ? String(req.body.scheduledDate).trim() : null,
@@ -1065,6 +1075,16 @@ app.patch('/api/social-posts/:id', requireContentTeam, (req, res) => {
 app.delete('/api/social-posts/:id', requireContentTeam, (req, res) => {
   db.prepare('DELETE FROM social_posts WHERE id=?').run(req.params.id);
   res.json({ success: true });
+});
+
+// Comptes "communication" pour l'assignation des posts — avant, le champ
+// "Assigné à" réutilisait RESP_EDIT_LIST (l'équipe édito, pour l'assignation
+// des ÉMISSIONS), ce qui n'a aucun rapport avec qui doit publier un post
+// réseaux sociaux. On expose ici les comptes role='communication' actifs.
+app.get('/api/social-team', requireContentTeam, (req, res) => {
+  res.json(db.prepare(
+    "SELECT id, nom FROM commercial_users WHERE role='communication' AND actif=1 ORDER BY nom ASC"
+  ).all());
 });
 
 // ── SEED ──────────────────────────────────────────────────────────────────────

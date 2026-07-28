@@ -987,9 +987,10 @@ td { padding: 10px 14px; font-size: 13px; }
           <button class="social-subnav-btn active" onclick="switchSocialSubview('calendar')" id="social-tab-calendar">Calendrier</button>
           <button class="social-subnav-btn" onclick="switchSocialSubview('list')" id="social-tab-list">Liste</button>
         </div>
-        <select class="form-select" id="social-filter-channel" onchange="renderSocialViews()">
-          <option value="">Tous les canaux</option>
-        </select>
+        <div class="ms-filter" id="social-channel-filter-wrap">
+          <button type="button" class="form-select ms-filter-btn" id="social-filter-channel-btn" onclick="toggleSocialChannelFilterMenu(event)">Tous les canaux</button>
+          <div class="ms-filter-menu" id="social-channel-filter-menu" style="display:none"></div>
+        </div>
         <button class="btn-primary" onclick="openCreateSocialPostModal()">+ Ajouter un post</button>
       </div>
     </div>
@@ -1495,23 +1496,30 @@ function switchView(v){
   closePlanningMenu();
 }
 
-// ── RÉTROPLANNING COMMUNICATION (v2) ──────────────────────────────────────────
+// ── RÉTROPLANNING COMMUNICATION (v3) ──────────────────────────────────────────
 // Calendrier de posts Instagram/LinkedIn/YouTube/Newsletter — nouveau projet,
 // séparé du planning de diffusion (emissions). Statuts simples : à faire ->
-// prêt -> publié. v2 ajoute une vraie vue calendrier (grille mensuelle,
-// distincte du calendrier de diffusion), un lien Drive pour la pièce jointe,
-// et un aperçu du rendu du post par réseau (mockup, pas d'upload d'image réel).
+// prêt -> publié. v3 : un post peut viser PLUSIEURS canaux à la fois (stocké
+// "Instagram,LinkedIn" en base, voir parseChannels() côté serveur), le filtre
+// canal devient multi-sélection, et "Assigné à" pointe vers les comptes
+// communication (role='communication') au lieu de l'équipe édito (aucun
+// rapport — RESP_EDIT_LIST sert à assigner les ÉMISSIONS, pas les posts).
 let socialPostsCache=[];
+let socialTeamCache=[]; // comptes communication, pour "Assigné à"
 let socialCalendarDate=new Date();
 let socialSubview='calendar';
+let socialFilterChannels=new Set(); // vide = tous les canaux
 const SOCIAL_STATUS_LABEL={a_faire:'À faire',pret:'Prêt',publie:'Publié'};
 const SOCIAL_STATUS_ORDER=['a_faire','pret','publie'];
 const SOCIAL_CHANNEL_ICON={Instagram:'📷',LinkedIn:'💼',YouTube:'▶️',Newsletter:'✉️'};
 
+function socialChannelsOf(post){
+  return String(post.channel||'').split(',').map(c=>c.trim()).filter(Boolean);
+}
+
 async function loadSocial(){
-  const channelSel=document.getElementById('social-filter-channel');
-  if(channelSel.options.length<=1){
-    channelSel.innerHTML='<option value="">Tous les canaux</option>'+(meta.channels||[]).map(c=>`<option value="${c}">${c}</option>`).join('');
+  if(!socialTeamCache.length){
+    try{ socialTeamCache=await fetch(`${API}/social-team`,{headers:{role}}).then(r=>r.json()); }catch(e){ socialTeamCache=[]; }
   }
   socialPostsCache=await fetch(`${API}/social-posts`,{headers:{role}}).then(r=>r.json());
   renderSocialViews();
@@ -1526,14 +1534,59 @@ function switchSocialSubview(v){
 }
 
 function renderSocialViews(){
+  refreshSocialChannelFilterButton();
   renderSocialCalendar();
   renderSocialList();
 }
 
 function socialFilteredPosts(){
-  const filter=document.getElementById('social-filter-channel').value;
-  return socialPostsCache.filter(p=>!filter||p.channel===filter);
+  if(!socialFilterChannels.size)return socialPostsCache;
+  return socialPostsCache.filter(p=>socialChannelsOf(p).some(c=>socialFilterChannels.has(c)));
 }
+
+// ── Filtre canal multi-sélection (bouton + menu à cases à cocher) ────────────
+function refreshSocialChannelFilterButton(){
+  const btn=document.getElementById('social-filter-channel-btn');
+  if(!btn)return;
+  const n=socialFilterChannels.size;
+  btn.textContent=n===0?'Tous les canaux':n===1?[...socialFilterChannels][0]:`${n} canaux`;
+  btn.classList.toggle('ms-filter-active',n>0);
+}
+function renderSocialChannelFilterMenu(){
+  const menu=document.getElementById('social-channel-filter-menu');
+  menu.innerHTML=(meta.channels||[]).map(c=>`
+    <label class="ms-filter-item">
+      <input type="checkbox" value="${c}" ${socialFilterChannels.has(c)?'checked':''} onchange="toggleSocialFilterChannel('${c}')">
+      <span>${SOCIAL_CHANNEL_ICON[c]||''} ${c}</span>
+    </label>
+  `).join('')+(socialFilterChannels.size?'<div class="ms-filter-sep"></div><button type="button" class="ms-filter-clear" onclick="clearSocialChannelFilter()">Tout désélectionner</button>':'');
+}
+function toggleSocialChannelFilterMenu(event){
+  const menu=document.getElementById('social-channel-filter-menu');
+  const willOpen=menu.style.display==='none';
+  document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
+  if(!willOpen)return;
+  renderSocialChannelFilterMenu();
+  const rect=event.currentTarget.getBoundingClientRect();
+  menu.style.position='fixed';
+  menu.style.left=`${rect.left}px`;
+  menu.style.top=`${rect.bottom+4}px`;
+  menu.style.width=`${Math.max(170,rect.width)}px`;
+  menu.style.display='block';
+}
+function toggleSocialFilterChannel(c){
+  if(socialFilterChannels.has(c))socialFilterChannels.delete(c);else socialFilterChannels.add(c);
+  renderSocialViews();
+  renderSocialChannelFilterMenu();
+}
+function clearSocialChannelFilter(){
+  socialFilterChannels.clear();
+  document.getElementById('social-channel-filter-menu').style.display='none';
+  renderSocialViews();
+}
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#social-channel-filter-wrap'))document.getElementById('social-channel-filter-menu').style.display='none';
+});
 
 // ── Vue calendrier (grille mensuelle, semaine du lundi) ──────────────────────
 function socialCalendarNav(delta){
@@ -1564,7 +1617,12 @@ function renderSocialCalendar(){
     cells.push(`
       <div class="social-cal-day${outside?' outside':''}${dStr===todayStr?' today':''}" onclick="openCreateSocialPostModal('${dStr}')">
         <div class="social-cal-daynum">${d.getDate()}</div>
-        ${dayPosts.map(p=>`<div class="social-cal-chip ${p.channel}" onclick="event.stopPropagation();openEditSocialPostModal(${p.id})" title="${p.title}">${SOCIAL_CHANNEL_ICON[p.channel]||''} ${p.title}</div>`).join('')}
+        ${dayPosts.map(p=>{
+          const chs=socialChannelsOf(p);
+          const cls=chs[0]||'';
+          const icons=chs.map(c=>SOCIAL_CHANNEL_ICON[c]||'').join('');
+          return `<div class="social-cal-chip ${cls}" onclick="event.stopPropagation();openEditSocialPostModal(${p.id})" title="${chs.join(', ')} — ${p.title}">${icons} ${p.title}</div>`;
+        }).join('')}
       </div>
     `);
   }
@@ -1581,7 +1639,7 @@ function renderSocialList(){
   }
   el.innerHTML=posts.map(p=>`
     <div class="param-row">
-      <span class="social-channel">${SOCIAL_CHANNEL_ICON[p.channel]||''} ${p.channel}</span>
+      <span class="social-channel">${socialChannelsOf(p).map(c=>`${SOCIAL_CHANNEL_ICON[c]||''} ${c}`).join(' · ')}</span>
       <span class="social-date">${formatDateFR(p.scheduled_date)}</span>
       <span class="social-title">${p.title}${p.assigned_to?` <span style="opacity:0.6;font-weight:400">— ${p.assigned_to}</span>`:''}</span>
       ${p.drive_link?`<a href="${p.drive_link}" target="_blank" rel="noopener" title="Ouvrir la pièce jointe (Drive)" onclick="event.stopPropagation()">📎</a>`:''}
@@ -1605,11 +1663,24 @@ async function cycleSocialPostStatus(id){
   renderSocialViews();
 }
 
-function socialChannelOptionsHtml(selected){
-  return (meta.channels||[]).map(c=>`<option value="${c}" ${c===selected?'selected':''}>${c}</option>`).join('');
+// Cases à cocher (pas un select) : un post peut viser plusieurs canaux à la
+// fois. selectedArr = tableau des canaux déjà cochés (édition) ou [] (création).
+function socialChannelCheckboxesHtml(selectedArr){
+  const sel=selectedArr||[];
+  return `<div style="display:flex;gap:14px;flex-wrap:wrap">${(meta.channels||[]).map(c=>`
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;cursor:pointer">
+      <input type="checkbox" class="social-channel-check" value="${c}" ${sel.includes(c)?'checked':''}>
+      ${SOCIAL_CHANNEL_ICON[c]||''} ${c}
+    </label>
+  `).join('')}</div>`;
+}
+function socialSelectedChannels(){
+  return [...document.querySelectorAll('.social-channel-check:checked')].map(el=>el.value);
 }
 function socialAssignedOptionsHtml(selected){
-  return '<option value="">— Non assigné —</option>'+RESP_EDIT_LIST.map(r=>`<option value="${r}" ${r===selected?'selected':''}>${r}</option>`).join('');
+  // Comptes communication (role='communication'), pas l'équipe édito
+  // (RESP_EDIT_LIST) — sans rapport avec qui doit publier un post.
+  return '<option value="">— Non assigné —</option>'+socialTeamCache.map(t=>`<option value="${t.nom}" ${t.nom===selected?'selected':''}>${t.nom}</option>`).join('');
 }
 function socialStatusOptionsHtml(selected){
   return SOCIAL_STATUS_ORDER.map(s=>`<option value="${s}" ${s===selected?'selected':''}>${SOCIAL_STATUS_LABEL[s]}</option>`).join('');
@@ -1679,7 +1750,7 @@ function openCreateSocialPostModal(prefillDate){
   document.getElementById('modal-title').textContent='Ajouter un post';
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-body').innerHTML=`
-    <div class="form-group"><label class="form-label">Canal</label><select class="form-select" id="social-channel">${socialChannelOptionsHtml()}</select></div>
+    <div class="form-group"><label class="form-label">Canaux</label>${socialChannelCheckboxesHtml([])}</div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Titre</label><input class="form-input" id="social-title" placeholder="Ex : Teaser campagne rentrée"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date" value="${typeof prefillDate==='string'?prefillDate:''}"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Assigné à</label><select class="form-select" id="social-assigned">${socialAssignedOptionsHtml()}</select></div>
@@ -1693,12 +1764,13 @@ function openCreateSocialPostModal(prefillDate){
   `;
 }
 async function confirmCreateSocialPost(){
-  const channel=document.getElementById('social-channel').value;
+  const channel=socialSelectedChannels();
   const title=document.getElementById('social-title').value.trim();
   const scheduledDate=document.getElementById('social-date').value;
   const assignedTo=document.getElementById('social-assigned').value;
   const driveLink=document.getElementById('social-drive').value.trim();
   const notes=document.getElementById('social-notes').value.trim();
+  if(!channel.length){showToast('Sélectionne au moins un canal','error');return;}
   if(!title||!scheduledDate){showToast('Titre et date requis','error');return;}
   await fetch(`${API}/social-posts`,{method:'POST',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,driveLink,notes,imageData:socialPickedImageData})});
   closeModal();
@@ -1713,7 +1785,7 @@ function openEditSocialPostModal(id){
   document.getElementById('modal-title').textContent='Modifier le post';
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-body').innerHTML=`
-    <div class="form-group"><label class="form-label">Canal</label><select class="form-select" id="social-channel">${socialChannelOptionsHtml(post.channel)}</select></div>
+    <div class="form-group"><label class="form-label">Canaux</label>${socialChannelCheckboxesHtml(socialChannelsOf(post))}</div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Titre</label><input class="form-input" id="social-title" value="${post.title}"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date" value="${post.scheduled_date}"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Assigné à</label><select class="form-select" id="social-assigned">${socialAssignedOptionsHtml(post.assigned_to)}</select></div>
@@ -1731,13 +1803,14 @@ function openEditSocialPostModal(id){
   `;
 }
 async function confirmEditSocialPost(id){
-  const channel=document.getElementById('social-channel').value;
+  const channel=socialSelectedChannels();
   const title=document.getElementById('social-title').value.trim();
   const scheduledDate=document.getElementById('social-date').value;
   const assignedTo=document.getElementById('social-assigned').value;
   const status=document.getElementById('social-status').value;
   const driveLink=document.getElementById('social-drive').value.trim();
   const notes=document.getElementById('social-notes').value.trim();
+  if(!channel.length){showToast('Sélectionne au moins un canal','error');return;}
   if(!title||!scheduledDate){showToast('Titre et date requis','error');return;}
   await fetch(`${API}/social-posts/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,status,driveLink,notes,imageData:socialPickedImageData})});
   closeModal();
@@ -1761,17 +1834,18 @@ async function deleteSocialPost(id){
 // navigateur (essayé, jugé trop compliqué). Le lien Drive reste possible en
 // complément, comme référence vers le dossier source, mais n'est plus ce qui
 // alimente le visuel de l'aperçu.
-function socialPreviewHtml(post){
+// Un post peut viser plusieurs canaux : on génère une carte d'aperçu par canal.
+function socialPreviewCardHtml(post,channel){
   const caption=post.notes||post.title;
-  const mediaHeight=post.channel==='YouTube'?'180px':'220px';
-  const placeholderInner=post.channel==='YouTube'?'▶️':'🖼️';
+  const mediaHeight=channel==='YouTube'?'180px':'220px';
+  const placeholderInner=channel==='YouTube'?'▶️':'🖼️';
   const mediaBox=post.image_data
     ? `<div class="social-preview-media" style="height:${mediaHeight};padding:0;overflow:hidden">
          <img src="${post.image_data}" alt="${post.title}" style="width:100%;height:100%;object-fit:cover">
        </div>`
     : `<div class="social-preview-media" style="height:${mediaHeight}">${placeholderInner}</div>`;
   const driveNote=post.drive_link?`<a class="social-preview-link" href="${post.drive_link}" target="_blank" rel="noopener">📎 Dossier source (Drive)</a>`:'';
-  if(post.channel==='Instagram'){
+  if(channel==='Instagram'){
     return `<div class="social-preview-frame">
       <div class="social-preview-head"><div class="social-preview-avatar">OM</div><div><div class="social-preview-name">openmedias</div></div></div>
       ${mediaBox}
@@ -1780,7 +1854,7 @@ function socialPreviewHtml(post){
       ${driveNote}
     </div>`;
   }
-  if(post.channel==='LinkedIn'){
+  if(channel==='LinkedIn'){
     return `<div class="social-preview-frame">
       <div class="social-preview-head"><div class="social-preview-avatar">OM</div><div><div class="social-preview-name">OpenMedias</div><div class="social-preview-sub">Régie publicitaire média</div></div></div>
       <div class="social-preview-body">${caption}</div>
@@ -1789,7 +1863,7 @@ function socialPreviewHtml(post){
       ${driveNote}
     </div>`;
   }
-  if(post.channel==='YouTube'){
+  if(channel==='YouTube'){
     return `<div class="social-preview-frame">
       ${mediaBox}
       <div class="social-preview-body"><strong>${post.title}</strong><div class="social-preview-sub" style="margin-top:4px">OpenMedias • ${caption}</div></div>
@@ -1803,10 +1877,20 @@ function socialPreviewHtml(post){
     ${driveNote}
   </div>`;
 }
+function socialPreviewHtml(post){
+  const chs=socialChannelsOf(post);
+  if(chs.length<=1)return socialPreviewCardHtml(post,chs[0]||'Newsletter');
+  return `<div style="display:flex;flex-direction:column;gap:18px">${chs.map(c=>`
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:8px">${SOCIAL_CHANNEL_ICON[c]||''} ${c}</div>
+      ${socialPreviewCardHtml(post,c)}
+    </div>
+  `).join('')}</div>`;
+}
 function openSocialPreview(id){
   const post=socialPostsCache.find(p=>p.id===id);
   if(!post)return;
-  document.getElementById('modal-title').textContent=`Aperçu — ${post.channel}`;
+  document.getElementById('modal-title').textContent=`Aperçu — ${socialChannelsOf(post).join(', ')}`;
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-body').innerHTML=socialPreviewHtml(post);
   document.getElementById('modal-footer').innerHTML=`
