@@ -93,6 +93,41 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .social-status.a_faire { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
 .social-status.pret { background: var(--bdc-bg); color: var(--bdc-text); }
 .social-status.publie { background: var(--green-dim); color: var(--green); }
+/* Sous-onglets Calendrier/Liste — même pilule que .app-switch. */
+.social-subnav { display: inline-flex; background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; padding: 3px; gap: 2px; }
+.social-subnav-btn { border: none; background: none; font-size: 12px; font-weight: 600; color: var(--text-dim); padding: 6px 14px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+.social-subnav-btn.active { background: var(--accent); color: #fff; }
+.social-subview { display: none; }
+.social-subview.active { display: block; }
+/* Grille calendrier mensuelle du rétroplanning — indépendante du calendrier
+   de diffusion (currentDate/renderCalendar), pour ne pas coupler deux
+   fonctionnalités sans rapport (posts réseaux sociaux vs créneaux média). */
+.social-cal-header { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+.social-cal-title { font-weight: 700; font-size: 14px; text-transform: capitalize; min-width: 140px; text-align: center; }
+.social-cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 0 2px 6px; text-align: center; }
+.social-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.social-cal-day { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 6px; min-height: 92px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+.social-cal-day:hover { border-color: var(--accent); }
+.social-cal-day.outside { opacity: 0.35; }
+.social-cal-day.today { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.social-cal-daynum { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.social-cal-chip { font-size: 10px; padding: 3px 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.social-cal-chip.Instagram { border-left-color: #E1306C; }
+.social-cal-chip.LinkedIn { border-left-color: #0A66C2; }
+.social-cal-chip.YouTube { border-left-color: #FF0000; }
+.social-cal-chip.Newsletter { border-left-color: var(--accent); }
+/* Aperçu du rendu du post par réseau — mockups légers, pas de vraies images
+   (on n'a qu'un lien Drive, pas d'upload) : un cadre placeholder suffit pour
+   se projeter sur la mise en page. */
+.social-preview-frame { max-width: 360px; margin: 0 auto; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif; color: #111; }
+.social-preview-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+.social-preview-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0; }
+.social-preview-name { font-weight: 700; font-size: 13px; }
+.social-preview-sub { font-size: 11px; color: #6b7280; }
+.social-preview-media { background: #e5e7eb; color: #9ca3af; display: flex; align-items: center; justify-content: center; font-size: 32px; }
+.social-preview-body { padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+.social-preview-icons { display: flex; gap: 14px; padding: 8px 12px; color: #6b7280; font-size: 16px; border-top: 1px solid #f0f0f0; }
+.social-preview-link { display: block; padding: 8px 12px; font-size: 11px; color: var(--accent); text-decoration: none; border-top: 1px solid #f0f0f0; }
 .list-filter-row th { padding: 4px 8px 10px; font-weight: 400; }
 .list-filter-input { font-size: 11px !important; padding: 5px 8px !important; width: 100%; min-width: 70px; }
 .list-filter-reset { font-size: 11px; color: var(--accent); cursor: pointer; text-decoration: underline; white-space: nowrap; margin-left: 8px; }
@@ -948,14 +983,33 @@ td { padding: 10px 14px; font-size: 13px; }
     <div class="report-header">
       <h2 style="font-size:16px;font-weight:700">📱 Réseaux sociaux — rétroplanning</h2>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select class="form-select" id="social-filter-channel" onchange="renderSocialList()">
+        <div class="social-subnav">
+          <button class="social-subnav-btn active" onclick="switchSocialSubview('calendar')" id="social-tab-calendar">Calendrier</button>
+          <button class="social-subnav-btn" onclick="switchSocialSubview('list')" id="social-tab-list">Liste</button>
+        </div>
+        <select class="form-select" id="social-filter-channel" onchange="renderSocialViews()">
           <option value="">Tous les canaux</option>
         </select>
         <button class="btn-primary" onclick="openCreateSocialPostModal()">+ Ajouter un post</button>
       </div>
     </div>
-    <div class="param-card">
-      <div class="param-table" id="social-posts-list"></div>
+
+    <div class="social-subview active" id="social-subview-calendar">
+      <div class="social-cal-header">
+        <button class="btn-secondary" onclick="socialCalendarNav(-1)">‹</button>
+        <div class="social-cal-title" id="social-cal-title"></div>
+        <button class="btn-secondary" onclick="socialCalendarNav(1)">›</button>
+      </div>
+      <div class="social-cal-weekdays">
+        <span>Lun</span><span>Mar</span><span>Mer</span><span>Jeu</span><span>Ven</span><span>Sam</span><span>Dim</span>
+      </div>
+      <div class="social-cal-grid" id="social-cal-grid"></div>
+    </div>
+
+    <div class="social-subview" id="social-subview-list">
+      <div class="param-card">
+        <div class="param-table" id="social-posts-list"></div>
+      </div>
     </div>
   </div>
 
@@ -1441,11 +1495,15 @@ function switchView(v){
   closePlanningMenu();
 }
 
-// ── RÉTROPLANNING COMMUNICATION (v1) ──────────────────────────────────────────
+// ── RÉTROPLANNING COMMUNICATION (v2) ──────────────────────────────────────────
 // Calendrier de posts Instagram/LinkedIn/YouTube/Newsletter — nouveau projet,
 // séparé du planning de diffusion (emissions). Statuts simples : à faire ->
-// prêt -> publié, on affine après premier retour ("essaye un truc").
+// prêt -> publié. v2 ajoute une vraie vue calendrier (grille mensuelle,
+// distincte du calendrier de diffusion), un lien Drive pour la pièce jointe,
+// et un aperçu du rendu du post par réseau (mockup, pas d'upload d'image réel).
 let socialPostsCache=[];
+let socialCalendarDate=new Date();
+let socialSubview='calendar';
 const SOCIAL_STATUS_LABEL={a_faire:'À faire',pret:'Prêt',publie:'Publié'};
 const SOCIAL_STATUS_ORDER=['a_faire','pret','publie'];
 const SOCIAL_CHANNEL_ICON={Instagram:'📷',LinkedIn:'💼',YouTube:'▶️',Newsletter:'✉️'};
@@ -1456,15 +1514,67 @@ async function loadSocial(){
     channelSel.innerHTML='<option value="">Tous les canaux</option>'+(meta.channels||[]).map(c=>`<option value="${c}">${c}</option>`).join('');
   }
   socialPostsCache=await fetch(`${API}/social-posts`,{headers:{role}}).then(r=>r.json());
+  renderSocialViews();
+}
+
+function switchSocialSubview(v){
+  socialSubview=v;
+  document.getElementById('social-tab-calendar').classList.toggle('active',v==='calendar');
+  document.getElementById('social-tab-list').classList.toggle('active',v==='list');
+  document.getElementById('social-subview-calendar').classList.toggle('active',v==='calendar');
+  document.getElementById('social-subview-list').classList.toggle('active',v==='list');
+}
+
+function renderSocialViews(){
+  renderSocialCalendar();
   renderSocialList();
 }
 
-function renderSocialList(){
+function socialFilteredPosts(){
   const filter=document.getElementById('social-filter-channel').value;
+  return socialPostsCache.filter(p=>!filter||p.channel===filter);
+}
+
+// ── Vue calendrier (grille mensuelle, semaine du lundi) ──────────────────────
+function socialCalendarNav(delta){
+  socialCalendarDate=new Date(socialCalendarDate.getFullYear(),socialCalendarDate.getMonth()+delta,1);
+  renderSocialCalendar();
+}
+function renderSocialCalendar(){
+  const y=socialCalendarDate.getFullYear(), m=socialCalendarDate.getMonth();
+  document.getElementById('social-cal-title').textContent=socialCalendarDate.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+  const posts=socialFilteredPosts();
+  const postsByDate={};
+  posts.forEach(p=>{(postsByDate[p.scheduled_date]=postsByDate[p.scheduled_date]||[]).push(p);});
+
+  const firstOfMonth=new Date(y,m,1);
+  const startDow=(firstOfMonth.getDay()+6)%7; // 0=lundi
+  const daysInMonth=new Date(y,m+1,0).getDate();
+  const gridStart=new Date(y,m,1-startDow);
+  const todayStr=fmtDate(new Date());
+
+  const cells=[];
+  for(let i=0;i<42;i++){
+    const d=new Date(gridStart);
+    d.setDate(gridStart.getDate()+i);
+    const dStr=fmtDate(d);
+    const outside=d.getMonth()!==m;
+    if(outside && i>=35 && d.getDate()>7)break; // pas de 6e ligne inutile
+    const dayPosts=postsByDate[dStr]||[];
+    cells.push(`
+      <div class="social-cal-day${outside?' outside':''}${dStr===todayStr?' today':''}" onclick="openCreateSocialPostModal('${dStr}')">
+        <div class="social-cal-daynum">${d.getDate()}</div>
+        ${dayPosts.map(p=>`<div class="social-cal-chip ${p.channel}" onclick="event.stopPropagation();openEditSocialPostModal(${p.id})" title="${p.title}">${SOCIAL_CHANNEL_ICON[p.channel]||''} ${p.title}</div>`).join('')}
+      </div>
+    `);
+  }
+  document.getElementById('social-cal-grid').innerHTML=cells.join('');
+}
+
+// ── Vue liste ─────────────────────────────────────────────────────────────────
+function renderSocialList(){
   const el=document.getElementById('social-posts-list');
-  const posts=socialPostsCache
-    .filter(p=>!filter||p.channel===filter)
-    .sort((a,b)=>a.scheduled_date.localeCompare(b.scheduled_date));
+  const posts=socialFilteredPosts().sort((a,b)=>a.scheduled_date.localeCompare(b.scheduled_date));
   if(!posts.length){
     el.innerHTML='<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">Aucun post planifié pour l\'instant.</div>';
     return;
@@ -1474,8 +1584,10 @@ function renderSocialList(){
       <span class="social-channel">${SOCIAL_CHANNEL_ICON[p.channel]||''} ${p.channel}</span>
       <span class="social-date">${formatDateFR(p.scheduled_date)}</span>
       <span class="social-title">${p.title}${p.assigned_to?` <span style="opacity:0.6;font-weight:400">— ${p.assigned_to}</span>`:''}</span>
+      ${p.drive_link?`<a href="${p.drive_link}" target="_blank" rel="noopener" title="Ouvrir la pièce jointe (Drive)" onclick="event.stopPropagation()">📎</a>`:''}
       <div class="pr-actions">
         <button class="social-status ${p.status}" onclick="cycleSocialPostStatus(${p.id})" title="Cliquer pour changer le statut">${SOCIAL_STATUS_LABEL[p.status]}</button>
+        <button class="btn-secondary" onclick="openSocialPreview(${p.id})" title="Aperçu du rendu">👁</button>
         <button class="btn-secondary" onclick="openEditSocialPostModal(${p.id})" title="Modifier">✎</button>
         <button class="btn-secondary" onclick="deleteSocialPost(${p.id})" title="Supprimer">✕</button>
       </div>
@@ -1490,7 +1602,7 @@ async function cycleSocialPostStatus(id){
   const updated=await fetch(`${API}/social-posts/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role},body:JSON.stringify({status:next})}).then(r=>r.json());
   const idx=socialPostsCache.findIndex(p=>p.id===id);
   if(idx>=0)socialPostsCache[idx]=updated;
-  renderSocialList();
+  renderSocialViews();
 }
 
 function socialChannelOptionsHtml(selected){
@@ -1503,15 +1615,16 @@ function socialStatusOptionsHtml(selected){
   return SOCIAL_STATUS_ORDER.map(s=>`<option value="${s}" ${s===selected?'selected':''}>${SOCIAL_STATUS_LABEL[s]}</option>`).join('');
 }
 
-function openCreateSocialPostModal(){
+function openCreateSocialPostModal(prefillDate){
   document.getElementById('modal-title').textContent='Ajouter un post';
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-body').innerHTML=`
     <div class="form-group"><label class="form-label">Canal</label><select class="form-select" id="social-channel">${socialChannelOptionsHtml()}</select></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Titre</label><input class="form-input" id="social-title" placeholder="Ex : Teaser campagne rentrée"></div>
-    <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date"></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date" value="${typeof prefillDate==='string'?prefillDate:''}"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Assigné à</label><select class="form-select" id="social-assigned">${socialAssignedOptionsHtml()}</select></div>
-    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes</label><textarea class="form-input" id="social-notes" rows="3" placeholder="Brief, lien vers les visuels…"></textarea></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Lien Drive (pièce jointe)</label><input class="form-input" id="social-drive" placeholder="https://drive.google.com/…"></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes / légende</label><textarea class="form-input" id="social-notes" rows="3" placeholder="Texte du post, brief…"></textarea></div>
   `;
   document.getElementById('modal-footer').innerHTML=`
     <button class="btn-secondary" onclick="closeModal()">Annuler</button>
@@ -1523,9 +1636,10 @@ async function confirmCreateSocialPost(){
   const title=document.getElementById('social-title').value.trim();
   const scheduledDate=document.getElementById('social-date').value;
   const assignedTo=document.getElementById('social-assigned').value;
+  const driveLink=document.getElementById('social-drive').value.trim();
   const notes=document.getElementById('social-notes').value.trim();
   if(!title||!scheduledDate){showToast('Titre et date requis','error');return;}
-  await fetch(`${API}/social-posts`,{method:'POST',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,notes})});
+  await fetch(`${API}/social-posts`,{method:'POST',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,driveLink,notes})});
   closeModal();
   loadSocial();
   showToast('Post ajouté au rétroplanning');
@@ -1542,9 +1656,11 @@ function openEditSocialPostModal(id){
     <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date" value="${post.scheduled_date}"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Assigné à</label><select class="form-select" id="social-assigned">${socialAssignedOptionsHtml(post.assigned_to)}</select></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Statut</label><select class="form-select" id="social-status">${socialStatusOptionsHtml(post.status)}</select></div>
-    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes</label><textarea class="form-input" id="social-notes" rows="3">${post.notes||''}</textarea></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Lien Drive (pièce jointe)</label><input class="form-input" id="social-drive" value="${post.drive_link||''}" placeholder="https://drive.google.com/…"></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes / légende</label><textarea class="form-input" id="social-notes" rows="3">${post.notes||''}</textarea></div>
   `;
   document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="openSocialPreview(${id})">👁 Aperçu</button>
     <button class="btn-secondary" onclick="closeModal()">Annuler</button>
     <button class="btn-primary" onclick="confirmEditSocialPost(${id})">Enregistrer</button>
   `;
@@ -1555,9 +1671,10 @@ async function confirmEditSocialPost(id){
   const scheduledDate=document.getElementById('social-date').value;
   const assignedTo=document.getElementById('social-assigned').value;
   const status=document.getElementById('social-status').value;
+  const driveLink=document.getElementById('social-drive').value.trim();
   const notes=document.getElementById('social-notes').value.trim();
   if(!title||!scheduledDate){showToast('Titre et date requis','error');return;}
-  await fetch(`${API}/social-posts/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,status,notes})});
+  await fetch(`${API}/social-posts/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,status,driveLink,notes})});
   closeModal();
   loadSocial();
   showToast('Post mis à jour');
@@ -1567,6 +1684,55 @@ async function deleteSocialPost(id){
   await fetch(`${API}/social-posts/${id}`,{method:'DELETE',headers:{role}});
   loadSocial();
   showToast('Post supprimé');
+}
+
+// ── Aperçu du rendu par réseau (mockup, pas d'image réelle uploadée) ─────────
+function socialPreviewHtml(post){
+  const caption=post.notes||post.title;
+  const mediaBox=`<div class="social-preview-media" style="height:${post.channel==='YouTube'?'180px':'220px'}">${post.channel==='YouTube'?'▶️':'🖼️'}</div>`;
+  const driveNote=post.drive_link?`<a class="social-preview-link" href="${post.drive_link}" target="_blank" rel="noopener">📎 Voir la pièce jointe (Drive)</a>`:'';
+  if(post.channel==='Instagram'){
+    return `<div class="social-preview-frame">
+      <div class="social-preview-head"><div class="social-preview-avatar">OM</div><div><div class="social-preview-name">openmedias</div></div></div>
+      ${mediaBox}
+      <div class="social-preview-icons"><span>♡</span><span>💬</span><span>➤</span></div>
+      <div class="social-preview-body"><strong>openmedias</strong> ${caption}</div>
+      ${driveNote}
+    </div>`;
+  }
+  if(post.channel==='LinkedIn'){
+    return `<div class="social-preview-frame">
+      <div class="social-preview-head"><div class="social-preview-avatar">OM</div><div><div class="social-preview-name">OpenMedias</div><div class="social-preview-sub">Régie publicitaire média</div></div></div>
+      <div class="social-preview-body">${caption}</div>
+      ${mediaBox}
+      <div class="social-preview-icons"><span>👍</span><span>💬</span><span>🔁</span><span>➤</span></div>
+      ${driveNote}
+    </div>`;
+  }
+  if(post.channel==='YouTube'){
+    return `<div class="social-preview-frame">
+      ${mediaBox}
+      <div class="social-preview-body"><strong>${post.title}</strong><div class="social-preview-sub" style="margin-top:4px">OpenMedias • ${caption}</div></div>
+      ${driveNote}
+    </div>`;
+  }
+  // Newsletter
+  return `<div class="social-preview-frame">
+    <div class="social-preview-head"><div class="social-preview-avatar">OM</div><div><div class="social-preview-name">OpenMedias</div><div class="social-preview-sub">Objet : ${post.title}</div></div></div>
+    <div class="social-preview-body">${caption}</div>
+    ${driveNote}
+  </div>`;
+}
+function openSocialPreview(id){
+  const post=socialPostsCache.find(p=>p.id===id);
+  if(!post)return;
+  document.getElementById('modal-title').textContent=`Aperçu — ${post.channel}`;
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML=socialPreviewHtml(post);
+  document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="openEditSocialPostModal(${id})">← Retour à l'édition</button>
+    <button class="btn-primary" onclick="closeModal()">Fermer</button>
+  `;
 }
 // Menu burger mobile (voir bloc RESPONSIVE MOBILE en fin de <style>) : ouvre/
 // ferme le panneau qui regroupe navigation mois + actions (header-right) et

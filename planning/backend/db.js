@@ -67,10 +67,14 @@ db.exec(`
     scheduled_date TEXT NOT NULL,
     status TEXT DEFAULT 'a_faire',
     assigned_to TEXT,
+    drive_link TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   );
 `);
+// Migration : lien Drive (pièce jointe du post) ajouté après coup — try/catch
+// au cas où social_posts existait déjà (déployé) sans cette colonne.
+try { db.exec('ALTER TABLE social_posts ADD COLUMN drive_link TEXT'); } catch(e) {}
 
 // Migration: add montant column if missing
 try { db.exec('ALTER TABLE emissions ADD COLUMN montant REAL DEFAULT 0'); } catch(e) {}
