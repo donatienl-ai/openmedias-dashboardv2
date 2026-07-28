@@ -1023,13 +1023,16 @@ app.post('/api/social-posts', requireContentTeam, (req, res) => {
   const notes = req.body.notes ? String(req.body.notes).trim() : null;
   const assignedTo = req.body.assignedTo ? String(req.body.assignedTo).trim() : null;
   const driveLink = req.body.driveLink ? String(req.body.driveLink).trim() : null;
+  // Image de preview envoyée en data URL base64 (ex: "data:image/jpeg;base64,...")
+  // — compressée côté client avant envoi, voir imageDataUrlFromFile() dans le front.
+  const imageData = req.body.imageData ? String(req.body.imageData) : null;
   const status = SOCIAL_POST_STATUSES.includes(req.body.status) ? req.body.status : 'a_faire';
   if (!CHANNELS.includes(channel)) return res.status(400).json({ error: 'Canal invalide' });
   if (!title) return res.status(400).json({ error: 'Titre requis' });
   if (!scheduledDate) return res.status(400).json({ error: 'Date requise' });
   const r = db.prepare(
-    'INSERT INTO social_posts (channel, title, notes, scheduled_date, status, assigned_to, drive_link) VALUES (?,?,?,?,?,?,?)'
-  ).run(channel, title, notes, scheduledDate, status, assignedTo, driveLink);
+    'INSERT INTO social_posts (channel, title, notes, scheduled_date, status, assigned_to, drive_link, image_data) VALUES (?,?,?,?,?,?,?,?)'
+  ).run(channel, title, notes, scheduledDate, status, assignedTo, driveLink, imageData);
   res.status(201).json(db.prepare('SELECT * FROM social_posts WHERE id=?').get(r.lastInsertRowid));
 });
 
@@ -1043,7 +1046,7 @@ app.patch('/api/social-posts/:id', requireContentTeam, (req, res) => {
   db.prepare(`
     UPDATE social_posts SET
       channel=?, title=COALESCE(?,title), notes=?, scheduled_date=COALESCE(?,scheduled_date),
-      status=?, assigned_to=?, drive_link=?, updated_at=datetime('now')
+      status=?, assigned_to=?, drive_link=?, image_data=?, updated_at=datetime('now')
     WHERE id=?
   `).run(
     channel,
@@ -1053,6 +1056,7 @@ app.patch('/api/social-posts/:id', requireContentTeam, (req, res) => {
     status,
     req.body.assignedTo !== undefined ? String(req.body.assignedTo).trim() : post.assigned_to,
     req.body.driveLink !== undefined ? String(req.body.driveLink).trim() : post.drive_link,
+    req.body.imageData !== undefined ? (req.body.imageData ? String(req.body.imageData) : null) : post.image_data,
     req.params.id
   );
   res.json(db.prepare('SELECT * FROM social_posts WHERE id=?').get(req.params.id));

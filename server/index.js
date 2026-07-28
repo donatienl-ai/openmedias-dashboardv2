@@ -37,7 +37,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(compression());
-app.use(express.json());
+// Limite relevée (défaut 100kb) : le rétroplanning communication envoie l'image
+// de preview d'un post en base64 dans le JSON (pas d'upload multipart), un
+// visuel compressé côté client dépasse vite la limite par défaut.
+app.use(express.json({ limit: '5mb' }));
 
 const PASSWORD = process.env.DASHBOARD_PASSWORD || 'change-moi';
 

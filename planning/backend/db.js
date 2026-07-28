@@ -68,6 +68,7 @@ db.exec(`
     status TEXT DEFAULT 'a_faire',
     assigned_to TEXT,
     drive_link TEXT,
+    image_data TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   );
@@ -75,6 +76,13 @@ db.exec(`
 // Migration : lien Drive (pièce jointe du post) ajouté après coup — try/catch
 // au cas où social_posts existait déjà (déployé) sans cette colonne.
 try { db.exec('ALTER TABLE social_posts ADD COLUMN drive_link TEXT'); } catch(e) {}
+// Migration : image de preview envoyée directement par l'app (data URL base64) —
+// remplace la tentative d'intégrer la miniature Drive (nécessitait un partage
+// domaine + une session Google active dans le navigateur, jugé trop compliqué).
+// Stockée en TEXT dans SQLite plutôt qu'un fichier sur disque : plus simple à
+// gérer pour ce volume (dizaines de posts, pas des milliers), pas de dossier
+// d'uploads à sauvegarder/nettoyer séparément de la base.
+try { db.exec('ALTER TABLE social_posts ADD COLUMN image_data TEXT'); } catch(e) {}
 
 // Migration: add montant column if missing
 try { db.exec('ALTER TABLE emissions ADD COLUMN montant REAL DEFAULT 0'); } catch(e) {}
