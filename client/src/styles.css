@@ -480,6 +480,11 @@ body {
 .mrow-delta.flat { color: var(--text-muted); }
 [data-theme="dark"] .mrow-delta.up   { color: #4ADE80; }
 [data-theme="dark"] .mrow-delta.down { color: #F87171; }
+.mrow-extra {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  font-size: 11px; color: var(--text-muted); margin-bottom: 5px;
+}
+.mrow-extra-item b { color: var(--text); font-weight: 700; }
 .mrow-bar-bg {
   height: 4px; background: var(--border-soft); border-radius: 3px; overflow: hidden;
 }

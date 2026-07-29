@@ -199,7 +199,7 @@ function Login({ onSuccess }) {
 }
 
 // ---------- MODALE détail ----------
-function DetailModal({ open, title, rows, isAmount, accent, onClose, cmpRows }) {
+function DetailModal({ open, title, rows, isAmount, accent, onClose, cmpRows, extraCols }) {
   if (!open) return null;
   const max = Math.max(1, ...rows.map((r) => (isAmount ? r.amount : r.count)));
   // Index comparaison par nom pour lookup O(1)
@@ -240,6 +240,15 @@ function DetailModal({ open, title, rows, isAmount, accent, onClose, cmpRows }) 
                         </span>
                       )}
                     </div>
+                    {extraCols && extraCols.length > 0 && (
+                      <div className="mrow-extra">
+                        {extraCols.map((c, ci) => (
+                          <span className="mrow-extra-item" key={ci}>
+                            {c.label} : <b>{c.render(r)}</b>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     <div className="mrow-bar-bg">
                       <div className={`mrow-bar ${accent}-bg`} style={{ width: `${barPct}%` }} />
                     </div>
@@ -1251,6 +1260,29 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   // Propositions sur Comptes (statut Salesforce "Proposition envoyée")
   const propalsComptes = fBlock(d.propalsComptes || { total: 0, detail: [] });
 
+  // Vue fusionnée Pistes + Comptes par commercial, pour le détail de la carte
+  // "Propals" (qui affiche la somme des deux) — sans ça le clic sur la carte
+  // n'ouvrait que le détail des pistes, les comptes restaient invisibles.
+  const propalsMerged = (() => {
+    const map = new Map();
+    for (const r of propals.detail || []) {
+      map.set(r.name, { name: r.name, leads: r.count || 0, comptes: 0, amount: r.amount || 0 });
+    }
+    for (const r of propalsComptes.detail || []) {
+      const e = map.get(r.name) || { name: r.name, leads: 0, comptes: 0, amount: 0 };
+      e.comptes = r.count || 0;
+      map.set(r.name, e);
+    }
+    return Array.from(map.values())
+      .map((e) => ({ ...e, count: e.leads + e.comptes }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  })();
+  const propalsExtraCols = [
+    { label: 'Pistes', render: (r) => r.leads },
+    { label: 'Comptes', render: (r) => r.comptes },
+    { label: 'Estimé', render: (r) => `${fmt(r.amount)} €` },
+  ];
+
   // Repère "mois en cours" (sous CA & Signatures), masqué si la période EST déjà ce mois
   const isThisMonth = (d.range?.preset || 'today') === 'this_month';
   const monthRev = fBlock(d.monthRevenue || { totalAmount: 0, detail: [] }, true);
@@ -1368,8 +1400,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   };
 
   // ouvre une modale
-  const openModal = (title, rows, isAmount, accent, cmpRows) =>
-    setModal({ title, rows: rows || [], isAmount: !!isAmount, accent: accent || 'c-blue', cmpRows: cmpRows || [] });
+  const openModal = (title, rows, isAmount, accent, cmpRows, extraCols) =>
+    setModal({ title, rows: rows || [], isAmount: !!isAmount, accent: accent || 'c-blue', cmpRows: cmpRows || [], extraCols: extraCols || null });
   // Helper : récupère le detail filtré d'un bloc de comparaison
   const cmpDetail = (block) => fBlock(block || { total: 0, detail: [] }).detail;
   const cmpDetailAmt = (block) => fBlock(block || { totalAmount: 0, detail: [] }, true).detail;
@@ -1573,7 +1605,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             { value: `${fmt(propals.totalAmount)} €`, label: 'estimé pistes', dot: '#FDBA74' },
           ]}
           delta={dPropals}
-          clickable onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [])} />
+          clickable onClick={() => openModal('Propals (pistes + comptes) par commercial', propalsMerged, false, 'c-orange', [], propalsExtraCols)} />
         <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow
           secondary={!isThisMonth ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
           delta={dSig} />
@@ -1751,7 +1783,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <TileHead dotClass="bg-orange" title="Propals" />
           <div
             className="subsec clickable-zone"
-            onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [])}
+            onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [], [{ label: 'Estimé', render: (r) => `${fmt(r.amount || 0)} €` }])}
           >
             <div className="subsec-head">
               <span>Pistes</span>
@@ -1880,6 +1912,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         isAmount={modal?.isAmount}
         accent={modal?.accent}
         cmpRows={modal?.cmpRows || []}
+        extraCols={modal?.extraCols || null}
         onClose={() => setModal(null)}
       />
     </div>
