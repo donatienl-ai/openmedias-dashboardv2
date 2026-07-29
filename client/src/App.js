@@ -18,6 +18,24 @@ function timeLabel(iso) {
   return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
 }
 
+// ---------- MODE ÉDITION — blocs du dashboard réorganisables ----------
+// Chaque "bloc" regroupe plusieurs tuiles existantes (pas tuile par tuile,
+// pour rester gérable) — ordre mémorisé par navigateur (localStorage), pas
+// de backend : c'est une préférence d'affichage personnelle, pas une donnée
+// métier partagée.
+const DEFAULT_BLOCK_ORDER = ['hero', 'money', 'ca12mois', 'activite', 'classements', 'objectifs', 'newsletter', 'synthese'];
+const BLOCK_LABELS = {
+  hero: 'KPI principaux',
+  money: 'CA + Signatures',
+  ca12mois: 'CA — 12 mois glissants',
+  activite: 'Activité (Calls, RDV pris, BDC)',
+  classements: 'Classements (Propals, RDV, SalesForge)',
+  objectifs: 'Objectifs individuels',
+  newsletter: 'Newsletters',
+  synthese: 'Synthèse semaine (tunnel + podium)',
+};
+const BLOCK_ORDER_STORAGE_KEY = 'om_block_order';
+
 // ---------- AUTH (fusion OpenDashboard / OpenPlanning) ----------
 // `cred` (anciennement une simple string "password") est désormais un objet :
 //   { mode: 'legacy', password }                       — mot de passe unique (filet de sécurité, accès admin complet)
@@ -350,6 +368,38 @@ function LeaderboardColumn({ title, rows, isAmount, color, anonymized }) {
     </div>
   );
 }
+// Funnel vertical (barres proportionnelles à la 1ère étape + taux de passage
+// entre chaque étape) — remplace l'ancien alignement de boîtes côte à côte.
+function ConversionFunnel({ stages }) {
+  const max = Math.max(1, ...stages.map((s) => s.value));
+  return (
+    <div className="funnel-v2">
+      {stages.map((s, i) => (
+        <React.Fragment key={s.label}>
+          {i > 0 && (
+            <div className="funnel-v2-step">
+              <span className="funnel-v2-step-line" />
+              <span className={`funnel-rate ${s.rate === null ? '' : s.rate >= 50 ? 'up' : s.rate >= 20 ? 'flat' : 'down'}`}>
+                {s.rate === null ? '—' : `${s.rate}%`}
+              </span>
+            </div>
+          )}
+          <div className="funnel-v2-row">
+            <div className="funnel-v2-label">{s.label}</div>
+            <div className="funnel-v2-track">
+              <div
+                className="funnel-v2-bar"
+                style={{ width: `${Math.max(6, Math.round((s.value / max) * 100))}%`, background: s.color }}
+              />
+              <span className="funnel-v2-val">{fmt(s.value)}</span>
+            </div>
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 function Leaderboard({ callsDetail, rdvDetail, revenueDetail, anonymized }) {
   return (
     <div className="lb-grid">
@@ -1274,6 +1324,52 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const toggleHidden = (name) =>
     setHiddenSales((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
 
+  // ---- Mode édition : réorganiser les blocs du dashboard (drag & drop natif) ----
+  const [editMode, setEditMode] = useState(false);
+  const [blockOrder, setBlockOrder] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(BLOCK_ORDER_STORAGE_KEY) || 'null');
+      if (Array.isArray(saved) && saved.length) {
+        // Ne garde que les blocs connus (protège contre un renommage futur),
+        // et ajoute à la fin tout nouveau bloc apparu depuis le dernier réglage.
+        const known = new Set(DEFAULT_BLOCK_ORDER);
+        const kept = saved.filter((id) => known.has(id));
+        const missing = DEFAULT_BLOCK_ORDER.filter((id) => !kept.includes(id));
+        return [...kept, ...missing];
+      }
+    } catch { /* ignore, on retombe sur l'ordre par défaut */ }
+    return DEFAULT_BLOCK_ORDER;
+  });
+  useEffect(() => {
+    localStorage.setItem(BLOCK_ORDER_STORAGE_KEY, JSON.stringify(blockOrder));
+  }, [blockOrder]);
+
+  const moveBlock = (id, dir) => {
+    setBlockOrder((prev) => {
+      const idx = prev.indexOf(id);
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+  const dragBlockRef = useRef(null);
+  const handleBlockDragStart = (id) => () => { dragBlockRef.current = id; };
+  const handleBlockDragOver = (e) => { e.preventDefault(); };
+  const handleBlockDrop = (targetId) => (e) => {
+    e.preventDefault();
+    const draggedId = dragBlockRef.current;
+    dragBlockRef.current = null;
+    if (!draggedId || draggedId === targetId) return;
+    setBlockOrder((prev) => {
+      const next = prev.filter((x) => x !== draggedId);
+      const targetIdx = next.indexOf(targetId);
+      next.splice(targetIdx, 0, draggedId);
+      return next;
+    });
+  };
+
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
@@ -1652,6 +1748,347 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     { name: 'R2 pris', value: rdvB.r2.total, fill: '#22D3EE' },
   ].filter((x) => x.value > 0);
 
+  // ---- Contenu de chaque bloc réorganisable (cf. DEFAULT_BLOCK_ORDER) ----
+  // Chaque valeur est le contenu (tuiles) d'un bloc ; le wrapper `.grid` autour
+  // de chaque bloc est ajouté au rendu, pas ici, pour garder la grille 12
+  // colonnes fonctionnelle à l'intérieur de chaque bloc indépendamment de
+  // l'ordre choisi par l'utilisateur.
+  const BLOCKS = {
+    hero: (
+      <>
+        <Kpi label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total}
+          sub={calls.truncated ? 'plafonné' : 'passés'} color="c-blue" dot="#3B82F6"
+          secondary={[
+            { value: callsOut, label: 'out', dot: '#2563EB' },
+            { value: callsIn, label: 'in', dot: '#60A5FA' },
+          ]}
+          delta={dCalls}
+          clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue', cmp ? cmpDetail(cmp.calls) : [])} />
+        <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
+          secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
+          delta={dR1}
+          clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green', cmp ? cmpDetail(cmp.rdvToday?.r1) : [])} />
+        <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#22D3EE"
+          secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
+          delta={dR2}
+          clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.rdvToday?.r2) : [])} />
+        <Kpi label="Propals" value={propals.total + propalsComptes.total} sub="envoyées" color="c-orange" dot="#F97316"
+          secondary={[
+            { value: propals.total, label: 'pistes', dot: '#F97316' },
+            { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
+            { value: `${fmt(propals.totalAmount)} €`, label: 'estimé pistes', dot: '#FDBA74' },
+          ]}
+          delta={dPropals}
+          clickable onClick={() => openModal('Propals (pistes + comptes) par commercial', propalsMerged, false, 'c-orange', [], propalsExtraCols)} />
+        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow
+          secondary={!isThisMonth ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
+          delta={dSig} />
+        <div className="tile hero-ca col-2">
+          <div className="lbl">CA · {isToday ? 'du jour' : 'période'}
+            {dCA !== null && dCA !== undefined && (
+              <span className={`hero-delta ${dCA > 0 ? 'up' : dCA < 0 ? 'down' : 'flat'}`}>
+                {dCA > 0 ? '▲' : dCA < 0 ? '▼' : '•'} {Math.abs(dCA)}%
+              </span>
+            )}
+          </div>
+          <div className="val">{fmt(rev.totalAmount)}€</div>
+          <div className="sub">{isToday ? 'cumul signé' : rangeLabel.toLowerCase()}</div>
+          {!isThisMonth && (
+            <div className="hero-month"><span className="hero-month-dot" />ce mois · {fmt(monthRev.totalAmount)} €</div>
+          )}
+          {objectiveStatus && (
+            <div
+              className={`objective-badge ${objectiveStatus}`}
+              onClick={isAdmin ? editMonthlyObjective : undefined}
+              style={isAdmin ? { cursor: 'pointer' } : undefined}
+              title={
+                isAdmin
+                  ? `Objectif du mois : ${fmt(monthlyObjective)}€ — clique pour modifier`
+                  : `Objectif du mois : ${fmt(monthlyObjective)}€`
+              }
+            >
+              🎯 {objectivePct}% du rythme visé
+            </div>
+          )}
+          {!objectiveStatus && isAdmin && (
+            <div
+              className="objective-badge muted"
+              onClick={editMonthlyObjective}
+              style={{ cursor: 'pointer' }}
+              title="Définir un objectif de CA mensuel"
+            >
+              🎯 Définir un objectif
+            </div>
+          )}
+        </div>
+      </>
+    ),
+
+    money: (
+      <>
+        <div className="tile col-8 clickable" onClick={() => openModal(`CA · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue', cmp ? cmpDetailAmt(cmp.revenue) : [])}>
+          <TileHead dotClass="bg-blue" title={`CA ${isToday ? 'du jour' : '· ' + rangeLabel} par commercial`} clickable />
+          <div className="chart-box" style={{ height: 250 }}>
+            {caBySales.length === 0 ? (
+              <div className="empty">Aucune donnée</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={caBySales} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+                  <XAxis dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
+                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
+                    tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                  <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
+                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={90} isAnimationActive={false}>
+                    {caBySales.map((e, i) => (
+                      <Cell key={i} fill={i === 0 ? '#3B82F6' : '#2563EB'} fillOpacity={i === 0 ? 1 : 0.55} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
+        <div className="tile col-4">
+          <TileHead dotClass="bg-violet" title={isToday ? 'Signatures du jour' : `Signatures · ${rangeLabel}`} />
+          {sig.detail.length === 0 ? (
+            <div className="empty">Aucune signature</div>
+          ) : (
+            <div className="sig-scroll">
+              {sig.detail.map((s, i) => (
+                <div className="sig-row" key={i}>
+                  <span className="sig-name">{s.name}</span>
+                  <span className="sig-val">{fmt(s.amount)} €</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </>
+    ),
+
+    ca12mois: (
+      <div className="tile col-12">
+        <TileHead dotClass="bg-blue" title="CA — 12 derniers mois" />
+        <div className="chart-box" style={{ height: 220 }}>
+          {revenueByMonthChart.every((m) => m.value === 0) ? (
+            <div className="empty">Aucune donnée</div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={revenueByMonthChart} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+                <XAxis dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
+                <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
+                  tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
+                <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive={false}>
+                  {revenueByMonthChart.map((e, i) => (
+                    <Cell key={i} fill={i === revenueByMonthChart.length - 1 ? '#3B82F6' : '#2563EB'} fillOpacity={i === revenueByMonthChart.length - 1 ? 1 : 0.55} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+    ),
+
+    activite: (
+      <>
+        <div className="tile col-5 clickable" onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue', cmp ? cmpDetail(cmp.calls) : [])}>
+          <TileHead dotClass="bg-blue" title={`Calls par commercial${callsBySales.length > 10 ? ' · top 10' : ''}`} clickable />
+          <div className="chart-box" style={{ height: Math.max(200, Math.min(callsBySales.length, 10) * 30) }}>
+            {callsBySales.length === 0 ? (
+              <div className="empty">Aucun call sur la période</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={callsBySales.slice(0, 10)} layout="vertical" margin={{ top: 0, right: 36, left: 8, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
+                  <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
+                  <Bar dataKey="outbound" name="Sortants" stackId="dir" fill="#2563EB" isAnimationActive={false} />
+                  <Bar dataKey="inbound" name="Entrants" stackId="dir" fill="#60A5FA" radius={[0, 6, 6, 0]} isAnimationActive={false}>
+                    <LabelList dataKey="total" position="right" fill={ct.tick} fontSize={11} fontWeight={700} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <div className="rdv-legend">
+            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#2563EB' }} />Sortants<b>{callsOut}</b></span>
+            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#60A5FA' }} />Entrants<b>{callsIn}</b></span>
+          </div>
+          {callsBySales.length > 10 && <div className="see-all">⤢ Voir les {callsBySales.length} commerciaux</div>}
+        </div>
+
+        <div className="tile col-3">
+          <TileHead dotClass="bg-amber" title="RDV pris — répartition" />
+          <div className="chart-box" style={{ height: 200 }}>
+            {rdvPie.length === 0 ? (
+              <div className="empty">Aucun RDV pris</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={rdvPie} margin={{ top: 24, right: 8, left: 8, bottom: 4 }} barCategoryGap="30%">
+                  <XAxis dataKey="name" tick={{ fill: ct.tickBold, fontSize: 13, fontWeight: 700 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
+                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={32} allowDecimals={false} />
+                  <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+                  <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={70} isAnimationActive={false}
+                    label={{ position: 'top', fill: ct.labelStrong, fontSize: 16, fontWeight: 800 }}>
+                    {rdvPie.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+          <div className="rdv-legend">
+            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#FBBF24' }} />R1 pris<b>{rdvB.r1.total}</b></span>
+            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#22D3EE' }} />R2 pris<b>{rdvB.r2.total}</b></span>
+          </div>
+        </div>
+
+        <div className="tile col-4">
+          <TileHead dotClass="bg-violet" title="BDC · DocuSign" />
+          <div className="bdc-stats">
+            {[
+              { key: 'sent', label: 'Envoyés', color: 'c-orange', title: 'BDC envoyés par commercial' },
+              { key: 'pending', label: 'En attente', color: 'c-amber', title: 'BDC en attente de signature' },
+              { key: 'signed', label: 'Signés', color: 'c-green', title: 'BDC signés par commercial' },
+            ].map((v) => (
+              <button
+                key={v.key}
+                className={`bdc-stat ${bdcView === v.key ? 'active' : ''}`}
+                onClick={() => setBdcView(v.key)}
+              >
+                <span className={`bdc-stat-val ${v.color}`}>{bdc[v.key].total}</span>
+                <span className="bdc-stat-label">{v.label}</span>
+              </button>
+            ))}
+          </div>
+          {(() => {
+            const meta = {
+              sent: { color: 'c-orange', title: 'BDC envoyés par commercial' },
+              signed: { color: 'c-green', title: 'BDC signés par commercial' },
+              pending: { color: 'c-amber', title: 'BDC en attente de signature' },
+            }[bdcView];
+            return (
+              <>
+                <TopList rows={bdc[bdcView].detail} color={meta.color} />
+                <div
+                  className="see-all linky"
+                  onClick={() => openModal(meta.title, bdc[bdcView].detail, false, meta.color, cmp && cmp.bdc ? cmpDetail(cmp.bdc[bdcView]) : [])}
+                >
+                  ⤢ Voir tout
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      </>
+    ),
+
+    classements: (
+      <>
+        <div className="tile col-3">
+          <TileHead dotClass="bg-orange" title="Propals" />
+          <div
+            className="subsec clickable-zone"
+            onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [], [{ label: 'Estimé', render: (r) => `${fmt(r.amount || 0)} €` }])}
+          >
+            <div className="subsec-head">
+              <span>Pistes</span>
+              <b className="c-orange">{propals.total}</b>
+            </div>
+            <div className="kpi-sub" style={{ marginTop: -4, marginBottom: 6 }}>
+              {fmt(propals.totalAmount)} € estimés
+            </div>
+            <TopList rows={propals.detail} color="c-orange" max={4} />
+          </div>
+          <div
+            className="subsec clickable-zone"
+            onClick={() => openModal('Propositions Comptes par commercial', propalsComptes.detail, false, 'c-amber', cmp ? cmpDetail(cmp.propalsComptes) : [])}
+          >
+            <div className="subsec-head">
+              <span>Comptes</span>
+              <b className="c-amber">{propalsComptes.total}</b>
+            </div>
+            <TopList rows={propalsComptes.detail} color="c-amber" max={5} />
+          </div>
+        </div>
+        <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber', cmp ? cmpDetail(cmp.rdvBooked?.r1) : [])}>
+          <TileHead dotClass="bg-amber" title="R1 pris par sales" clickable />
+          <TopList rows={rdvB.r1.detail} color="c-amber" />
+        </div>
+        <div className="tile col-3 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber', cmp ? cmpDetail(cmp.rdvBooked?.r2) : [])}>
+          <TileHead dotClass="bg-amber" title="R2 pris par sales" clickable />
+          <TopList rows={rdvB.r2.detail} color="c-amber" />
+        </div>
+        <div className="tile col-3 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.salesforge) : [])}>
+          <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
+          <TopList rows={sf.detail} color="c-bluer2" />
+        </div>
+      </>
+    ),
+
+    // N'affiche rien (bloc masqué en mode normal) tant qu'aucun objectif n'est réglé.
+    objectifs: objectifsProgress.length > 0 ? (
+      <div className="tile col-6">
+        <TileHead dotClass="bg-green" title="Objectifs du mois en cours" />
+        <div className="obj-list">
+          {objectifsProgress.map((o) => (
+            <div className="obj-row" key={o.commercialId}>
+              <div className="obj-row-top">
+                <span className="obj-name">{o.displayName}</span>
+                <span className="obj-val">{fmt(o.ca)} € / {fmt(o.monthlyObjective)} €</span>
+              </div>
+              <div className="mrow-bar-bg">
+                <div
+                  className={`mrow-bar ${o.pct >= 100 ? 'c-green-bg' : o.pct >= 70 ? 'c-amber-bg' : 'c-blue-bg'}`}
+                  style={{ width: `${o.pct}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : null,
+
+    newsletter: (
+      <NewsletterSection
+        nlData={nlData}
+        nlLoading={nlLoading}
+        rangeLabel={rangeLabel}
+        onOpenCampaigns={() => setNlModal('campaigns')}
+      />
+    ),
+
+    // Regroupe tunnel de conversion + podium hebdo — regardé en second, après
+    // les chiffres du jour/de la période (demande explicite : moins prioritaire
+    // au premier coup d'œil que les tuiles chiffrées du dessus).
+    synthese: (
+      <>
+        <div className="tile col-12">
+          <TileHead dotClass="bg-violet" title={`Tunnel de conversion · ${rangeLabel}`} />
+          <ConversionFunnel stages={funnelStages} />
+        </div>
+        <div className="tile col-12">
+          <div className="tile-head">
+            <span className="tile-dot bg-amber" />
+            <span className="tile-title">Podium de la semaine</span>
+            <label className="lb-anon-toggle" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={lbAnonymized} onChange={(e) => setLbAnonymized(e.target.checked)} />
+              Anonymiser
+            </label>
+          </div>
+          <Leaderboard
+            callsDetail={weekCalls.detail}
+            rdvDetail={weekRdvMerged}
+            revenueDetail={weekRev.detail}
+            anonymized={lbAnonymized}
+          />
+        </div>
+      </>
+    ),
+  };
+
   return (
     <div className="shell">
       {/* TOPBAR — barre d'identité sticky (app-switch + marque), même
@@ -1768,6 +2205,13 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
               📺
             </button>
+            <button
+              className={`theme-btn ${editMode ? 'active' : ''}`}
+              onClick={() => setEditMode((v) => !v)}
+              title={editMode ? 'Terminer la réorganisation' : 'Réorganiser les blocs du dashboard'}
+            >
+              {editMode ? '✅' : '✏️'}
+            </button>
             {isRestrictedCommercial && (
               <button className="theme-btn" onClick={() => setShowMaSemaine(true)} title="Ma semaine">
                 📅
@@ -1815,341 +2259,31 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
       )}
 
-      <div className="grid">
-        {/* ===== BANDE KPI — duo cards (R1/R2 intègrent leurs "pris") ===== */}
-        <Kpi label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total}
-          sub={calls.truncated ? 'plafonné' : 'passés'} color="c-blue" dot="#3B82F6"
-          secondary={[
-            { value: callsOut, label: 'out', dot: '#2563EB' },
-            { value: callsIn, label: 'in', dot: '#60A5FA' },
-          ]}
-          delta={dCalls}
-          clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue', cmp ? cmpDetail(cmp.calls) : [])} />
-        <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
-          secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
-          delta={dR1}
-          clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green', cmp ? cmpDetail(cmp.rdvToday?.r1) : [])} />
-        <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#22D3EE"
-          secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
-          delta={dR2}
-          clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.rdvToday?.r2) : [])} />
-        <Kpi label="Propals" value={propals.total + propalsComptes.total} sub="envoyées" color="c-orange" dot="#F97316"
-          secondary={[
-            { value: propals.total, label: 'pistes', dot: '#F97316' },
-            { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
-            { value: `${fmt(propals.totalAmount)} €`, label: 'estimé pistes', dot: '#FDBA74' },
-          ]}
-          delta={dPropals}
-          clickable onClick={() => openModal('Propals (pistes + comptes) par commercial', propalsMerged, false, 'c-orange', [], propalsExtraCols)} />
-        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow
-          secondary={!isThisMonth ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
-          delta={dSig} />
-        <div className="tile hero-ca col-2">
-          <div className="lbl">CA · {isToday ? 'du jour' : 'période'}
-            {dCA !== null && dCA !== undefined && (
-              <span className={`hero-delta ${dCA > 0 ? 'up' : dCA < 0 ? 'down' : 'flat'}`}>
-                {dCA > 0 ? '▲' : dCA < 0 ? '▼' : '•'} {Math.abs(dCA)}%
-              </span>
-            )}
-          </div>
-          <div className="val">{fmt(rev.totalAmount)}€</div>
-          <div className="sub">{isToday ? 'cumul signé' : rangeLabel.toLowerCase()}</div>
-          {!isThisMonth && (
-            <div className="hero-month"><span className="hero-month-dot" />ce mois · {fmt(monthRev.totalAmount)} €</div>
-          )}
-          {objectiveStatus && (
+      <div className="dash-blocks">
+        {blockOrder.map((blockId, idx) => {
+          const content = BLOCKS[blockId];
+          if (!content && !editMode) return null;
+          return (
             <div
-              className={`objective-badge ${objectiveStatus}`}
-              onClick={isAdmin ? editMonthlyObjective : undefined}
-              style={isAdmin ? { cursor: 'pointer' } : undefined}
-              title={
-                isAdmin
-                  ? `Objectif du mois : ${fmt(monthlyObjective)}€ — clique pour modifier`
-                  : `Objectif du mois : ${fmt(monthlyObjective)}€`
-              }
+              key={blockId}
+              className={`dash-block ${editMode ? 'edit-mode' : ''}`}
+              draggable={editMode}
+              onDragStart={editMode ? handleBlockDragStart(blockId) : undefined}
+              onDragOver={editMode ? handleBlockDragOver : undefined}
+              onDrop={editMode ? handleBlockDrop(blockId) : undefined}
             >
-              🎯 {objectivePct}% du rythme visé
-            </div>
-          )}
-          {!objectiveStatus && isAdmin && (
-            <div
-              className="objective-badge muted"
-              onClick={editMonthlyObjective}
-              style={{ cursor: 'pointer' }}
-              title="Définir un objectif de CA mensuel"
-            >
-              🎯 Définir un objectif
-            </div>
-          )}
-        </div>
-
-        {/* ===== TUNNEL DE CONVERSION — Calls → RDV pris → Propal → Signature ===== */}
-        <div className="tile col-12">
-          <TileHead dotClass="bg-violet" title={`Tunnel de conversion · ${rangeLabel}`} />
-          <div className="funnel-row">
-            {funnelStages.map((s, i) => (
-              <React.Fragment key={s.label}>
-                {i > 0 && (
-                  <div className="funnel-arrow">
-                    <span className="funnel-arrow-glyph">→</span>
-                    <span className={`funnel-rate ${s.rate === null ? '' : s.rate >= 50 ? 'up' : s.rate >= 20 ? 'flat' : 'down'}`}>
-                      {s.rate === null ? '—' : `${s.rate}%`}
-                    </span>
-                  </div>
-                )}
-                <div className="funnel-stage">
-                  <div className="funnel-stage-val" style={{ color: s.color }}>{fmt(s.value)}</div>
-                  <div className="funnel-stage-label">{s.label}</div>
+              {editMode && (
+                <div className="dash-block-bar">
+                  <span className="dash-block-handle">⠿</span>
+                  <span className="dash-block-name">{BLOCK_LABELS[blockId]}</span>
+                  <button className="dash-block-btn" onClick={() => moveBlock(blockId, -1)} disabled={idx === 0} title="Monter">▲</button>
+                  <button className="dash-block-btn" onClick={() => moveBlock(blockId, 1)} disabled={idx === blockOrder.length - 1} title="Descendre">▼</button>
                 </div>
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-
-        {/* ===== LEADERBOARD HEBDO — toujours "cette semaine" ===== */}
-        <div className="tile col-12">
-          <div className="tile-head">
-            <span className="tile-dot bg-amber" />
-            <span className="tile-title">Podium de la semaine</span>
-            <label className="lb-anon-toggle" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={lbAnonymized} onChange={(e) => setLbAnonymized(e.target.checked)} />
-              Anonymiser
-            </label>
-          </div>
-          <Leaderboard
-            callsDetail={weekCalls.detail}
-            rdvDetail={weekRdvMerged}
-            revenueDetail={weekRev.detail}
-            anonymized={lbAnonymized}
-          />
-        </div>
-
-        {/* ===== RANGÉE MONEY — CA + Signatures ===== */}
-        <div className="tile col-8 clickable" onClick={() => openModal(`CA · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue', cmp ? cmpDetailAmt(cmp.revenue) : [])}>
-          <TileHead dotClass="bg-blue" title={`CA ${isToday ? 'du jour' : '· ' + rangeLabel} par commercial`} clickable />
-          <div className="chart-box" style={{ height: 250 }}>
-            {caBySales.length === 0 ? (
-              <div className="empty">Aucune donnée</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={caBySales} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                  <XAxis dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
-                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
-                    tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                  <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={90} isAnimationActive={false}>
-                    {caBySales.map((e, i) => (
-                      <Cell key={i} fill={i === 0 ? '#3B82F6' : '#2563EB'} fillOpacity={i === 0 ? 1 : 0.55} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-
-        <div className="tile col-4">
-          <TileHead dotClass="bg-violet" title={isToday ? 'Signatures du jour' : `Signatures · ${rangeLabel}`} />
-          {sig.detail.length === 0 ? (
-            <div className="empty">Aucune signature</div>
-          ) : (
-            <div className="sig-scroll">
-              {sig.detail.map((s, i) => (
-                <div className="sig-row" key={i}>
-                  <span className="sig-name">{s.name}</span>
-                  <span className="sig-val">{fmt(s.amount)} €</span>
-                </div>
-              ))}
+              )}
+              <div className="grid">{content}</div>
             </div>
-          )}
-        </div>
-
-        {/* ===== CA — 12 MOIS GLISSANTS (indépendant du filtre de période en haut) ===== */}
-        <div className="tile col-12">
-          <TileHead dotClass="bg-blue" title="CA — 12 derniers mois" />
-          <div className="chart-box" style={{ height: 220 }}>
-            {revenueByMonthChart.every((m) => m.value === 0) ? (
-              <div className="empty">Aucune donnée</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={revenueByMonthChart} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                  <XAxis dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
-                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
-                    tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-                  <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive={false}>
-                    {revenueByMonthChart.map((e, i) => (
-                      <Cell key={i} fill={i === revenueByMonthChart.length - 1 ? '#3B82F6' : '#2563EB'} fillOpacity={i === revenueByMonthChart.length - 1 ? 1 : 0.55} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-
-        {/* ===== RANGÉE ACTIVITÉ — Calls top 10 + RDV pris + SalesForge ===== */}
-        <div className="tile col-5 clickable" onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue', cmp ? cmpDetail(cmp.calls) : [])}>
-          <TileHead dotClass="bg-blue" title={`Calls par commercial${callsBySales.length > 10 ? ' · top 10' : ''}`} clickable />
-          <div className="chart-box" style={{ height: Math.max(200, Math.min(callsBySales.length, 10) * 30) }}>
-            {callsBySales.length === 0 ? (
-              <div className="empty">Aucun call sur la période</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={callsBySales.slice(0, 10)} layout="vertical" margin={{ top: 0, right: 36, left: 8, bottom: 0 }}>
-                  <XAxis type="number" tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={false} tickLine={false} width={70} />
-                  <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
-                  <Bar dataKey="outbound" name="Sortants" stackId="dir" fill="#2563EB" isAnimationActive={false} />
-                  <Bar dataKey="inbound" name="Entrants" stackId="dir" fill="#60A5FA" radius={[0, 6, 6, 0]} isAnimationActive={false}>
-                    <LabelList dataKey="total" position="right" fill={ct.tick} fontSize={11} fontWeight={700} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-          <div className="rdv-legend">
-            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#2563EB' }} />Sortants<b>{callsOut}</b></span>
-            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#60A5FA' }} />Entrants<b>{callsIn}</b></span>
-          </div>
-          {callsBySales.length > 10 && <div className="see-all">⤢ Voir les {callsBySales.length} commerciaux</div>}
-        </div>
-
-        <div className="tile col-3">
-          <TileHead dotClass="bg-amber" title="RDV pris — répartition" />
-          <div className="chart-box" style={{ height: 200 }}>
-            {rdvPie.length === 0 ? (
-              <div className="empty">Aucun RDV pris</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={rdvPie} margin={{ top: 24, right: 8, left: 8, bottom: 4 }} barCategoryGap="30%">
-                  <XAxis dataKey="name" tick={{ fill: ct.tickBold, fontSize: 13, fontWeight: 700 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
-                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={32} allowDecimals={false} />
-                  <Tooltip content={<DarkTooltip />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
-                  <Bar dataKey="value" radius={[8, 8, 0, 0]} maxBarSize={70} isAnimationActive={false}
-                    label={{ position: 'top', fill: ct.labelStrong, fontSize: 16, fontWeight: 800 }}>
-                    {rdvPie.map((e, i) => <Cell key={i} fill={e.fill} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-          <div className="rdv-legend">
-            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#FBBF24' }} />R1 pris<b>{rdvB.r1.total}</b></span>
-            <span className="rdv-leg-item"><span className="rdv-leg-dot" style={{ background: '#22D3EE' }} />R2 pris<b>{rdvB.r2.total}</b></span>
-          </div>
-        </div>
-
-        <div className="tile col-4">
-          <TileHead dotClass="bg-violet" title="BDC · DocuSign" />
-          <div className="bdc-stats">
-            {[
-              { key: 'sent', label: 'Envoyés', color: 'c-orange', title: 'BDC envoyés par commercial' },
-              { key: 'pending', label: 'En attente', color: 'c-amber', title: 'BDC en attente de signature' },
-              { key: 'signed', label: 'Signés', color: 'c-green', title: 'BDC signés par commercial' },
-            ].map((v) => (
-              <button
-                key={v.key}
-                className={`bdc-stat ${bdcView === v.key ? 'active' : ''}`}
-                onClick={() => setBdcView(v.key)}
-              >
-                <span className={`bdc-stat-val ${v.color}`}>{bdc[v.key].total}</span>
-                <span className="bdc-stat-label">{v.label}</span>
-              </button>
-            ))}
-          </div>
-          {(() => {
-            const meta = {
-              sent: { color: 'c-orange', title: 'BDC envoyés par commercial' },
-              signed: { color: 'c-green', title: 'BDC signés par commercial' },
-              pending: { color: 'c-amber', title: 'BDC en attente de signature' },
-            }[bdcView];
-            return (
-              <>
-                <TopList rows={bdc[bdcView].detail} color={meta.color} />
-                <div
-                  className="see-all linky"
-                  onClick={() => openModal(meta.title, bdc[bdcView].detail, false, meta.color, cmp && cmp.bdc ? cmpDetail(cmp.bdc[bdcView]) : [])}
-                >
-                  ⤢ Voir tout
-                </div>
-              </>
-            );
-          })()}
-        </div>
-
-        {/* ===== RANGÉE CLASSEMENTS ===== */}
-        <div className="tile col-3">
-          <TileHead dotClass="bg-orange" title="Propals" />
-          <div
-            className="subsec clickable-zone"
-            onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [], [{ label: 'Estimé', render: (r) => `${fmt(r.amount || 0)} €` }])}
-          >
-            <div className="subsec-head">
-              <span>Pistes</span>
-              <b className="c-orange">{propals.total}</b>
-            </div>
-            <div className="kpi-sub" style={{ marginTop: -4, marginBottom: 6 }}>
-              {fmt(propals.totalAmount)} € estimés
-            </div>
-            <TopList rows={propals.detail} color="c-orange" max={4} />
-          </div>
-          <div
-            className="subsec clickable-zone"
-            onClick={() => openModal('Propositions Comptes par commercial', propalsComptes.detail, false, 'c-amber', cmp ? cmpDetail(cmp.propalsComptes) : [])}
-          >
-            <div className="subsec-head">
-              <span>Comptes</span>
-              <b className="c-amber">{propalsComptes.total}</b>
-            </div>
-            <TopList rows={propalsComptes.detail} color="c-amber" max={5} />
-          </div>
-        </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('R1 pris par commercial', rdvB.r1.detail, false, 'c-amber', cmp ? cmpDetail(cmp.rdvBooked?.r1) : [])}>
-          <TileHead dotClass="bg-amber" title="R1 pris par sales" clickable />
-          <TopList rows={rdvB.r1.detail} color="c-amber" />
-        </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('R2 pris par commercial', rdvB.r2.detail, false, 'c-amber', cmp ? cmpDetail(cmp.rdvBooked?.r2) : [])}>
-          <TileHead dotClass="bg-amber" title="R2 pris par sales" clickable />
-          <TopList rows={rdvB.r2.detail} color="c-amber" />
-        </div>
-        <div className="tile col-3 clickable" onClick={() => openModal('RDV SalesForge par commercial', sf.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.salesforge) : [])}>
-          <TileHead dotClass="bg-bluer2" title={`SalesForge · ${sf.total} RDV`} clickable />
-          <TopList rows={sf.detail} color="c-bluer2" />
-        </div>
-
-        {/* ===== OBJECTIFS INDIVIDUELS — CA du mois en cours vs objectif réglé
-             par un admin (⚙️ Paramètres). N'affiche que les commerciaux dont un
-             objectif > 0 est réglé, et respecte le filtre équipe/masquage actif. ===== */}
-        {objectifsProgress.length > 0 && (
-          <div className="tile col-6">
-            <TileHead dotClass="bg-green" title="Objectifs du mois en cours" />
-            <div className="obj-list">
-              {objectifsProgress.map((o) => (
-                <div className="obj-row" key={o.commercialId}>
-                  <div className="obj-row-top">
-                    <span className="obj-name">{o.displayName}</span>
-                    <span className="obj-val">{fmt(o.ca)} € / {fmt(o.monthlyObjective)} €</span>
-                  </div>
-                  <div className="mrow-bar-bg">
-                    <div
-                      className={`mrow-bar ${o.pct >= 100 ? 'c-green-bg' : o.pct >= 70 ? 'c-amber-bg' : 'c-blue-bg'}`}
-                      style={{ width: `${o.pct}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ===== NEWSLETTERS EXT — stats Mailjet + RDV Calendly ===== */}
-        <NewsletterSection
-          nlData={nlData}
-          nlLoading={nlLoading}
-          rangeLabel={rangeLabel}
-          onOpenCampaigns={() => setNlModal('campaigns')}
-        />
+          );
+        })}
       </div>
 
       <div className="foot">

@@ -487,16 +487,24 @@ body {
 .lb-name { flex: 1; font-size: 12.5px; color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lb-val { font-size: 12.5px; font-weight: 800; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 @media (max-width: 640px) { .lb-grid { grid-template-columns: 1fr; } }
-.funnel-row {
-  display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 8px; padding: 8px 4px;
-}
-.funnel-stage { display: flex; flex-direction: column; align-items: center; min-width: 90px; }
 .funnel-stage-val { font-family: var(--font-display); font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.funnel-stage-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
-.funnel-arrow { display: flex; flex-direction: column; align-items: center; flex: 1; min-width: 50px; }
-.funnel-arrow-glyph { font-size: 16px; color: var(--text-muted); }
-.funnel-rate { font-size: 12px; font-weight: 800; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* Funnel v2 : barres empilées proportionnelles + taux de passage entre étapes */
+.funnel-v2 { display: flex; flex-direction: column; padding: 6px 4px; }
+.funnel-v2-row { display: flex; align-items: center; gap: 14px; }
+.funnel-v2-label {
+  width: 96px; flex-shrink: 0; font-size: 11px; font-weight: 700;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px;
+}
+.funnel-v2-track { flex: 1; display: flex; align-items: center; gap: 12px; height: 30px; }
+.funnel-v2-bar { height: 100%; border-radius: 7px; min-width: 6px; transition: width 0.4s ease; }
+.funnel-v2-val {
+  font-family: var(--font-display); font-size: 15px; font-weight: 800;
+  color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.funnel-v2-step { display: flex; align-items: center; gap: 8px; padding: 3px 0 3px 96px; margin-left: 14px; }
+.funnel-v2-step-line { width: 1px; height: 16px; background: var(--border-soft); }
+.funnel-rate { font-size: 11.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .funnel-rate.up { color: #16A34A; }
 .funnel-rate.flat { color: #D97706; }
 .funnel-rate.down { color: #EF4444; }
@@ -763,6 +771,28 @@ body {
 }
 .theme-btn:hover { border-color: var(--om-blue-light); background: var(--panel-2); }
 .theme-btn:active { transform: scale(0.94); }
+.theme-btn.active { background: var(--om-blue-light); border-color: var(--om-blue-light); }
+
+/* --- Mode édition : blocs réorganisables --- */
+.dash-blocks { display: flex; flex-direction: column; gap: 0; }
+.dash-block { position: relative; }
+.dash-block.edit-mode {
+  border: 2px dashed var(--border); border-radius: 16px;
+  padding: 8px; margin-bottom: 10px; cursor: grab;
+}
+.dash-block.edit-mode:active { cursor: grabbing; }
+.dash-block-bar {
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px 10px;
+  font-size: 11px; color: var(--text-muted); font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.dash-block-handle { font-size: 15px; cursor: grab; color: var(--text-soft); }
+.dash-block-name { flex: 1; }
+.dash-block-btn {
+  background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: 6px;
+  width: 24px; height: 22px; font-size: 10px; color: var(--text); cursor: pointer;
+}
+.dash-block-btn:disabled { opacity: 0.3; cursor: default; }
 
 /* Transition douce entre thèmes */
 body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
