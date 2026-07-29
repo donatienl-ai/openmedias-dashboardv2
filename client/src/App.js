@@ -368,34 +368,46 @@ function LeaderboardColumn({ title, rows, isAmount, color, anonymized }) {
     </div>
   );
 }
-// Funnel vertical (barres proportionnelles à la 1ère étape + taux de passage
-// entre chaque étape) — remplace l'ancien alignement de boîtes côte à côte.
+// Funnel v3 : vrai entonnoir centré — barres de largeur proportionnelle à la
+// 1ère étape, centrées (label au-dessus, valeur dans la barre), taux de
+// passage en pillule entre étapes + conversion globale en pied. Chaque stage
+// peut fournir `text` (couleur du chiffre) pour les barres claires.
 function ConversionFunnel({ stages }) {
   const max = Math.max(1, ...stages.map((s) => s.value));
+  const first = stages[0]?.value || 0;
+  const last = stages[stages.length - 1]?.value || 0;
+  const globalRate = first > 0 ? Math.round((last / first) * 1000) / 10 : null;
   return (
-    <div className="funnel-v2">
+    <div className="funnel-v3">
       {stages.map((s, i) => (
         <React.Fragment key={s.label}>
           {i > 0 && (
-            <div className="funnel-v2-step">
-              <span className="funnel-v2-step-line" />
+            <div className="funnel-v3-rate">
+              <span className="funnel-v3-arrow">▼</span>
               <span className={`funnel-rate ${s.rate === null ? '' : s.rate >= 50 ? 'up' : s.rate >= 20 ? 'flat' : 'down'}`}>
                 {s.rate === null ? '—' : `${s.rate}%`}
               </span>
             </div>
           )}
-          <div className="funnel-v2-row">
-            <div className="funnel-v2-label">{s.label}</div>
-            <div className="funnel-v2-track">
-              <div
-                className="funnel-v2-bar"
-                style={{ width: `${Math.max(6, Math.round((s.value / max) * 100))}%`, background: s.color }}
-              />
-              <span className="funnel-v2-val">{fmt(s.value)}</span>
+          <div className="funnel-v3-stage">
+            <div className="funnel-v3-label">{s.label}</div>
+            <div
+              className="funnel-v3-bar"
+              style={{
+                width: `${Math.max(9, Math.round((s.value / max) * 100))}%`,
+                background: `linear-gradient(180deg, rgba(255,255,255,0.16), rgba(0,0,0,0.14)), ${s.color}`,
+              }}
+            >
+              <span className="funnel-v3-val" style={{ color: s.text || '#fff' }}>{fmt(s.value)}</span>
             </div>
           </div>
         </React.Fragment>
       ))}
+      {globalRate !== null && (
+        <div className="funnel-v3-foot">
+          Conversion globale {stages[0]?.label} → {stages[stages.length - 1]?.label} : <strong>{globalRate}%</strong>
+        </div>
+      )}
     </div>
   );
 }
@@ -1588,7 +1600,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const funnelRate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
   const funnelStages = [
     { label: 'Calls', value: calls.total, color: '#3B82F6' },
-    { label: 'RDV pris', value: rdvB.r1.total + rdvB.r2.total, color: '#FBBF24' },
+    { label: 'RDV pris', value: rdvB.r1.total + rdvB.r2.total, color: '#FBBF24', text: '#713F12' },
     { label: 'Propals', value: propals.total + propalsComptes.total, color: '#F97316' },
     { label: 'Signatures', value: sig.total, color: '#8B5CF6' },
   ].map((s, i, arr) => ({ ...s, rate: i === 0 ? null : funnelRate(s.value, arr[i - 1].value) }));
@@ -2206,11 +2218,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               📺
             </button>
             <button
-              className={`theme-btn ${editMode ? 'active' : ''}`}
+              className={`theme-btn with-label ${editMode ? 'active' : ''}`}
               onClick={() => setEditMode((v) => !v)}
-              title={editMode ? 'Terminer la réorganisation' : 'Réorganiser les blocs du dashboard'}
+              title={editMode ? 'Terminer la réorganisation' : 'Réorganiser les blocs du dashboard (glisser-déposer)'}
             >
-              {editMode ? '✅' : '✏️'}
+              {editMode ? '✅ Terminer' : '✏️ Réorganiser'}
             </button>
             {isRestrictedCommercial && (
               <button className="theme-btn" onClick={() => setShowMaSemaine(true)} title="Ma semaine">
