@@ -2118,6 +2118,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <div className="app-switch">
             <button className="app-switch-btn active">📊 Dashboard</button>
             <button className="app-switch-btn" onClick={() => { window.location.href = '/planning'; }}>📅 Planning</button>
+            {/* Radar éditorial (radar/frontend, servi sous /radar) : quelles
+                émissions couvrent le thème d'un prospect, chez nous vs chez les
+                concurrents. Ouvert à tous les rôles, donc pas de condition. */}
+            <button className="app-switch-btn" onClick={() => { window.location.href = '/radar'; }}>📡 Radar</button>
             {/* Réglages (comptes/rôles/équipes/reporting) : un seul endroit, dans
                 le planning, réservé aux comptes admin. */}
             {isAdmin && (

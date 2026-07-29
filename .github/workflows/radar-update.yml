@@ -1,0 +1,173 @@
+name: Radar — mise à jour du catalogue
+
+# Alimente radar/frontend/catalogue.json et radar/frontend/embeddings.json,
+# servis sous /radar par server/index.js.
+#
+# Cron en UTC. Paris est à UTC+2 l'été, UTC+1 l'hiver :
+#   05:00 UTC -> 7h Paris (été) / 6h Paris (hiver)
+#   12:00 UTC -> 14h Paris (été) / 13h Paris (hiver)
+on:
+  schedule:
+    - cron: "0 5,12 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Que faire"
+        type: choice
+        default: scrape
+        options:
+          - scrape        # scrape + merge + commit
+          - check         # diagnostic des sources, sans rien écrire
+      embeddings:
+        description: "Recalculer les vecteurs sémantiques"
+        type: boolean
+        default: true
+
+# Deux runs ne doivent jamais écrire dans le repo en même temps.
+concurrency:
+  group: radar-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: radar/scraper
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: radar/scraper/requirements.txt
+
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          # torch CPU-only : ~200 Mo au lieu de ~2,5 Go avec CUDA
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      # Le modèle d'embeddings (~120 Mo) est mis en cache entre les runs :
+      # sans ça, on le retélécharge deux fois par jour pour rien.
+      - name: Cache du modèle d'embeddings
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-paraphrase-multilingual-MiniLM-L12-v2
+
+      - name: Tests du scraper
+        run: python tests/test_scraper.py
+
+      # ---------------------------------------------------------------
+      # Mode diagnostic : lancé à la main, n'écrit rien
+      # ---------------------------------------------------------------
+      - name: Diagnostic des sources
+        if: github.event.inputs.mode == 'check'
+        run: |
+          python scrape_openmedias.py --check | tee check.log
+          {
+            echo '## Diagnostic des sources'
+            echo '```'
+            cat check.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---------------------------------------------------------------
+      # Mode normal : scrape + merge
+      # ---------------------------------------------------------------
+      - name: Empreinte avant scrape
+        if: github.event.inputs.mode != 'check'
+        id: before
+        run: |
+          echo "count=$(python -c "import json;print(len(json.load(open('../frontend/catalogue.json'))))" 2>/dev/null || echo 0)" >> "$GITHUB_OUTPUT"
+
+      - name: Scrape + merge
+        if: github.event.inputs.mode != 'check'
+        id: scrape
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.embeddings }}" != "false" ]; then
+            ARGS="--embeddings"
+          fi
+          set +e
+          python scrape_openmedias.py $ARGS | tee scrape.log
+          CODE=${PIPESTATUS[0]}
+          set -e
+          # code 2 = garde-fou : 0 épisode récupéré alors que le catalogue est
+          # peuplé (blocage réseau). Le catalogue n'a pas été touché : on sort
+          # en échec pour être notifié, sans rien committer.
+          if [ "$CODE" = "2" ]; then
+            echo "::error::Garde-fou déclenché — aucun épisode récupéré, catalogue laissé intact. Vérifie si les médias bloquent l'IP des runners GitHub."
+            exit 1
+          fi
+          exit $CODE
+
+      - name: Commit si le catalogue a bougé
+        if: github.event.inputs.mode != 'check'
+        id: commit
+        # override explicite du defaults.run.working-directory : git doit tourner
+        # à la racine du repo, pas dans radar/scraper
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.name  "radar-bot"
+          git config user.email "radar-bot@users.noreply.github.com"
+          git add radar/frontend/catalogue.json radar/frontend/embeddings.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Aucun changement — pas de commit, pas de redéploiement Render."
+          else
+            AFTER=$(python -c "import json;print(len(json.load(open('radar/frontend/catalogue.json'))))")
+            NEW=$((AFTER - ${{ steps.before.outputs.count }}))
+            # [skip ci] : seuls des fichiers de données changent, aucun code —
+            # inutile de relancer le build React + smoke test de ci.yml.
+            git commit -m "radar: +${NEW} épisodes (${AFTER} au total) [skip ci]"
+            # rebase au cas où un humain a poussé entre-temps
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "new=$NEW"     >> "$GITHUB_OUTPUT"
+            echo "total=$AFTER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Récapitulatif
+        if: always() && github.event.inputs.mode != 'check'
+        run: |
+          {
+            echo '## Radar éditorial'
+            if [ "${{ steps.commit.outputs.changed }}" = "true" ]; then
+              echo "**+${{ steps.commit.outputs.new }} nouveaux épisodes** · ${{ steps.commit.outputs.total }} au total"
+              echo ""
+              echo "Render redéploie automatiquement — le radar est à jour sur /radar."
+            else
+              echo "Aucun nouvel épisode détecté."
+            fi
+            echo ""
+            echo '<details><summary>Log du scrape</summary>'
+            echo ''
+            echo '```'
+            tail -60 scrape.log 2>/dev/null || echo "(pas de log)"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Les pages de diagnostic écrites quand une source ne renvoie rien.
+      # Utile pour corriger un slug sans avoir à rejouer le scrape.
+      - name: Pages de diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-pages
+          path: radar/scraper/debug_*.html
+          if-no-files-found: ignore
+          retention-days: 7

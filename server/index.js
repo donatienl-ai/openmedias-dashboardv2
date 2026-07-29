@@ -675,6 +675,36 @@ const planningFrontendDir = path.join(__dirname, '..', 'planning', 'frontend');
 app.use('/planning', express.static(planningFrontendDir));
 app.use('/planning', planningRouter);
 
+// ---------- RADAR ÉDITORIAL (fusionné sous /radar) ----------
+// Même patron que /planning : un front autonome (radar/frontend/index.html, sans
+// build) servi en statique. Pas de routeur API — le radar est 100 % client, il
+// lit catalogue.json et embeddings.json, tous deux régénérés 2x/jour par
+// .github/workflows/radar-update.yml (qui commit dans radar/frontend/).
+//
+// catalogue.json (~2,3 Mo) et embeddings.json (~1,5 Mo) DOIVENT rester
+// cohérents entre eux : embeddings.json indexe les URLs du catalogue. Ils sont
+// écrits et commités par le même run, donc toujours de la même génération —
+// mais un navigateur pourrait en cacher un seul. D'où le no-store ci-dessous :
+// coût négligeable (compression() est actif en amont, et le front ne les charge
+// qu'une fois par session), et aucun risque de mélanger deux générations.
+const radarFrontendDir = path.join(__dirname, '..', 'radar', 'frontend');
+app.use('/radar', express.static(radarFrontendDir, {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('catalogue.json') || filePath.endsWith('embeddings.json')) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+  },
+}));
+// Sans ce garde-fou, un fichier manquant sous /radar/ traverse le static et
+// atterrit dans le catch-all React tout en bas : le client recevait un HTTP 200
+// contenant le HTML du dashboard. Concrètement, tant qu'embeddings.json n'a pas
+// été généré, le radar voyait `res.ok === true` et ne détectait le problème
+// qu'au JSON.parse — il dégradait bien en TF-IDF, mais par accident. Le radar
+// n'a pas de routage interne : tout ce qui n'est pas un fichier est un 404.
+app.use('/radar', (req, res) => {
+  res.status(404).json({ error: `Introuvable sous /radar : ${req.path}` });
+});
+
 // --- Sert le build React en production ---
 const clientBuild = path.join(__dirname, '..', 'client', 'build');
 app.use(express.static(clientBuild));

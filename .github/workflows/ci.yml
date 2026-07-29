@@ -28,6 +28,13 @@ jobs:
       - name: Vérifie la syntaxe de tous les fichiers serveur
         run: npm run check
 
+      # Le radar est un HTML autonome servi sous /radar : il n'entre ni dans le
+      # build React ni dans check-syntax (qui ne scanne que server/ et
+      # planning/backend/). Ces tests le chargent dans jsdom et vérifient
+      # notamment le décodage des vecteurs écrits par le scraper Python.
+      - name: Tests du radar éditorial
+        run: npm run test:radar
+
       - name: Build du client React (aurait détecté le bug calendly.js)
         run: npm run build
 

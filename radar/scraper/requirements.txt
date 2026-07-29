@@ -1,0 +1,11 @@
+# Scraping
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+openpyxl>=3.1          # lecture de l'ancien export RSS (xlsx)
+cloudscraper>=1.2.71   # contournement anti-bot quand un site renvoie 403
+
+# Embeddings sémantiques
+# torch est installé séparément en version CPU dans la CI (voir le workflow) :
+# la roue par défaut embarque CUDA et pèse ~2,5 Go pour rien sur un runner.
+sentence-transformers>=2.7

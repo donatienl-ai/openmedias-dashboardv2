@@ -11,3 +11,11 @@ openmedias-dashboard/
 # (la vraie base vit sur le disque persistant Render, voir render.yaml)
 planning/backend/planning.db
 planning/backend/planning.db-*
+
+# Radar éditorial — sous-produits du scraper.
+# catalogue.json et embeddings.json, EUX, sont bien commités : c'est la GitHub
+# Action radar-update.yml qui les régénère 2x/jour, et Render les sert tels quels.
+radar/scraper/debug_*.html
+radar/scraper/check.log
+radar/scraper/scrape.log
+radar/scraper/__pycache__/

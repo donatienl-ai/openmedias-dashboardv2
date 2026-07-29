@@ -10,7 +10,9 @@
     "build": "cd client && npm install && npm run build",
     "postinstall": "cd client && npm install && npm run build",
     "check": "node scripts/check-syntax.mjs",
-    "smoke": "node scripts/smoke-test.mjs"
+    "smoke": "node scripts/smoke-test.mjs",
+    "test:radar": "node radar/scraper/tests/test_front.mjs",
+    "test:radar:scraper": "python radar/scraper/tests/test_scraper.py"
   },
   "engines": {
     "node": "20.x"
@@ -26,5 +28,8 @@
     "handlebars": "^4.7.8",
     "puppeteer-core": "^22.15.0",
     "@sparticuz/chromium": "^127.0.0"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
   }
 }

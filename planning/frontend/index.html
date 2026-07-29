@@ -718,6 +718,9 @@ td { padding: 10px 14px; font-size: 13px; }
     <div class="app-switch">
       <button class="app-switch-btn" onclick="window.location.href='/'" id="app-tab-dashboard">📊 Dashboard</button>
       <button class="app-switch-btn active" onclick="switchView('calendar')" id="app-tab-planning">📅 Planning</button>
+      <!-- Radar éditorial (servi sous /radar) : ouvert à tous les rôles, y
+           compris édito et communication — d'où l'absence de admin-only. -->
+      <button class="app-switch-btn" onclick="window.location.href='/radar'" id="app-tab-radar">📡 Radar</button>
       <button class="app-switch-btn admin-only" onclick="switchView('parametres')" id="app-tab-parametres" style="display:none">⚙️ Paramètres</button>
     </div>
     <div class="header-sep"></div>
@@ -1177,13 +1180,13 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
   // lui — donc on ne masque l'onglet que si ce n'est pas un admin.
   const hideDashboardTab=(role==='edit'&&!isAccountAdmin)||role==='com';
   document.getElementById('app-tab-dashboard').style.display = hideDashboardTab ? 'none' : '';
-  // Édito (non-admin) et communication n'ont accès qu'à Planning : masquer le
-  // bouton Dashboard seul laissait une barre pleine largeur avec un unique
-  // pavé actif et beaucoup de vide à droite — donnait l'impression d'un
-  // élément à moitié cassé plutôt que d'un choix voulu (Paramètres reste de
-  // toute façon caché pour ces rôles, admin-only). Toute la barre disparaît
-  // dans ce cas ; rien à choisir puisqu'il n'y a qu'une seule destination.
-  document.querySelector('.app-switch').style.display = hideDashboardTab ? 'none' : '';
+  // La barre entière était masquée pour ces rôles : avec le seul Dashboard
+  // caché, il ne restait qu'un pavé actif et beaucoup de vide à droite, ce qui
+  // ressemblait à un élément cassé plutôt qu'à un choix. Ce n'est plus le cas
+  // depuis l'ajout du Radar éditorial, ouvert à tous les rôles : édito et
+  // communication ont désormais deux destinations réelles (Planning, Radar), la
+  // barre garde donc son sens et reste affichée.
+  document.querySelector('.app-switch').style.display = '';
   // Réglages spécifiques au dashboard (reporting, connexions, groupements
   // d'affichage) : réservés aux comptes admin, seuls comptes autorisés côté
   // serveur sur ces routes (requireAdmin).
