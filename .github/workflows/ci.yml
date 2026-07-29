@@ -35,6 +35,12 @@ jobs:
       - name: Tests du radar éditorial
         run: npm run test:radar
 
+      # planning/frontend/index.html est un HTML autonome de ~3900 lignes, hors
+      # du build React et hors de check-syntax : sans ces tests, une régression
+      # sur la navigation de mois ne se voit qu'en production.
+      - name: Tests du planning (sélecteur de mois)
+        run: npm run test:planning
+
       - name: Build du client React (aurait détecté le bug calendly.js)
         run: npm run build
 

@@ -99,11 +99,14 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .social-subnav-btn.active { background: var(--accent); color: #fff; }
 .social-subview { display: none; }
 .social-subview.active { display: block; }
-/* Grille calendrier mensuelle du rétroplanning — indépendante du calendrier
-   de diffusion (currentDate/renderCalendar), pour ne pas coupler deux
-   fonctionnalités sans rapport (posts réseaux sociaux vs créneaux média). */
-.social-cal-header { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
-.social-cal-title { font-weight: 700; font-size: 14px; text-transform: capitalize; min-width: 140px; text-align: center; }
+/* Grille calendrier mensuelle du rétroplanning. Le MOIS AFFICHÉ reste propre à
+   ce calendrier (socialCalendarDate), distinct de celui des diffusions
+   (currentDate) : les deux fonctionnalités n'ont aucun rapport, et les coupler
+   permettrait à un compte communication de pousser le planning de diffusion
+   au-delà de son horizon de visibilité. En revanche le CONTRÔLE est unique —
+   .month-nav dans le header pilote celui des deux calendriers qui est affiché
+   (cf. changeMonth / updateMonthLabel). Les anciennes règles .social-cal-header
+   et .social-cal-title ont disparu avec la navigation en doublon. */
 .social-cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 0 2px 6px; text-align: center; }
 .social-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .social-cal-day { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 6px; min-height: 92px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
@@ -749,7 +752,10 @@ td { padding: 10px 14px; font-size: 13px; }
          effet (voir bloc RESPONSIVE MOBILE en fin de feuille de style). -->
     <button class="planning-burger-btn" id="planning-burger-btn" onclick="togglePlanningMenu()" aria-label="Menu" title="Menu">☰</button>
     <div class="header-right" id="header-right">
-      <div class="month-nav">
+      <!-- Sélecteur de mois UNIQUE de l'app : pilote le calendrier des
+           diffusions ou le rétroplanning réseaux sociaux, selon la vue
+           affichée (cf. changeMonth). -->
+      <div class="month-nav" id="month-nav">
         <button onclick="changeMonth(-1)">‹</button>
         <div class="month-label" id="month-label"></div>
         <button onclick="changeMonth(1)">›</button>
@@ -999,11 +1005,11 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
 
     <div class="social-subview active" id="social-subview-calendar">
-      <div class="social-cal-header">
-        <button class="btn-secondary" onclick="socialCalendarNav(-1)">‹</button>
-        <div class="social-cal-title" id="social-cal-title"></div>
-        <button class="btn-secondary" onclick="socialCalendarNav(1)">›</button>
-      </div>
+      <!-- Pas de navigation de mois ici : c'est celle du header (.month-nav)
+           qui pilote ce calendrier, comme elle pilote celui des diffusions.
+           Avant, les deux coexistaient — deux paires de flèches et deux
+           libellés de mois à l'écran, dont un seul agissait sur ce qu'on
+           regardait. Voir changeMonth(). -->
       <div class="social-cal-weekdays">
         <span>Lun</span><span>Mar</span><span>Mer</span><span>Jeu</span><span>Ven</span><span>Sam</span><span>Dim</span>
       </div>
@@ -1493,6 +1499,10 @@ function switchView(v){
   if(v==='parametres')loadParametres();
   if(v==='bdc')bdcOnShow();
   if(v==='social')loadSocial();
+  // Le sélecteur de mois est partagé : en changeant de vue on change le
+  // calendrier qu'il pilote, donc le mois qu'il doit afficher.
+  updateMonthLabel();
+  refreshMonthNavVisibility();
   // Favicon dynamique : roue crantée sur Paramètres, sinon fruit du mois
   // (repris par renderCalendar au retour sur Calendrier, cf. plus haut).
   setFaviconEmoji(v==='parametres'?'⚙️':FRUITS_MOIS[currentDate.getMonth()]);
@@ -1534,6 +1544,8 @@ function switchSocialSubview(v){
   document.getElementById('social-tab-list').classList.toggle('active',v==='list');
   document.getElementById('social-subview-calendar').classList.toggle('active',v==='calendar');
   document.getElementById('social-subview-list').classList.toggle('active',v==='list');
+  // La liste n'est pas découpée par mois : on retire le sélecteur du header.
+  refreshMonthNavVisibility();
 }
 
 function renderSocialViews(){
@@ -1592,13 +1604,14 @@ document.addEventListener('click',e=>{
 });
 
 // ── Vue calendrier (grille mensuelle, semaine du lundi) ──────────────────────
-function socialCalendarNav(delta){
-  socialCalendarDate=new Date(socialCalendarDate.getFullYear(),socialCalendarDate.getMonth()+delta,1);
-  renderSocialCalendar();
-}
+// La navigation de mois est celle du header (changeMonth) — ce calendrier n'a
+// plus la sienne. socialCalendarNav() a été supprimée avec les flèches en
+// doublon ; si tu la vois réapparaître dans un diff, c'est une régression.
 function renderSocialCalendar(){
   const y=socialCalendarDate.getFullYear(), m=socialCalendarDate.getMonth();
-  document.getElementById('social-cal-title').textContent=socialCalendarDate.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+  // Le libellé du mois vit dans le header, partagé avec le calendrier des
+  // diffusions : on le resynchronise à chaque rendu.
+  updateMonthLabel();
   const posts=socialFilteredPosts();
   const postsByDate={};
   posts.forEach(p=>{(postsByDate[p.scheduled_date]=postsByDate[p.scheduled_date]||[]).push(p);});
@@ -1938,16 +1951,59 @@ async function refreshAll(){
   setTimeout(()=>{btn.style.transform='';},500);
 }
 
+// ── NAVIGATION DE MOIS (contrôle unique) ─────────────────────────────────────
+// .month-nav dans le header est le SEUL sélecteur de mois de l'application. Il
+// agit sur le calendrier actuellement affiché : celui des diffusions
+// (currentDate) ou le rétroplanning réseaux sociaux (socialCalendarDate).
+// Les deux gardent leur propre mois — voir le commentaire CSS de .social-cal-*.
+function isSocialCalendarActive(){
+  return document.getElementById('view-social').classList.contains('active');
+}
+function activeMonthDate(){
+  return isSocialCalendarActive() ? socialCalendarDate : currentDate;
+}
+function updateMonthLabel(){
+  const d=activeMonthDate();
+  document.getElementById('month-label').textContent=`${MOIS_FR[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Le seul écran où un sélecteur de mois n'a aucun sens est la sous-vue "Liste"
+// du rétroplanning : elle affiche TOUS les posts, sans découpage mensuel (à la
+// différence de la vue Liste des diffusions, qui est bien mensuelle). Y laisser
+// des flèches actives donnait un contrôle qui ne changeait rien à l'écran.
+function refreshMonthNavVisibility(){
+  const nav=document.getElementById('month-nav');
+  if(!nav)return;
+  nav.style.display=(isSocialCalendarActive()&&socialSubview==='list')?'none':'';
+}
+
+// Toujours normaliser au 1er du mois. Avec setMonth() sur une date au 29, 30 ou
+// 31, un mois plus court était purement sauté : 29 janvier + 1 mois donne un
+// 29 février inexistant, que JS reporte au 1er mars — février disparaissait de
+// la navigation. Le rétroplanning, lui, construisait déjà ses dates au 1er.
+function shiftMonth(date, delta){
+  return new Date(date.getFullYear(), date.getMonth()+delta, 1);
+}
+
 async function changeMonth(d){
+  if(isSocialCalendarActive()){
+    // Le garde-fou d'horizon ci-dessous porte sur la visibilité du planning de
+    // DIFFUSION (créneaux média vendus). Le rétroplanning réseaux sociaux n'a
+    // rien à voir : on n'y limite pas la projection dans le futur.
+    socialCalendarDate=shiftMonth(socialCalendarDate,d);
+    updateMonthLabel();
+    renderSocialCalendar();
+    return;
+  }
   if(role!=='edit'&&d>0){
     const maxDate=new Date(); maxDate.setMonth(maxDate.getMonth()+(meta.horizonMois||3));
-    const next=new Date(currentDate); next.setMonth(next.getMonth()+d);
+    const next=shiftMonth(currentDate,d);
     if(next.getFullYear()>maxDate.getFullYear()||(next.getFullYear()===maxDate.getFullYear()&&next.getMonth()>maxDate.getMonth())){
       showToast(`Visibilité limitée à ${meta.horizonMois||3} mois à l'avance`,'warning');
       return;
     }
   }
-  currentDate.setMonth(currentDate.getMonth()+d);
+  currentDate=shiftMonth(currentDate,d);
   await loadData();renderCalendar();
   if(document.getElementById('view-reporting').classList.contains('active')) loadReporting();
   if(document.getElementById('view-list').classList.contains('active')) renderList();
@@ -2379,7 +2435,7 @@ document.addEventListener('dragleave', e => {
 // ── CALENDRIER ──────────────────────────────────────────────────────────────
 function renderCalendar(){
   const y=currentDate.getFullYear(),m=currentDate.getMonth();
-  document.getElementById('month-label').textContent=`${MOIS_FR[m]} ${y}`;
+  updateMonthLabel();   // libellé partagé avec le rétroplanning, cf. changeMonth
   setFaviconEmoji(FRUITS_MOIS[m]);
   const lastDay=new Date(y,m+1,0);
   const today=new Date();
