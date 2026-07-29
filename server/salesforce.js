@@ -136,10 +136,10 @@ const workingLeadsCache = createWideningCache({
     const s = toSoqlDateTime(new Date(fromMs));
     const e = toSoqlDateTime(new Date(toMs));
     return queryAll(
-      `SELECT Id, Name, Owner.Name, LastModifiedDate FROM Lead WHERE Status = 'Working' AND LastModifiedDate >= ${s} AND LastModifiedDate <= ${e}`
+      `SELECT Id, Name, Owner.Name, LastModifiedDate, Montant_estim__c FROM Lead WHERE Status = 'Working' AND LastModifiedDate >= ${s} AND LastModifiedDate <= ${e}`
     );
   },
-  mapRecord: (r) => ({ at: new Date(r.LastModifiedDate).getTime(), owner: r.Owner?.Name || null }),
+  mapRecord: (r) => ({ at: new Date(r.LastModifiedDate).getTime(), owner: r.Owner?.Name || null, amount: r.Montant_estim__c || 0 }),
 });
 
 // --- Signatures sur la période (Opportunity Closed Won, CloseDate dans la plage) ---
@@ -162,9 +162,10 @@ export async function getRevenue({ start, end }) {
 // --- Propals sur la période (Lead Status=Working, LastModifiedDate dans la plage) ---
 export async function getPropals({ start, end }) {
   const records = await workingLeadsCache.get(start.getTime(), end.getTime());
-  const detail = buildFullList(groupByOwner(records, false), false);
+  const detail = buildFullList(groupByOwner(records, true), true);
   const total = records.length;
-  return { total, detail };
+  const totalAmount = records.reduce((sum, r) => sum + (r.amount || 0), 0);
+  return { total, totalAmount, detail };
 }
 
 // ==========================================

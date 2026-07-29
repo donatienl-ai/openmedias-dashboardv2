@@ -1240,7 +1240,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   };
   const sig = fBlock(d.signatures || { total: 0, totalAmount: 0, detail: [] }, true);
   const rev = fBlock(d.revenue || { totalAmount: 0, detail: [] }, true);
-  const propals = fBlock(d.propals || { total: 0, detail: [] });
+  const propals = fBlock(d.propals || { total: 0, totalAmount: 0, detail: [] }, true);
   const calls = fBlock(d.calls || { total: 0, detail: [] });
   const sf = fBlock(d.salesforge || { total: 0, detail: [] });
   const bdc = {
@@ -1310,7 +1310,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       ['R2 tenus', rdvT.r2, false],
       ['R1 pris', rdvB.r1, false],
       ['R2 pris', rdvB.r2, false],
-      ['Propals pistes', propals, false],
+      ['Propals pistes', propals, true],
       ['Propals comptes', propalsComptes, false],
       ['Signatures', sig, true],
       ['CA', rev, true],
@@ -1570,6 +1570,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           secondary={[
             { value: propals.total, label: 'pistes', dot: '#F97316' },
             { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
+            { value: `${fmt(propals.totalAmount)} €`, label: 'estimé pistes', dot: '#FDBA74' },
           ]}
           delta={dPropals}
           clickable onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [])} />
@@ -1755,6 +1756,9 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             <div className="subsec-head">
               <span>Pistes</span>
               <b className="c-orange">{propals.total}</b>
+            </div>
+            <div className="kpi-sub" style={{ marginTop: -4, marginBottom: 6 }}>
+              {fmt(propals.totalAmount)} € estimés
             </div>
             <TopList rows={propals.detail} color="c-orange" max={4} />
           </div>
