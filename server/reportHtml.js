@@ -136,7 +136,57 @@ function miniList({ emoji, title, color, bg, rows, valueFn, emptyText }) {
 
 // ---------- le template ----------
 
-export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light', preset = 'today', range = null }) {
+// ---- ANOMALIES / TEMPS FORTS (vs période de comparaison équivalente) ----
+// `compare` est optionnel (déjà calculé côté index.js via collectCompareData,
+// désactivé sur les très longues périodes >70j pour préserver les quotas API) —
+// pas de section si absent. Seuils volontairement larges (±30/50%) et une
+// base minimale (`min`) par métrique pour ne pas alerter sur du bruit
+// statistique (ex: 1 call devenu 2 calls = +100% mais ça ne veut rien dire).
+function pctDelta(cur, prev) {
+  return prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
+}
+function buildAnomalies(data, compare) {
+  if (!compare) return '';
+  const rdvPrisCur = (data.rdvBooked?.r1?.total || 0) + (data.rdvBooked?.r2?.total || 0);
+  const rdvPrisPrev = (compare.rdvBooked?.r1?.total || 0) + (compare.rdvBooked?.r2?.total || 0);
+  const propalsCur = (data.propals?.total || 0) + (data.propalsComptes?.total || 0);
+  const propalsPrev = (compare.propals?.total || 0) + (compare.propalsComptes?.total || 0);
+
+  const metrics = [
+    { label: 'Calls', cur: data.calls?.total || 0, prev: compare.calls?.total || 0, min: 5 },
+    { label: 'RDV pris', cur: rdvPrisCur, prev: rdvPrisPrev, min: 3 },
+    { label: 'Propals', cur: propalsCur, prev: propalsPrev, min: 3 },
+    { label: 'Signatures', cur: data.signatures?.total || 0, prev: compare.signatures?.total || 0, min: 1 },
+    { label: 'CA', cur: data.revenue?.totalAmount || 0, prev: compare.revenue?.totalAmount || 0, min: 500, isAmount: true },
+  ];
+
+  const lines = [];
+  for (const m of metrics) {
+    if (m.prev < m.min) continue; // base trop faible pour un % fiable
+    const delta = pctDelta(m.cur, m.prev);
+    if (delta === null) continue;
+    const curTxt = m.isAmount ? `${fmt(m.cur)} €` : fmt(m.cur);
+    const prevTxt = m.isAmount ? `${fmt(m.prev)} €` : fmt(m.prev);
+    if (delta <= -30) {
+      lines.push({ emoji: '⚠️', text: `${m.label} en baisse de ${Math.abs(delta)}% (${curTxt} vs ${prevTxt} sur la période comparable précédente)` });
+    } else if (delta >= 50) {
+      lines.push({ emoji: '🔥', text: `${m.label} en hausse de ${delta}% (${curTxt} vs ${prevTxt} sur la période comparable précédente)` });
+    }
+  }
+  if (lines.length === 0) return '';
+
+  let inner = sectionLabel('🔎', 'Points notables', C.blue, '#EFF6FF');
+  inner += `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">`;
+  inner += lines.map((l) => `<tr>
+    <td style="padding:8px 0;font-size:13px;color:${C.text};font-family:${FONT};border-bottom:1px solid #F4F7FB;">
+      <span style="margin-right:6px;">${l.emoji}</span>${esc(l.text)}
+    </td>
+  </tr>`).join('');
+  inner += `</table>`;
+  return card(inner);
+}
+
+export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light', preset = 'today', range = null, compare = null }) {
   const dark = theme === 'dark';
   const isToday = preset === 'today';
   // Texte de période pour les libellés ("du jour" / "hier" / label de plage)
@@ -244,6 +294,9 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
     </tr></table>
   </td></tr>`;
 
+  // ---- ANOMALIES / TEMPS FORTS ----
+  const anomalyCard = buildAnomalies(data, compare);
+
   // ---- SECTIONS ----
   const callsSection = listSection({
     emoji: '📞', title: `Calls passés ${isToday ? '' : '· ' + (range?.label || '')}`.trim(), color: C.blue, bg: '#EFF6FF',
@@ -346,6 +399,7 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
     <tr><td align="center" style="padding:24px 12px;">
       <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
         ${hero}
+        ${anomalyCard}
         ${callsSection}
         ${rdvSection}
         ${rdvPrisSection}

@@ -9,11 +9,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { getCalls, prewarmCalls, refreshRecent, getCacheStats as getAircallCacheStats } from './aircall.js';
-import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv, getNewsletterRdv, getCacheStats as getCalendlyCacheStats } from './calendly.js';
+import { getRdvInRange, getRdvBookedInRange, getSalesforgeRdv, getNewsletterRdv, getUpcomingRdvForHost, getCacheStats as getCalendlyCacheStats } from './calendly.js';
 import { getNewsletterStats } from './mailjet.js';
 import {
   getSignatures,
   getRevenue,
+  getRevenueByMonth,
   getPropals,
   getPropalsComptes,
   getCacheStats as getSalesforceCacheStats,
@@ -389,6 +390,51 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   }
 });
 
+// ---------- CA MENSUEL SUR N MOIS GLISSANTS (graphique d'évolution) ----------
+app.get('/api/revenue-by-month', requireAuth, async (req, res) => {
+  try {
+    if (req.commercial && ['edito', 'communication'].includes(req.commercial.role)) {
+      return res.status(403).json({ error: "Ce compte n'a pas accès au dashboard" });
+    }
+    const months = parseInt(req.query.months, 10) || 12;
+    let scopeNames = null;
+    if (req.commercial && !isAdminAccount(req.commercial)) {
+      if (req.commercial.role === 'manager' && req.commercial.team_id) {
+        const members = getTeamMembers(req.commercial.team_id);
+        scopeNames = resolveTeamDisplayNames(members.length ? members : [req.commercial]);
+      } else {
+        const displayName = resolveDisplayName(req.commercial);
+        scopeNames = displayName ? [displayName] : [req.commercial.nom];
+      }
+    }
+    const data = await getRevenueByMonth({ months, scopeNames });
+    res.json({ months: data });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// ---------- MES RDV À VENIR (vue perso "Ma semaine" du commercial connecté) ----------
+// Seule pièce réellement nouvelle pour cette vue : une LISTE d'événements
+// individuels datés (pas juste un compteur). Les autres chiffres de "Ma
+// semaine" (calls, propals) sont récupérés côté client depuis /api/dashboard
+// (déjà scopé au commercial connecté via scopeDataToCommercial).
+app.get('/api/mes-rdv-a-venir', requireAuth, async (req, res) => {
+  if (!req.commercial) {
+    return res.status(400).json({ error: 'Réservé aux comptes commerciaux individuels (pas au mot de passe legacy)' });
+  }
+  const displayName = resolveDisplayName(req.commercial);
+  if (!displayName) return res.json({ displayName: null, upcoming: [] });
+  try {
+    const days = Math.max(1, Math.min(14, parseInt(req.query.days, 10) || 7));
+    const end = new Date(Date.now() + days * 86400000);
+    const upcoming = await getUpcomingRdvForHost({ end, displayName });
+    res.json({ displayName, upcoming });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 // ---------- NEWSLETTER STATS (Mailjet EXT + Calendly utm_source=newsletter) ----------
 app.get('/api/newsletter-stats', requireAuth, async (req, res) => {
   try {
@@ -434,7 +480,13 @@ async function sendReportNow({ to, theme, preset = 'today', start, end }) {
   let monthRevenue = { totalAmount: 0, detail: [] };
   try { monthRevenue = await getRevenue({ start: month.start, end: month.end }); } catch (e) { /* section vide si KO */ }
 
-  const html = buildReportHtml({ data, monthRevenue, monthLabel: month.label, theme, preset, range });
+  // Comparatif (même logique que computeDashboard : désactivé sur >70j pour
+  // préserver les quotas API) — alimente la section "Points notables" (anomalies).
+  const durationDays = (range.end - range.start) / 86400000;
+  const compRange = durationDays <= 70 ? comparisonRange(preset, range) : null;
+  const compare = compRange ? await collectCompareData(compRange).catch(() => null) : null;
+
+  const html = buildReportHtml({ data, monthRevenue, monthLabel: month.label, theme, preset, range, compare });
   const sameDay = range.start.toDateString() === new Date(range.end.getTime() - 1).toDateString();
   const subjectLabel = sameDay
     ? range.start.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -479,6 +531,51 @@ app.get('/api/send-report', async (req, res) => {
 // ---------- CONSOLE ADMIN (réglages + test, réservés aux comptes admin) ----------
 app.get('/api/admin/settings', requireAdmin, (req, res) => {
   res.json({ ...getReportSettings(), scheduler: getSchedulerState() });
+});
+
+// ---------- OBJECTIFS INDIVIDUELS (CA mensuel par commercial) ----------
+// Lecture ouverte à tout compte connecté (chacun doit pouvoir voir sa propre
+// jauge, et un manager celle de son équipe) ; écriture réservée aux admins.
+// Stocké dans planning.db (commercial_objectives, cf. planning/backend/db.js)
+// pour bénéficier du même disque persistant que le reste (pas de perte au
+// redémarrage, contrairement à l'ancien server/settings.js en mémoire).
+app.get('/api/objectifs', requireAuth, (req, res) => {
+  try {
+    const rows = planningDb.prepare(`
+      SELECT cu.id AS commercial_id, cu.nom, co.monthly_amount
+      FROM commercial_users cu
+      LEFT JOIN commercial_objectives co ON co.commercial_id = cu.id
+      WHERE cu.actif = 1
+    `).all();
+    const out = rows
+      .map((r) => ({
+        commercialId: r.commercial_id,
+        displayName: resolveDisplayName({ nom: r.nom }),
+        monthlyObjective: Math.max(0, Math.round(r.monthly_amount || 0)),
+      }))
+      // Ignore les comptes sans correspondance dans le roster (server/roster.js) —
+      // on ne peut pas calculer de progression sans un nom de référence sûr.
+      .filter((r) => r.displayName);
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.patch('/api/admin/objectifs/:commercialId', requireAdmin, (req, res) => {
+  const commercialId = parseInt(req.params.commercialId, 10);
+  if (!commercialId) return res.status(400).json({ error: 'commercialId invalide' });
+  const montant = Math.max(0, Math.round(Number(req.body?.monthlyObjective)) || 0);
+  try {
+    planningDb.prepare(`
+      INSERT INTO commercial_objectives (commercial_id, monthly_amount, updated_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(commercial_id) DO UPDATE SET monthly_amount = excluded.monthly_amount, updated_at = datetime('now')
+    `).run(commercialId, montant);
+    res.json({ ok: true, commercialId, monthlyObjective: montant });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 // Endpoint léger pour le pinger (UptimeRobot) : maintient le service éveillé.

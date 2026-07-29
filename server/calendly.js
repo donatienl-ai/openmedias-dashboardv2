@@ -87,6 +87,21 @@ const eventsCache = createWideningCache({
 function isR2(record) {
   return (record.name || '').trim().toLowerCase().startsWith('retour');
 }
+
+/**
+ * RDV À VENIR pour UN commercial (roster.js display name), du moment présent
+ * jusqu'à `end`. Réutilise le même eventsCache que getRdvInRange/getRdvBookedInRange
+ * (aucun nouvel appel Calendly dédié) — sert la vue perso "Ma semaine" du
+ * commercial connecté (cf. server/index.js /api/mes-rdv-a-venir).
+ */
+export async function getUpcomingRdvForHost({ end, displayName }) {
+  const now = Date.now();
+  const records = await eventsCache.get(now, end.getTime());
+  return records
+    .filter((r) => matchSale(r.hostRaw) === displayName)
+    .map((r) => ({ at: r.at, name: r.name, isR2: isR2(r) }))
+    .sort((a, b) => a.at - b.at);
+}
 function groupByHost(records) {
   const map = new Map();
   for (const r of records) {

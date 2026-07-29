@@ -159,6 +159,38 @@ export async function getRevenue({ start, end }) {
   return { totalAmount, detail };
 }
 
+// --- CA mensuel sur N mois glissants (graphique d'évolution) ---
+// Réutilise le MÊME cache que getSignatures/getRevenue (wonOppsCache) : un seul
+// appel qui élargit la fenêtre à N mois, puis un simple regroupement en mémoire
+// par mois — pas de nouvel appel Salesforce dédié.
+// `scopeNames` (optionnel) : restreint aux Opportunities dont le owner (matché
+// via roster.js matchSale, même logique que groupByOwner) est dans cette liste —
+// même principe que scopeByCommercial.js pour /api/dashboard, pour qu'un
+// commercial/manager scopé n'y voie pas le CA de toute l'entreprise.
+export async function getRevenueByMonth({ months = 12, scopeNames = null } = {}) {
+  const n = Math.max(1, Math.min(24, parseInt(months, 10) || 12));
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - (n - 1), 1);
+  let records = await wonOppsCache.get(start.getTime(), now.getTime());
+  if (Array.isArray(scopeNames) && scopeNames.length) {
+    const allowed = new Set(scopeNames);
+    records = records.filter((r) => allowed.has(matchSale(r.owner)));
+  }
+
+  const buckets = new Map(); // 'YYYY-MM' -> { amount, count }
+  for (let i = 0; i < n; i += 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - (n - 1) + i, 1);
+    buckets.set(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, { amount: 0, count: 0 });
+  }
+  for (const r of records) {
+    const d = new Date(r.at);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const b = buckets.get(key);
+    if (b) { b.amount += r.amount || 0; b.count += 1; }
+  }
+  return Array.from(buckets.entries()).map(([month, b]) => ({ month, totalAmount: b.amount, total: b.count }));
+}
+
 // --- Propals sur la période (Lead Status=Working, LastModifiedDate dans la plage) ---
 export async function getPropals({ start, end }) {
   const records = await workingLeadsCache.get(start.getTime(), end.getTime());

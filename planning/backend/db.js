@@ -117,6 +117,19 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 `);
+
+// ── OBJECTIFS INDIVIDUELS (dashboard) ────────────────────────────────────────
+// Objectif de CA mensuel par commercial (montant "courant", pas d'historique
+// mois par mois pour cette v1 — même logique simple que monthlyRevenueObjective
+// dans dashboard_settings, mais par personne). Éditable depuis ⚙️ Paramètres
+// (React, client/src/App.js) par un compte admin.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS commercial_objectives (
+    commercial_id INTEGER PRIMARY KEY REFERENCES commercial_users(id) ON DELETE CASCADE,
+    monthly_amount REAL NOT NULL DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`);
 // Migration : manager désigné de l'équipe (FK logique vers commercial_users.id,
 // pas de vraie contrainte SQL — même convention que commercial_users.team_id).
 // Avant, "qui manage l'équipe X" ne se déduisait qu'implicitement du fait

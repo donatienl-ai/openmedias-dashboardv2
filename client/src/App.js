@@ -327,6 +327,39 @@ function TopList({ rows, isAmount, color, max = 6 }) {
   );
 }
 
+// Podium à 3 colonnes (Calls / RDV pris / CA) sur la semaine en cours.
+// `anonymized` masque les noms (utile sur un écran public, cf. TvView) en les
+// remplaçant par leur rang — les valeurs restent affichées, seule l'identité change.
+const MEDALS = ['🥇', '🥈', '🥉'];
+function LeaderboardColumn({ title, rows, isAmount, color, anonymized }) {
+  const top = (rows || []).filter((r) => (isAmount ? r.amount : r.count) > 0).slice(0, 3);
+  return (
+    <div className="lb-col">
+      <div className="lb-col-title">{title}</div>
+      {top.length === 0 ? (
+        <div className="empty">Aucune donnée</div>
+      ) : (
+        top.map((r, i) => (
+          <div className="lb-row" key={i}>
+            <span className="lb-medal">{MEDALS[i]}</span>
+            <span className="lb-name">{anonymized ? `Commercial #${i + 1}` : r.name}</span>
+            <span className={`lb-val ${color}`}>{isAmount ? `${fmt(r.amount)} €` : r.count}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+function Leaderboard({ callsDetail, rdvDetail, revenueDetail, anonymized }) {
+  return (
+    <div className="lb-grid">
+      <LeaderboardColumn title="📞 Calls" rows={callsDetail} isAmount={false} color="c-blue" anonymized={anonymized} />
+      <LeaderboardColumn title="📅 RDV pris" rows={rdvDetail} isAmount={false} color="c-amber" anonymized={anonymized} />
+      <LeaderboardColumn title="💰 CA" rows={revenueDetail} isAmount color="c-green" anonymized={anonymized} />
+    </div>
+  );
+}
+
 function DarkTooltip({ active, payload, label, suffix }) {
   if (!active || !payload || !payload.length) return null;
   return (
@@ -492,7 +525,7 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
 // bouton "⚙️ Paramètres" (visible pour les comptes admin, cf. topbar).
 
 // ---------- PARAMÈTRES ADMIN (équipes + sales visibles) ----------
-function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, teams = [], onTeamsChanged }) {
+function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, teams = [], onTeamsChanged, objectifs = [], onObjectifsChanged }) {
   const [newTeamLabel, setNewTeamLabel] = useState('');
   const [openTeamId, setOpenTeamId] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -502,16 +535,29 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, t
 
   const authHeaders = credHeaders(password, { 'Content-Type': 'application/json' });
 
-  const run = async (fn) => {
+  const run = async (fn, { skipTeamsReload } = {}) => {
     setBusy(true); setErr('');
     try {
       await fn();
-      onTeamsChanged?.();
+      if (!skipTeamsReload) onTeamsChanged?.();
     } catch (e) {
       setErr(String(e.message || e));
     } finally {
       setBusy(false);
     }
+  };
+
+  const saveObjectif = (commercialId, currentValue, rawInput) => {
+    const n = Math.max(0, parseInt(String(rawInput).replace(/[^\d]/g, ''), 10) || 0);
+    if (n === currentValue) return; // rien à sauvegarder
+    run(async () => {
+      const r = await fetch(`api/admin/objectifs/${commercialId}`, {
+        method: 'PATCH', headers: authHeaders, body: JSON.stringify({ monthlyObjective: n }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Erreur');
+      onObjectifsChanged?.();
+    }, { skipTeamsReload: true });
   };
 
   const createTeam = () => {
@@ -641,6 +687,30 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, t
               <span className="set-switch" />
             </label>
           ))}
+
+          <div className="set-sep" />
+          <div className="set-section-title">Objectifs mensuels (CA)</div>
+          <div className="set-hint">
+            Objectif de chiffre d'affaires par commercial pour le mois en cours —
+            affiché en jauge sur la tuile "Objectifs du mois en cours" du dashboard.
+            0 ou vide = pas d'objectif (la jauge ne s'affiche pas pour cette personne).
+          </div>
+          {objectifs.length === 0 && <div className="empty">Aucun compte commercial aligné au roster</div>}
+          {objectifs.map((o) => (
+            <div className="set-row" style={{ cursor: 'default' }} key={o.commercialId}>
+              <span className="set-name">{o.displayName}</span>
+              <input
+                type="number"
+                min="0"
+                step="500"
+                className="set-obj-input"
+                defaultValue={o.monthlyObjective || ''}
+                placeholder="0 €"
+                disabled={busy}
+                onBlur={(e) => saveObjectif(o.commercialId, o.monthlyObjective, e.target.value)}
+              />
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -654,6 +724,11 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, t
 // sales a signé cette semaine ; sinon dégradé « négatif » selon les jours ouvrés
 // écoulés dans la semaine, remis à zéro chaque lundi).
 const TV_REFRESH_MS = 60000;
+// Auto-refresh du dashboard "normal" (pas la vue TV) : les caches serveur
+// (rawDataCache.js) ont un TTL de 5 min sur les données volatiles (Leads
+// Working, enveloppes DocuSign en attente) — inutile de retaper plus souvent,
+// ça ne ferait que re-render sans nouvelle donnée réelle.
+const DASHBOARD_REFRESH_MS = 5 * 60 * 1000;
 
 // Statut de signature de la 3e colonne. 'ok' = a signé cette semaine.
 const SIGN_STATUS = {
@@ -1027,6 +1102,53 @@ function NewsletterSection({ nlData, nlLoading, rangeLabel, onOpenCampaigns }) {
 
 
 // ---------- DASHBOARD ----------
+// ---------- "MA SEMAINE" — vue perso du commercial connecté ----------
+function MaSemaineModal({ open, onClose, nom, callsTotal, propalsTotal, propalsAmount, upcoming }) {
+  if (!open) return null;
+  const fmtDateTime = (ms) => new Date(ms).toLocaleString('fr-FR', {
+    weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="modal-title">📅 Ma semaine{nom ? ` — ${nom.split(' ')[0]}` : ''}</span>
+          <button className="modal-close" onClick={onClose} aria-label="Fermer">✕</button>
+        </div>
+        <div className="modal-body">
+          <div className="lb-grid" style={{ marginBottom: 16 }}>
+            <div className="lb-col">
+              <div className="lb-col-title">📞 Calls cette semaine</div>
+              <div className="funnel-stage-val" style={{ color: '#3B82F6' }}>{fmt(callsTotal)}</div>
+            </div>
+            <div className="lb-col">
+              <div className="lb-col-title">📄 Propals actives</div>
+              <div className="funnel-stage-val" style={{ color: '#F97316' }}>{fmt(propalsTotal)}</div>
+              <div className="kpi-sub" style={{ marginTop: 2 }}>{fmt(propalsAmount)} € estimés</div>
+            </div>
+          </div>
+          <div className="set-section-title">Mes RDV à venir (7 prochains jours)</div>
+          {upcoming.length === 0 ? (
+            <div className="empty">Aucun RDV à venir sur cette période</div>
+          ) : (
+            upcoming.map((r, i) => (
+              <div className="mrow" key={i}>
+                <div className="mrow-rank">{r.isR2 ? 'R2' : 'R1'}</div>
+                <div className="mrow-main">
+                  <div className="mrow-top">
+                    <span className="mrow-name">{r.name || 'Rendez-vous'}</span>
+                    <span className="mrow-val c-blue">{fmtDateTime(r.at)}</span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const isAdmin = isAdminCred(password);
   // Rôle du compte connecté, pour adapter les filtres visibles à ce qu'il peut
@@ -1064,6 +1186,62 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     } catch { /* silencieux : on garde la dernière liste connue */ }
   }, [password]);
   useEffect(() => { loadTeams(); }, [loadTeams]);
+
+  // Objectifs individuels de CA mensuel (planning.db, cf. server/index.js /api/objectifs)
+  const [objectifs, setObjectifs] = useState([]); // [{ commercialId, displayName, monthlyObjective }]
+  const loadObjectifs = useCallback(async () => {
+    try {
+      const r = await fetch('api/objectifs', { headers: credHeaders(password) });
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d)) setObjectifs(d);
+      }
+    } catch { /* silencieux */ }
+  }, [password]);
+  useEffect(() => { loadObjectifs(); }, [loadObjectifs]);
+
+  // CA mensuel sur 12 mois glissants (graphique d'évolution, indépendant de la
+  // période sélectionnée en haut de page — cf. server /api/revenue-by-month).
+  const [monthlyRevenue, setMonthlyRevenue] = useState([]);
+  const loadMonthlyRevenue = useCallback(async () => {
+    try {
+      const r = await fetch('api/revenue-by-month?months=12', { headers: credHeaders(password) });
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d.months)) setMonthlyRevenue(d.months);
+      }
+    } catch { /* silencieux */ }
+  }, [password]);
+  useEffect(() => { loadMonthlyRevenue(); }, [loadMonthlyRevenue]);
+
+  // Leaderboard hebdo : toujours "cette semaine", indépendant du filtre de
+  // période principal (même logique que TvView, qui fetch déjà preset=this_week).
+  const [weekData, setWeekData] = useState(null);
+  const [lbAnonymized, setLbAnonymized] = useState(false);
+  const loadWeekData = useCallback(async () => {
+    try {
+      const r = await fetch('api/dashboard?preset=this_week', { headers: credHeaders(password) });
+      if (r.ok) setWeekData(await r.json());
+    } catch { /* silencieux */ }
+  }, [password]);
+  useEffect(() => { loadWeekData(); }, [loadWeekData]);
+
+  // "Ma semaine" : vue perso, réservée aux comptes commerciaux individuels
+  // (calls/propals viennent de weekData, déjà scopé côté serveur ; seuls les
+  // RDV à venir datés sont une donnée dédiée, cf. /api/mes-rdv-a-venir).
+  const [showMaSemaine, setShowMaSemaine] = useState(false);
+  const [mesRdv, setMesRdv] = useState([]);
+  const loadMesRdv = useCallback(async () => {
+    if (!isRestrictedCommercial) return;
+    try {
+      const r = await fetch('api/mes-rdv-a-venir?days=7', { headers: credHeaders(password) });
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d.upcoming)) setMesRdv(d.upcoming);
+      }
+    } catch { /* silencieux */ }
+  }, [password, isRestrictedCommercial]);
+  useEffect(() => { loadMesRdv(); }, [loadMesRdv]);
 
   // Resynchronise les réglages admin sauvegardés vers le serveur
   // (la mémoire serveur est volatile sur Render free)
@@ -1131,6 +1309,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   useEffect(() => { loadNl(); }, [loadNl]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh périodique (même principe que TvView) : silencieux tant que
+  // `data` est déjà chargé — `loading && !data` (écran plein) ne se déclenche
+  // pas, seul le bouton "Rafraîchir" clignote brièvement en "Maj…".
+  useEffect(() => {
+    const it = setInterval(load, DASHBOARD_REFRESH_MS);
+    return () => clearInterval(it);
+  }, [load]);
 
   // Envoi par mail de la VUE COURANTE — passe par une modale pour choisir les
   // destinataires (évite de spammer la liste du reporting par erreur).
@@ -1288,6 +1474,44 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const monthRev = fBlock(d.monthRevenue || { totalAmount: 0, detail: [] }, true);
   const monthSig = fBlock(d.monthSignatures || { total: 0, totalAmount: 0, detail: [] }, true);
 
+  // ===== Objectifs individuels : progression du CA du mois en cours par
+  // commercial vs objectif réglé dans ⚙️ Paramètres (server/index.js /api/objectifs).
+  // isThisMonth : rev.detail EST déjà le mois en cours, pas besoin de monthRev en double.
+  const caMoisParRep = new Map((isThisMonth ? rev.detail : monthRev.detail || []).map((r) => [r.name, r.amount || 0]));
+  const objectifsProgress = objectifs
+    .filter((o) => o.monthlyObjective > 0 && filterRows([{ name: o.displayName }]).length > 0)
+    .map((o) => {
+      const ca = caMoisParRep.get(o.displayName) || 0;
+      return { ...o, ca, pct: Math.min(100, Math.round((ca / o.monthlyObjective) * 100)) };
+    })
+    .sort((a, b) => b.pct - a.pct);
+
+  // ===== Tunnel de conversion Calls → RDV pris → Propal → Signature =====
+  // Aucune nouvelle donnée : les 4 totaux existent déjà (calls, rdvB.r1/r2,
+  // propals + propalsComptes, sig) — juste des ratios entre étapes.
+  const funnelRate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
+  const funnelStages = [
+    { label: 'Calls', value: calls.total, color: '#3B82F6' },
+    { label: 'RDV pris', value: rdvB.r1.total + rdvB.r2.total, color: '#FBBF24' },
+    { label: 'Propals', value: propals.total + propalsComptes.total, color: '#F97316' },
+    { label: 'Signatures', value: sig.total, color: '#8B5CF6' },
+  ].map((s, i, arr) => ({ ...s, rate: i === 0 ? null : funnelRate(s.value, arr[i - 1].value) }));
+
+  // ===== Leaderboard hebdo (Calls / RDV pris / CA), respecte le filtre équipe/masquage =====
+  const weekCalls = fBlock(weekData?.calls || { total: 0, detail: [] });
+  const weekRev = fBlock(weekData?.revenue || { totalAmount: 0, detail: [] }, true);
+  const weekPropals = fBlock(weekData?.propals || { total: 0, totalAmount: 0, detail: [] }, true);
+  const weekRdvMerged = (() => {
+    const map = new Map();
+    const addAll = (rows) => (rows || []).forEach((r) => map.set(r.name, (map.get(r.name) || 0) + (r.count || 0)));
+    addAll(weekData?.rdvBooked?.r1?.detail);
+    addAll(weekData?.rdvBooked?.r2?.detail);
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .filter((r) => filterRows([r]).length > 0)
+      .sort((a, b) => b.count - a.count);
+  })();
+
   // ===== Alerte de seuil : objectif de CA mensuel (0 = pas d'objectif défini) =====
   // Rythme attendu = objectif au prorata du nombre de jours déjà écoulés dans
   // le mois (ex : au 10e jour d'un mois de 30, on "devrait" être à 33%).
@@ -1410,6 +1634,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const caBySales = (rev.detail || []).filter((r) => r.amount > 0).slice(0, 8).map((r) => ({
     name: r.name.split(' ')[0], value: r.amount,
   }));
+  // CA 12 mois glissants : 'YYYY-MM' -> "juil. 25"
+  const revenueByMonthChart = (monthlyRevenue || []).map((m) => {
+    const [y, mo] = m.month.split('-').map(Number);
+    const label = new Date(y, mo - 1, 1).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+    return { name: label, value: m.totalAmount || 0 };
+  });
   // Calls : tous les sales avec au moins 1 call (le bloc s'agrandit en conséquence)
   const callsBySales = (calls.detail || []).filter((r) => r.count > 0).map((r) => ({
     name: r.name.split(' ')[0],
@@ -1538,6 +1768,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
               📺
             </button>
+            {isRestrictedCommercial && (
+              <button className="theme-btn" onClick={() => setShowMaSemaine(true)} title="Ma semaine">
+                📅
+              </button>
+            )}
             <button className="theme-btn" onClick={exportCsv} title="Exporter cette vue en CSV (Excel/Sheets)">
               📥
             </button>
@@ -1648,6 +1883,47 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           )}
         </div>
 
+        {/* ===== TUNNEL DE CONVERSION — Calls → RDV pris → Propal → Signature ===== */}
+        <div className="tile col-12">
+          <TileHead dotClass="bg-violet" title={`Tunnel de conversion · ${rangeLabel}`} />
+          <div className="funnel-row">
+            {funnelStages.map((s, i) => (
+              <React.Fragment key={s.label}>
+                {i > 0 && (
+                  <div className="funnel-arrow">
+                    <span className="funnel-arrow-glyph">→</span>
+                    <span className={`funnel-rate ${s.rate === null ? '' : s.rate >= 50 ? 'up' : s.rate >= 20 ? 'flat' : 'down'}`}>
+                      {s.rate === null ? '—' : `${s.rate}%`}
+                    </span>
+                  </div>
+                )}
+                <div className="funnel-stage">
+                  <div className="funnel-stage-val" style={{ color: s.color }}>{fmt(s.value)}</div>
+                  <div className="funnel-stage-label">{s.label}</div>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+
+        {/* ===== LEADERBOARD HEBDO — toujours "cette semaine" ===== */}
+        <div className="tile col-12">
+          <div className="tile-head">
+            <span className="tile-dot bg-amber" />
+            <span className="tile-title">Podium de la semaine</span>
+            <label className="lb-anon-toggle" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+              <input type="checkbox" checked={lbAnonymized} onChange={(e) => setLbAnonymized(e.target.checked)} />
+              Anonymiser
+            </label>
+          </div>
+          <Leaderboard
+            callsDetail={weekCalls.detail}
+            rdvDetail={weekRdvMerged}
+            revenueDetail={weekRev.detail}
+            anonymized={lbAnonymized}
+          />
+        </div>
+
         {/* ===== RANGÉE MONEY — CA + Signatures ===== */}
         <div className="tile col-8 clickable" onClick={() => openModal(`CA · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue', cmp ? cmpDetailAmt(cmp.revenue) : [])}>
           <TileHead dotClass="bg-blue" title={`CA ${isToday ? 'du jour' : '· ' + rangeLabel} par commercial`} clickable />
@@ -1686,6 +1962,30 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               ))}
             </div>
           )}
+        </div>
+
+        {/* ===== CA — 12 MOIS GLISSANTS (indépendant du filtre de période en haut) ===== */}
+        <div className="tile col-12">
+          <TileHead dotClass="bg-blue" title="CA — 12 derniers mois" />
+          <div className="chart-box" style={{ height: 220 }}>
+            {revenueByMonthChart.every((m) => m.value === 0) ? (
+              <div className="empty">Aucune donnée</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={revenueByMonthChart} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
+                  <XAxis dataKey="name" tick={{ fill: ct.tick, fontSize: 11 }} axisLine={{ stroke: ct.axis }} tickLine={false} />
+                  <YAxis tick={{ fill: ct.tickFaint, fontSize: 10 }} axisLine={false} tickLine={false} width={50}
+                    tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                  <Tooltip content={<DarkTooltip suffix=" €" />} cursor={{ fill: 'rgba(59,130,246,0.10)' }} />
+                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={48} isAnimationActive={false}>
+                    {revenueByMonthChart.map((e, i) => (
+                      <Cell key={i} fill={i === revenueByMonthChart.length - 1 ? '#3B82F6' : '#2563EB'} fillOpacity={i === revenueByMonthChart.length - 1 ? 1 : 0.55} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
         </div>
 
         {/* ===== RANGÉE ACTIVITÉ — Calls top 10 + RDV pris + SalesForge ===== */}
@@ -1818,6 +2118,31 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           <TopList rows={sf.detail} color="c-bluer2" />
         </div>
 
+        {/* ===== OBJECTIFS INDIVIDUELS — CA du mois en cours vs objectif réglé
+             par un admin (⚙️ Paramètres). N'affiche que les commerciaux dont un
+             objectif > 0 est réglé, et respecte le filtre équipe/masquage actif. ===== */}
+        {objectifsProgress.length > 0 && (
+          <div className="tile col-6">
+            <TileHead dotClass="bg-green" title="Objectifs du mois en cours" />
+            <div className="obj-list">
+              {objectifsProgress.map((o) => (
+                <div className="obj-row" key={o.commercialId}>
+                  <div className="obj-row-top">
+                    <span className="obj-name">{o.displayName}</span>
+                    <span className="obj-val">{fmt(o.ca)} € / {fmt(o.monthlyObjective)} €</span>
+                  </div>
+                  <div className="mrow-bar-bg">
+                    <div
+                      className={`mrow-bar ${o.pct >= 100 ? 'c-green-bg' : o.pct >= 70 ? 'c-amber-bg' : 'c-blue-bg'}`}
+                      style={{ width: `${o.pct}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ===== NEWSLETTERS EXT — stats Mailjet + RDV Calendly ===== */}
         <NewsletterSection
           nlData={nlData}
@@ -1894,6 +2219,16 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         />
       )}
 
+      <MaSemaineModal
+        open={showMaSemaine}
+        onClose={() => setShowMaSemaine(false)}
+        nom={password?.nom}
+        callsTotal={weekCalls.total}
+        propalsTotal={weekPropals.total}
+        propalsAmount={weekPropals.totalAmount}
+        upcoming={mesRdv}
+      />
+
       <SettingsModal
         open={showSettings}
         hidden={hidden}
@@ -1903,6 +2238,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         password={password}
         teams={teams}
         onTeamsChanged={loadTeams}
+        objectifs={objectifs}
+        onObjectifsChanged={loadObjectifs}
       />
 
       <DetailModal
