@@ -36,6 +36,40 @@ const EMAIL_ADMIN = process.env.EMAIL_ADMIN || 'donatien.l@openmedias.fr';
 const { hashPassword, verifyCommercialLogin, getCommercialById } = require('./auth');
 const salesTeams = require('./teams');
 
+// ── JOURS DE DIFFUSION AUTORISÉS : lundi, mercredi, vendredi ─────────────────
+// Le calendrier n'affiche que ces 3 jours : une diffusion datée un mardi,
+// jeudi ou week-end était acceptée par l'API puis INVISIBLE dans l'interface
+// (cas réel : une diffusion "bloquée" au jeudi 10/12/2026 via le webhook
+// Salesforce). Règle métier : toute diffusion hors lun/mer/ven est renvoyée
+// vers "à programmer" — appliquée au webhook, au PATCH, et par un balayage
+// de réparation au démarrage (ci-dessous).
+const JOURS_DIFFUSION = new Set([1, 3, 5]); // getDay() : 1=lundi, 3=mercredi, 5=vendredi
+const NOMS_JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+
+function jourSemaine(dateStr) {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d).getDay();
+}
+// Renvoie le nom du jour si la date n'est PAS diffusable, null sinon.
+function jourNonDiffusable(dateStr) {
+  const j = jourSemaine(dateStr);
+  if (j === null || JOURS_DIFFUSION.has(j)) return null;
+  return NOMS_JOURS[j];
+}
+
+// Balayage de réparation : idempotent et rejoué à chaque démarrage — si une
+// écriture future contourne les gardes, elle sera rattrapée au prochain boot.
+try {
+  const fuyardes = db.prepare("SELECT id, date_diffusion FROM emissions WHERE statut NOT IN ('annule','a_programmer')").all()
+    .filter((e) => jourNonDiffusable(e.date_diffusion));
+  const upd = db.prepare("UPDATE emissions SET statut='a_programmer', notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=?");
+  for (const e of fuyardes) {
+    upd.run(`📌 Jour de diffusion impossible (${e.date_diffusion} tombe un ${jourNonDiffusable(e.date_diffusion)} — diffusions lun/mer/ven uniquement) — renvoyée automatiquement`, e.id);
+  }
+  if (fuyardes.length) console.log(`[PLANNING] ${fuyardes.length} diffusion(s) hors lun/mer/ven renvoyée(s) en "à programmer"`);
+} catch (e) { console.error('[PLANNING] balayage jours de diffusion KO :', e.message); }
+
 function getHorizonMois() {
   const row = db.prepare("SELECT value FROM config WHERE key='horizon_mois'").get();
   return row ? parseInt(row.value, 10) : 3;
@@ -412,6 +446,7 @@ function insertEmission(payload, isBdc = false) {
   const raisons = [];
   if (resolu.park) raisons.push(`Média SF: "${media}"${resolu.raison ? ' — ' + resolu.raison : ''}`);
   if (dateManquante) raisons.push(sansDateExplicite ? 'Date de diffusion pas encore connue (case cochée côté Salesforce)' : 'Date de diffusion manquante côté Salesforce');
+  if (!dateManquante && jourNonDiffusable(dateEff)) raisons.push(`Date de diffusion un ${jourNonDiffusable(dateEff)} (diffusions lun/mer/ven uniquement)`);
   if (!formatFinal) raisons.push('Format manquant côté Salesforce');
   if (raisons.length) {
     statut = 'a_programmer';
@@ -874,6 +909,18 @@ app.patch('/api/emissions/:id', (req, res) => {
   const newDate = date_diffusion || e.date_diffusion;
   const newMedia = media || e.media;
 
+  // Garde-fou jours de diffusion (lun/mer/ven uniquement) : une nouvelle date
+  // tombant un mardi/jeudi/week-end n'est PAS appliquée — la diffusion est
+  // renvoyée vers "à programmer" avec une alerte explicite.
+  let forceAProgrammer = false;
+  if (date_diffusion && date_diffusion !== e.date_diffusion) {
+    const jourKO = jourNonDiffusable(date_diffusion);
+    if (jourKO) {
+      alertes.push(`📌 Un ${jourKO} n'est pas un jour de diffusion (lun/mer/ven uniquement) — la diffusion a été renvoyée vers « À programmer »`);
+      forceAProgrammer = true;
+    }
+  }
+
   // Sous-média : validé si fourni, et forcé à null si le média parent change vers autre chose que "Médias spécialisés"
   const clearSousMedia = media && newMedia !== 'Médias spécialisés';
   let touchSousMedia = 0, sousMediaVal = null;
@@ -908,9 +955,9 @@ app.patch('/api/emissions/:id', (req, res) => {
     entreprise=COALESCE(?,entreprise), commercial=COALESCE(?,commercial),
     sous_media=CASE WHEN ?=1 THEN ? ELSE sous_media END,
     updated_at=datetime('now') WHERE id=?
-  `).run(date_diffusion||null, resp_edit||null, notes||null,
+  `).run(forceAProgrammer ? null : (date_diffusion||null), resp_edit||null, notes||null,
     homepage!==undefined?(homepage?1:0):null, homepage_eco!==undefined?(homepage_eco?1:0):null,
-    statut||null, secteur||null, format||null, montant!==undefined?montant:null, upsell!==undefined?upsell:null, media||null,
+    forceAProgrammer ? 'a_programmer' : (statut||null), secteur||null, format||null, montant!==undefined?montant:null, upsell!==undefined?upsell:null, media||null,
     entreprise||null, commercial||null, touchSousMedia, sousMediaVal, id);
 
   res.json({ success: true, alertes });

@@ -298,6 +298,24 @@ header {
   box-shadow: var(--shadow);
   background: var(--border);
 }
+/* Option "afficher mardi/jeudi" (jours non diffusés) — 5 colonnes au lieu de 3 */
+.calendar-grid.marjeu { grid-template-columns: 52px repeat(5, 1fr); }
+.cal-day.non-diffusable {
+  background: repeating-linear-gradient(45deg, rgba(127,127,127,0.06) 0 8px, transparent 8px 16px);
+}
+.cal-day.non-diffusable .cal-day-num { color: var(--text-muted); }
+.nd-label {
+  font-size: 9px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.6px; text-align: center; margin-top: 6px;
+}
+/* Le toggle, tout petit en bas à gauche de l'écran */
+.marjeu-toggle {
+  position: fixed; bottom: 10px; left: 10px; z-index: 45;
+  font-size: 10.5px; padding: 4px 9px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel);
+  color: var(--text-muted); cursor: pointer; opacity: 0.7; font-family: inherit;
+}
+.marjeu-toggle:hover { opacity: 1; color: var(--text); }
 .cal-header {
   background: var(--surface2); padding: 10px 14px;
   font-size: 11px; font-weight: 700; color: var(--text-dim);
@@ -559,6 +577,7 @@ td { padding: 10px 14px; font-size: 13px; }
      reste épinglée à gauche pour toujours savoir sur quelle semaine on est. */
   #calendar-container { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .calendar-grid { grid-template-columns: 52px repeat(3, 200px); width: max-content; }
+  .calendar-grid.marjeu { grid-template-columns: 52px repeat(5, 200px); }
   .cal-week-label { position: sticky; left: 0; z-index: 2; }
 
   /* Liste : le tableau devient une pile de cartes (une diffusion = une carte)
@@ -2433,6 +2452,17 @@ document.addEventListener('dragleave', e => {
 });
 
 // ── CALENDRIER ──────────────────────────────────────────────────────────────
+// Option d'affichage des mardis/jeudis (jours NON diffusés) : colonnes grisées
+// "Pas de diffusion", sans drop ni bouton d'ajout. Utile pour repérer
+// visuellement une éventuelle diffusion orpheline sur ces jours (le backend
+// les renvoie désormais automatiquement en "à programmer").
+let showMarJeu = localStorage.getItem('planning-show-marjeu')==='1';
+function toggleMarJeu(){
+  showMarJeu = !showMarJeu;
+  localStorage.setItem('planning-show-marjeu', showMarJeu?'1':'0');
+  renderCalendar();
+}
+
 function renderCalendar(){
   const y=currentDate.getFullYear(),m=currentDate.getMonth();
   updateMonthLabel();   // libellé partagé avec le rétroplanning, cf. changeMonth
@@ -2453,13 +2483,17 @@ function renderCalendar(){
     if(cur>lastDay&&(cur.getDay()===1||cur.getDay()===0))break;
   }
 
-  let html='<div class="calendar-grid">';
+  const dayIdx = showMarJeu ? [0,1,2,3,4] : [0,2,4]; // indices dans week[] (0=lundi … 4=vendredi)
+  const dayNames = showMarJeu ? ['LUNDI','MARDI','MERCREDI','JEUDI','VENDREDI'] : ['LUNDI','MERCREDI','VENDREDI'];
+  let html=`<div class="calendar-grid${showMarJeu?' marjeu':''}">`;
   html+='<div class="cal-header" style="border-right:1px solid var(--border)"></div>';
-  ['LUNDI','MERCREDI','VENDREDI'].forEach((j,i)=>html+=`<div class="cal-header"${i<2?' style="border-right:1px solid var(--border)"':''}>${j}</div>`);
+  dayNames.forEach((j,i)=>html+=`<div class="cal-header"${i<dayNames.length-1?' style="border-right:1px solid var(--border)"':''}>${j}</div>`);
 
   weeks.forEach((week,wi)=>{
     html+=`<div class="cal-week-label" style="border-right:1px solid var(--border);border-top:1px solid var(--border)">S${wi+1}</div>`;
-    [week[0],week[2],week[4]].forEach((day,di)=>{
+    dayIdx.forEach((dowIdx,di)=>{
+      const day=week[dowIdx];
+      const isNonDiff = dowIdx===1 || dowIdx===3; // mardi / jeudi : jamais de diffusion
       const inMonth=day.getMonth()===m;
       const dateStr=fmtDate(day);
       const isToday=sameDay(day,today);
@@ -2469,21 +2503,23 @@ function renderCalendar(){
       const utilises=slot?slot.utilises:0;
       const complet=utilises>=totalSlots;
       const presque=!complet&&utilises>=totalSlots-1&&totalSlots>1;
-      const border=`border-top:1px solid var(--border)${di<2?';border-right:1px solid var(--border)':''}`;
+      const border=`border-top:1px solid var(--border)${di<dayIdx.length-1?';border-right:1px solid var(--border)':''}`;
 
       let cls='cal-day';
       if(!inMonth)cls+=' vide';
       else if(isFerie)cls+=' ferie';
+      if(isNonDiff&&inMonth)cls+=' non-diffusable';
 
-      html+=`<div class="${cls}" style="${border}" ${inMonth&&!isFerie?`ondragover="allowDrop(event)" ondrop="dropOnDay(event,'${dateStr}')" data-date="${dateStr}"`:''}>`;
+      html+=`<div class="${cls}" style="${border}" ${inMonth&&!isFerie&&!isNonDiff?`ondragover="allowDrop(event)" ondrop="dropOnDay(event,'${dateStr}')" data-date="${dateStr}"`:''}>`;
       if(inMonth){
         html+=`<div class="cal-day-header">
           <div class="cal-day-num${isToday?' today':''}">${day.getDate()}</div>
           ${isFerie?'<span class="cal-day-badge badge-ferie">Férié</span>':''}
-          <span class="badge-slots${complet?' complet':presque?' presque':''}">
+          ${isNonDiff?'':`<span class="badge-slots${complet?' complet':presque?' presque':''}">
             ${utilises}<span style="color:var(--text-muted);font-weight:400">/${totalSlots}</span>
-          </span>
+          </span>`}
         </div>`;
+        if(isNonDiff)html+=`<div class="nd-label">Pas de diffusion</div>`;
 
         emList.filter(e=>e.statut!=='annule').forEach(e=>{
           const fc=fmtClass(e.format);
@@ -2505,13 +2541,14 @@ function renderCalendar(){
             </div>
           </div>`;
         });
-        if(role==='edit'&&!isFerie&&!complet)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}')">+ Ajouter</button>`;
-        if(role==='edit'&&complet)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}',true)" style="font-size:10px">⚙ Forcer</button>`;
+        if(role==='edit'&&!isFerie&&!isNonDiff&&!complet)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}')">+ Ajouter</button>`;
+        if(role==='edit'&&!isNonDiff&&complet)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}',true)" style="font-size:10px">⚙ Forcer</button>`;
       }
       html+='</div>';
     });
   });
   html+='</div>';
+  html+=`<button class="marjeu-toggle" onclick="toggleMarJeu()" title="Afficher/masquer les mardis et jeudis (jours sans diffusion)">${showMarJeu?'− masquer mar./jeu.':'+ mar./jeu.'}</button>`;
   document.getElementById('calendar-container').innerHTML=html;
 }
 
