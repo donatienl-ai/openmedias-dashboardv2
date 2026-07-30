@@ -1171,6 +1171,17 @@ async function fetchPageText(url){
   const hostname = new URL(url).hostname.replace(/^www\./, "");
   const company  = hostname.split(".")[0];
 
+  // 0. NOTRE serveur (route /radar/api/page-text, ajoutée après fusion) —
+  // fiable, vrai User-Agent navigateur, pas de proxy tiers. Remplace les
+  // sources 1-3 ci-dessous, gardées en secours seulement.
+  try {
+    const r = await fetch("api/page-text?url=" + encodeURIComponent(url), {signal: AbortSignal.timeout(12000)});
+    if(r.ok){
+      const d = await r.json();
+      if(d.text && d.text.length > 80) return {text: d.text, title: d.title || "", source: "server"};
+    }
+  } catch(_){}
+
   // 1. DuckDuckGo — meilleur pour grands comptes, retourne un résumé métier propre
   try {
     const ddgRes = await fetch(
@@ -1244,14 +1255,14 @@ async function scanURL(url){
 
   const raw = result.text.replace(/<[^>]+>/g,"").slice(0,6000);
   const kws = extractKeywords(raw);
-  const query = kws.slice(0,6).join(" ");
+  const query = kws.slice(0,8).join(" ");
 
   // Titre lisible
   const hostname = new URL(url).hostname.replace("www.","");
   const displayTitle = result.title || hostname;
 
   // Afficher mots-clés
-  const srcLabel = result.source==='ddg'?' (via DuckDuckGo)':result.source==='microlink'?' (via métadonnées)':result.source==='domain'?' (domaine uniquement — ajoute une description si besoin)':'';
+  const srcLabel = result.source==='server'?' (analysé par notre serveur)':result.source==='ddg'?' (via DuckDuckGo)':result.source==='microlink'?' (via métadonnées)':result.source==='domain'?' (domaine uniquement — ajoute une description si besoin)':'';
   scanTxt.innerHTML = `<b>${esc(displayTitle.slice(0,60))}</b>${srcLabel} — Mots-clés identifiés :`;
   scanKwRow.innerHTML = kws.slice(0,12).map(k=>`<span class="scan-kw">${esc(k)}</span>`).join("");
   scanKwRow.style.display = "flex";
