@@ -82,6 +82,45 @@ SOURCES = [
          path_filter="/entreprises-d-avenir/",
          paginate=True, page_pattern="slash"),
 
+    # Ajouts 2026-07-30 (demande Donatien) — 5 émissions OpenMedias.
+    dict(source="Nous", media="BFM Business", emission="Perspectives d'entreprises",
+         kind="html",
+         url="https://www.bfmtv.com/economie/professionnels/perspectives-d-entreprises/",
+         path_filter="/perspectives-d-entreprises/",
+         paginate=True, page_pattern="slash"),
+
+    dict(source="Nous", media="RMC Sport", emission="Les entreprises du sport",
+         kind="html",
+         url="https://rmcsport.bfmtv.com/services/les-entreprises-du-sport/",
+         path_filter="/les-entreprises-du-sport/",
+         paginate=True, page_pattern="slash"),
+
+    # Même problème structurel que les autres dossiers Figaro : les articles
+    # vivent sous /sports/<slug>-YYYYMMDD, indistingables de la rédaction
+    # sportive par l'URL — seule la page dossier fait foi.
+    dict(source="Nous", media="Le Figaro", emission="L'entreprise sportive de la semaine",
+         kind="html",
+         url="https://www.lefigaro.fr/sports/dossier/l-entreprise-sportive-de-la-semaine",
+         path_filter="/sports/",
+         paginate=True, page_pattern="query", exclude=NOISE),
+
+    # Page quasi figée depuis 2023 côté CNEWS (6 liens, "corner partenaires") —
+    # configurée quand même : si l'émission reprend, les nouveaux liens
+    # seront ramassés. Pas d'exclude NOISE : 2 des 6 contenus sont des vidéos.
+    dict(source="Nous", media="CNews", emission="Réussites d'entreprises",
+         kind="html",
+         url="https://www.cnews.fr/reussites-dentreprises",
+         path_filter="/le-corner-partenaires/"),
+
+    # DataDome (captcha JS) bloque requests ET cloudscraper, comme les deux
+    # autres sources Le Point — KO en scrape direct. Configurée pour le jour
+    # où le blocage est contourné (navigateur réel) ou levé.
+    dict(source="Nous", media="Le Point", emission="Portraits d'entrepreneurs",
+         kind="html",
+         url="https://www.lepoint.fr/portraits_entrepreneurs/",
+         path_filter="/portraits_entrepreneurs/",
+         paginate=True, page_pattern="query", exclude=NOISE),
+
     # =====================================================================
     # CONCURRENTS — BFM Business (path_filter propre, déjà fiable)
     # =====================================================================
