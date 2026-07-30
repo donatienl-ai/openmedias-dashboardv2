@@ -1159,13 +1159,14 @@ const scanKwRow  = document.getElementById("scan-kw-row");
 
 function isURL(s){ try{ const u=new URL(s.trim()); return u.protocol.startsWith("http"); }catch(_){return false;} }
 
-// `deny` : tokens à ignorer (ex. nom de l'entreprise scannée — "frame" ressortait
-// 3x dans les mots-clés d'une agence nommée Be Off Frame, sans aucune valeur de
-// matching). Ponctuation strippée (norm seul gardait "frame:" et "frame," comme
-// deux mots distincts) et tokens avec chiffres exclus ("2023" n'est pas un mot-clé).
-function extractKeywords(text, deny = new Set()){
+// `deny` : tokens à ignorer (ex. nom de l'entreprise scannée). `squash` : le
+// hostname écrasé ("beoffframecom") — un mot-clé qui y est CONTENU est un
+// morceau du nom de marque ("frame" ⊂ "beoffframe") et pollue le matching.
+// Ponctuation strippée (norm seul gardait "frame:" et "frame," comme deux
+// mots distincts) et tokens avec chiffres exclus ("2023" n'est pas un mot-clé).
+function extractKeywords(text, deny = new Set(), squash = ""){
   const words = norm(text).replace(/[^a-z0-9 ]/g," ").split(/\s+/)
-    .filter(w => w.length>3 && !STOP.has(w) && !/\d/.test(w) && !deny.has(w));
+    .filter(w => w.length>3 && !STOP.has(w) && !/\d/.test(w) && !deny.has(w) && !(squash && squash.includes(w)));
   const freq = {};
   words.forEach(w=>freq[w]=(freq[w]||0)+1);
   return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,12).map(e=>e[0]);
@@ -1266,16 +1267,18 @@ async function scanURL(url){
   }
 
   const raw = result.text.replace(/<[^>]+>/g,"").slice(0,6000);
+  // Titre lisible (déclaré AVANT hostTokens — une utilisation avant la
+  // déclaration du `const` jetait une ReferenceError et l'analyse restait
+  // bloquée sur "Analyse en cours…", bouton désactivé).
+  const hostname = new URL(url).hostname.replace("www.","");
+  const displayTitle = result.title || hostname;
   // Tokens du nom de domaine exclus des mots-clés (le nom de l'entreprise
   // pollue le matching, il est déjà dans le titre affiché).
   const hostTokens = new Set(norm(hostname).replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w.length>2));
-  const kws = extractKeywords(raw, hostTokens);
+  const hostSquash = norm(hostname).replace(/[^a-z0-9]/g,"");
+  const kws = extractKeywords(raw, hostTokens, hostSquash);
   const query = kws.slice(0,8).join(" ");
   semanticOverride = raw.slice(0,2000); // pour l'encodeur sémantique (voir searchSemantic)
-
-  // Titre lisible
-  const hostname = new URL(url).hostname.replace("www.","");
-  const displayTitle = result.title || hostname;
 
   // Afficher mots-clés
   const srcLabel = result.source==='server'?' (analysé par notre serveur)':result.source==='ddg'?' (via DuckDuckGo)':result.source==='microlink'?' (via métadonnées)':result.source==='domain'?' (domaine uniquement — ajoute une description si besoin)':'';

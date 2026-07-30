@@ -503,6 +503,39 @@ async function testAppSwitch() {
 }
 
 /* =========================================================================
+   11. SCAN URL — l'analyse d'un site prospect doit ABOUTIR
+   Régression : une ReferenceError (hostname utilisé avant son const) laissait
+   l'UI bloquée sur "Analyse en cours…", bouton désactivé, sans jamais finir.
+   ========================================================================= */
+async function testScanUrl() {
+  const prospectUrl = "https://www.beoffframe.com/";
+  const apiKey = "page-text?url=" + encodeURIComponent(prospectUrl);
+  const { win } = await boot({
+    "catalogue.json": catalogue([rec({
+      title: "Une marque mise en avant par une agence de publicité",
+      sector: "Média / Communication / Culture / Luxe",
+      url: "https://exemple.fr/pub",
+    })]),
+    [apiKey]: {
+      title: "Be Off Frame — Agence de communication",
+      text: "Be Off Frame est une agence de communication innovante. Nous accompagnons les marques dans leur stratégie de communication, publicité, branding et identité visuelle. frame frame frame.",
+    },
+  });
+
+  await win.eval(`scanURL(${JSON.stringify(prospectUrl)})`);
+
+  ok("scan URL : l'analyse aboutit (mots-clés affichés)",
+     win.document.getElementById("scan-txt").textContent.includes("Mots-clés"));
+  ok("scan URL : le bouton est réactivé à la fin",
+     win.document.getElementById("scan-btn").disabled === false);
+  const q = win.document.getElementById("q").value;
+  ok("scan URL : le nom de l'entreprise est exclu des mots-clés", !q.includes("frame"));
+  ok("scan URL : le métier ressort dans les mots-clés", q.includes("communication"));
+  eq("scan URL : secteur auto = Média/Communication (pas Immobilier)",
+     win.eval("state.sector"), "Média / Communication / Culture / Luxe");
+}
+
+/* =========================================================================
    RUNNER
    ========================================================================= */
 const tests = [
@@ -517,6 +550,7 @@ const tests = [
   testDesignTokenParity,
   testAppSwitch,
   testRealCatalogue,
+  testScanUrl,
 ];
 
 for (const t of tests) {
