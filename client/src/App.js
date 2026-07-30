@@ -1305,20 +1305,18 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   }, [password, isRestrictedCommercial]);
   useEffect(() => { loadMesRdv(); }, [loadMesRdv]);
 
-  // Resynchronise les réglages admin sauvegardés vers le serveur
-  // (la mémoire serveur est volatile sur Render free)
+  // Nettoyage unique d'un ancien mécanisme : la clé localStorage
+  // 'om_admin_settings' n'est plus écrite nulle part, mais un useEffect la
+  // RE-POSTAIT au serveur à chaque chargement pour "resynchroniser" les
+  // réglages (vestige de l'époque où la mémoire serveur était volatile sur
+  // Render free). Résultat : un vieux snapshot présent dans le navigateur
+  // écrasait silencieusement les réglages persistés en SQLite — notamment
+  // monthlyRevenueObjective, impossible à changer durablement. Les réglages
+  // vivent maintenant dans la base persistée (adminSettings.js), la source
+  // de vérité est le serveur : on supprime juste la clé périmée.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('om_admin_settings');
-      if (saved) {
-        fetch('api/admin/settings', {
-          method: 'POST',
-          headers: credHeaders(password, { 'Content-Type': 'application/json' }),
-          body: saved,
-        }).catch(() => {});
-      }
-    } catch { /* noop */ }
-  }, [password]);
+    try { localStorage.removeItem('om_admin_settings'); } catch { /* noop */ }
+  }, []);
   const [hiddenSales, setHiddenSales] = useState(() => {
     // Si l'utilisateur n'a jamais touché aux paramètres sur ce navigateur,
     // on applique le masquage par défaut (hors-équipe sauf Thomas Durand).
