@@ -72,6 +72,9 @@ cd client && npm start
 
 ## Déployer sur Render
 
+**Au quotidien, une seule commande suffit** : `npm run deploy -- "message de commit"` (add + commit + push). Render rebuild et redéploie automatiquement à chaque push sur `main` (~3-5 min) — aucune action manuelle sur le dashboard Render. Si ça ne redéploie pas tout seul : onglet **Settings → Build & Deploy → Auto-Deploy** doit être sur *Yes*.
+Astuce : pour régler du visuel, teste d'abord en local (`npm run dev` côté serveur + `cd client && npm start` pour le hot-reload React) et ne push qu'une fois satisfait — ça évite les allers-retours de rebuild.
+
 ⚠️ Depuis la fusion avec OpenPlanning/OpenBDC, ce service a besoin d'un **disque persistant** (base SQLite du planning) et d'un plan **payant** (le free tier n'a pas de disque, et la RAM sera juste avec SQLite + Puppeteer/Chromium en plus du cache Aircall/Calendly). `render.yaml` est déjà à jour avec ça (`plan: standard`, disque `/var/data`).
 
 ### Si le service `openmedias-dashboard` existe déjà sur Render (cas de la bascule)
