@@ -617,7 +617,7 @@ const DATA0 = [{"source": "Concurrents", "media": "BFM Business", "emission": "#
 let DATA = DATA0;
 
 /* ---------- tokenisation FR (miroir du build Python) ---------- */
-const STOP = new Set(("le la les un une des de du d l au aux et ou a en dans pour par sur avec sans son sa ses leur leurs ce cette ces qui que quoi dont comment pourquoi est sont etre fait plus tout tous toute toutes cas the of and " +"nos votre notre nous vous ils elles ils on je tu il elle se si ni car mais donc or " +"cookies cookie rgpd cgv cgu accepter refuser parametre onglet nouvel politique confidentialite mentions legales " +"savoir plus voir lire découvrir en savoir cliquez ici contact nous rejoindre " +"www http https com fr org net html site web page accueil menu").split(" "));
+const STOP = new Set(("le la les un une des de du d l au aux et ou a en dans pour par sur avec sans son sa ses leur leurs ce cette ces qui que quoi dont comment pourquoi est sont etre fait plus tout tous toute toutes cas the of and " +"nos votre notre nous vous ils elles ils on je tu il elle se si ni car mais donc or " +"cookies cookie rgpd cgv cgu accepter refuser parametre onglet nouvel politique confidentialite mentions legales " +"savoir plus voir lire découvrir en savoir cliquez ici contact nous rejoindre " +"decouvrez decouvrons decouvre propose proposons proposez vivante vivant idee idees solution solutions groupe groupes equipe equipes " +"deux trois quatre cinq ans annee annees jour jours toujours souvent encore afin grace choix qualite faire etre avoir aussi tres bien meme memes autre autres entre vers chez lors " +"www http https com fr org net html site web page accueil menu").split(" "));
 function norm(s){return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
 function toks(s){return norm(s).replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w.length>2 && !STOP.has(w));}
 
@@ -1159,9 +1159,13 @@ const scanKwRow  = document.getElementById("scan-kw-row");
 
 function isURL(s){ try{ const u=new URL(s.trim()); return u.protocol.startsWith("http"); }catch(_){return false;} }
 
-function extractKeywords(text){
-  const t = norm(text);
-  const words = t.split(/\s+/).filter(w=>w.length>3 && !STOP.has(w));
+// `deny` : tokens à ignorer (ex. nom de l'entreprise scannée — "frame" ressortait
+// 3x dans les mots-clés d'une agence nommée Be Off Frame, sans aucune valeur de
+// matching). Ponctuation strippée (norm seul gardait "frame:" et "frame," comme
+// deux mots distincts) et tokens avec chiffres exclus ("2023" n'est pas un mot-clé).
+function extractKeywords(text, deny = new Set()){
+  const words = norm(text).replace(/[^a-z0-9 ]/g," ").split(/\s+/)
+    .filter(w => w.length>3 && !STOP.has(w) && !/\d/.test(w) && !deny.has(w));
   const freq = {};
   words.forEach(w=>freq[w]=(freq[w]||0)+1);
   return Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,12).map(e=>e[0]);
@@ -1262,7 +1266,10 @@ async function scanURL(url){
   }
 
   const raw = result.text.replace(/<[^>]+>/g,"").slice(0,6000);
-  const kws = extractKeywords(raw);
+  // Tokens du nom de domaine exclus des mots-clés (le nom de l'entreprise
+  // pollue le matching, il est déjà dans le titre affiché).
+  const hostTokens = new Set(norm(hostname).replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w.length>2));
+  const kws = extractKeywords(raw, hostTokens);
   const query = kws.slice(0,8).join(" ");
   semanticOverride = raw.slice(0,2000); // pour l'encodeur sémantique (voir searchSemantic)
 
@@ -1296,13 +1303,17 @@ async function scanURL(url){
 }
 
 
+// Match EXACT uniquement (le double substring t.includes(k)||k.includes(t)
+// faisait matcher "agence" sur le mot-clé "agence immobiliere" → une agence de
+// communication se voyait filtrer le secteur Immobilier, qui écrasait tous les
+// résultats). Seuil 2 : un seul mot générique ne doit pas imposer un secteur.
 function detectSectorFromTokens(tokens){
   let best=null, bestScore=0;
   for(const [sec, kws] of Object.entries(SECTORS)){
-    const score = tokens.filter(t=> kws.some(k=>t.includes(k)||k.includes(t))).length;
+    const score = tokens.filter(t=> kws.includes(t)).length;
     if(score>bestScore){bestScore=score; best=sec;}
   }
-  return bestScore>=1 ? best : null;
+  return bestScore>=2 ? best : null;
 }
 
 scanBtn.addEventListener("click", ()=>{
