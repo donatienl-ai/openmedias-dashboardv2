@@ -818,7 +818,9 @@ async function searchSemantic(query, src){
 
   let qvec = null;
   if(pipelineReady){
-    try { qvec = await encodeQuery(query); } catch(e) { qvec = null; }
+    // Après une analyse d'URL, on encode le texte complet du site prospect
+    // (semanticOverride), pas les mots-clés affichés dans la barre de recherche.
+    try { qvec = await encodeQuery(semanticOverride || query); } catch(e) { qvec = null; }
   }
 
   if(!qvec){
@@ -1166,6 +1168,12 @@ function extractKeywords(text){
 }
 
 let scanLabel = null; // label affiché dans le bandeau après scan URL
+// Texte COMPLET du site prospect après analyse d'URL : c'est lui qu'on envoie
+// à l'encodeur sémantique (bien plus riche que les 8 mots-clés affichés dans
+// la barre de recherche — la fréquence brute des mots d'une homepage donne un
+// mauvais signal, le vecteur du texte entier capture le métier réel).
+// Remis à null dès que l'utilisateur tape une requête à la main.
+let semanticOverride = null;
 
 async function fetchPageText(url){
   const hostname = new URL(url).hostname.replace(/^www\./, "");
@@ -1256,6 +1264,7 @@ async function scanURL(url){
   const raw = result.text.replace(/<[^>]+>/g,"").slice(0,6000);
   const kws = extractKeywords(raw);
   const query = kws.slice(0,8).join(" ");
+  semanticOverride = raw.slice(0,2000); // pour l'encodeur sémantique (voir searchSemantic)
 
   // Titre lisible
   const hostname = new URL(url).hostname.replace("www.","");
@@ -1303,7 +1312,7 @@ scanBtn.addEventListener("click", ()=>{
 
 let t; qEl.addEventListener("input",()=>{
   const v=qEl.value;
-  state.q=v; scanLabel=null;
+  state.q=v; scanLabel=null; semanticOverride=null;
   qEl.style.height="auto"; qEl.style.height=Math.min(200,qEl.scrollHeight)+"px";
   // Affiche la barre URL si c'est une URL
   if(isURL(v.trim())){
