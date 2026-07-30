@@ -32,6 +32,18 @@ jobs:
       # build React ni dans check-syntax (qui ne scanne que server/ et
       # planning/backend/). Ces tests le chargent dans jsdom et vérifient
       # notamment le décodage des vecteurs écrits par le scraper Python.
+      # => 3 de ces tests importent scrape_openmedias.py via python3 : sans les
+      # dépendances pip, le script quitte à l'import ("Dépendances manquantes")
+      # et le job échoue. Version légère suffisante (pas de torch ici).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: radar/scraper/requirements.txt
+
+      - name: Dépendances Python du scraper (pour les tests radar)
+        run: pip install requests beautifulsoup4 lxml openpyxl
+
       - name: Tests du radar éditorial
         run: npm run test:radar
 
