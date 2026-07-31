@@ -256,6 +256,72 @@ async function testNavVisibility() {
 }
 
 /* =========================================================================
+   6. ZOOM FAÇON GOOGLE AGENDA — Mois / Semaine / 3 jours / Journée
+   ------------------------------------------------------------------------
+   Le zoom ne change que l'échelle : la grille passe de 7 colonnes mensuelles
+   à 7 jours / 3 jours / 1 jour, le libellé du header épouse la période
+   visible, et les flèches du header avancent du pas correspondant.
+   ========================================================================= */
+async function testSocialZoom() {
+  const { win } = await boot();
+  V(win, "switchView('social')");
+  await new Promise((r) => setTimeout(r, 60));
+  const grid = () => win.document.getElementById("social-cal-grid");
+
+  eq("zoom par défaut : mois", V(win, "socialZoom"), "mois");
+  ok("zoom mois : grille non zoomée", !grid().className.includes("zoomed"), grid().className);
+
+  // -- Semaine : 7 cases, semaine du lundi, libellé de plage --
+  // (janvier 2027 est choisi : ce n'est jamais le mois courant, donc pas de
+  // ré-ancrage sur aujourd'hui au moment du changement de zoom)
+  V(win, "socialCalendarDate = new Date(2027, 0, 14)"); // jeudi 14 janvier 2027
+  V(win, "setSocialZoom('semaine')");
+  eq("semaine : état du zoom", V(win, "socialZoom"), "semaine");
+  eq("semaine : 7 cases", grid().children.length, 7);
+  ok("semaine : grille zoomée", grid().className.includes("zoomed"), grid().className);
+  eq("semaine : 7 en-têtes de jours",
+     win.document.querySelectorAll(".social-cal-weekdays span").length, 7);
+  eq("semaine : libellé = plage lundi-dimanche", label(win), "11 – 17 Janvier 2027");
+
+  // -- les flèches du header avancent d'une semaine --
+  await V(win, "changeMonth(1)");
+  eq("semaine : +1 flèche = +7 jours", V(win, "socialCalendarDate.getDate()"), 21);
+  eq("semaine : libellé suit", label(win), "18 – 24 Janvier 2027");
+
+  // -- 3 jours : 3 cases, flèches = 3 jours --
+  V(win, "setSocialZoom('3jours')");
+  eq("3 jours : 3 cases", grid().children.length, 3);
+  eq("3 jours : libellé", label(win), "21 – 23 Janvier 2027");
+  await V(win, "changeMonth(-1)");
+  eq("3 jours : -1 flèche = -3 jours", V(win, "socialCalendarDate.getDate()"), 18);
+  eq("3 jours : libellé suit", label(win), "18 – 20 Janvier 2027");
+
+  // -- Journée : 1 case, flèches = 1 jour --
+  V(win, "setSocialZoom('jour')");
+  eq("journée : 1 case", grid().children.length, 1);
+  eq("journée : libellé jour complet", label(win), "Lundi 18 Janvier 2027");
+  await V(win, "changeMonth(1)");
+  eq("journée : +1 flèche = +1 jour", V(win, "socialCalendarDate.getDate()"), 19);
+
+  // -- retour au mois : normalisé au 1er, grille classique --
+  V(win, "setSocialZoom('mois')");
+  eq("mois : date renormalisée au 1er", V(win, "socialCalendarDate.getDate()"), 1);
+  eq("mois : libellé classique", label(win), "Janvier 2027");
+  ok("mois : grille non zoomée", !grid().className.includes("zoomed"), grid().className);
+
+  // -- ré-ancrage : quitter le mois courant cible aujourd'hui --
+  const now = new Date();
+  V(win, `socialCalendarDate = new Date(${now.getFullYear()}, ${now.getMonth()}, 1)`);
+  V(win, "setSocialZoom('jour')");
+  eq("mois courant -> journée : ancré sur aujourd'hui",
+     V(win, "socialCalendarDate.getDate()"), now.getDate());
+
+  // -- persistance du choix --
+  eq("zoom mémorisé en localStorage",
+     win.localStorage.getItem("social-zoom"), "jour");
+}
+
+/* =========================================================================
    RUNNER
    ========================================================================= */
 const tests = [
@@ -264,6 +330,7 @@ const tests = [
   testHorizonNotAppliedToSocial,
   testNoMonthSkipped,
   testNavVisibility,
+  testSocialZoom,
 ];
 
 for (const t of tests) {
