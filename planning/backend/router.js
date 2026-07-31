@@ -809,6 +809,74 @@ app.post('/api/bdc/generate', requireCommercial, async (req, res) => {
   }
 });
 
+// ── BDC — ENVOI POUR SIGNATURE VIA DOCUSIGN ───────────────────────────────────
+// Le PDF envoyé est exactement celui du bouton « Générer le PDF » (même moteur).
+// L'authentification DocuSign réutilise les mêmes variables d'env que le
+// connecteur reporting du dashboard (même service, même compte). Le suivi vit
+// dans la table bdc_envois ; les statuts sont rafraîchis à la demande (pas de
+// webhook DocuSign Connect configuré).
+const docusignSend = require('./docusignSend');
+
+const DS_STATUT_MAP = { sent: 'envoye', delivered: 'envoye', completed: 'signe', declined: 'refuse', voided: 'annule' };
+
+app.post('/api/bdc/docusign/send', requireCommercial, async (req, res) => {
+  try {
+    const signerEmail = String(req.body.signerEmail || '').trim();
+    const signerName = String(req.body.signerName || req.body.contact || '').trim();
+    if (!signerEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(signerEmail)) {
+      return res.status(400).json({ error: 'Email du signataire manquant ou invalide' });
+    }
+    if (!signerName) return res.status(400).json({ error: 'Nom du signataire manquant (champ Contact)' });
+    if (!String(req.body.entreprise || '').trim()) return res.status(400).json({ error: 'Entreprise manquante' });
+
+    const templateKey = req.body.templateKey || 'figaro-48h-hp';
+    const pdf = await renderBdcPdf(templateKey, bdcFieldsFromInput(req.body));
+    const { envelopeId, status } = await docusignSend.sendBdcEnvelope({
+      pdfBuffer: pdf,
+      entreprise: String(req.body.entreprise || '').trim(),
+      signerName,
+      signerEmail,
+      message: String(req.body.signerMessage || '').trim() || undefined,
+    });
+
+    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial)
+                VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(envelopeId, String(req.body.entreprise || '').trim(), signerName, signerEmail,
+           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom);
+    console.log(`[BDC-DOCUSIGN] enveloppe ${envelopeId} envoyée par ${req.commercial.nom} — ${req.body.entreprise} → ${signerEmail}`);
+    res.json({ ok: true, envelopeId });
+  } catch (e) {
+    console.error('[BDC-DOCUSIGN]', e);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+// Liste des envois (le commercial voit les siens, l'édito/admin voit tout) +
+// rafraîchissement à la demande des statuts encore "envoyé" (max 10 par appel
+// pour rester raisonnable avec le rate limit DocuSign).
+app.get('/api/bdc/docusign/envois', requireCommercial, async (req, res) => {
+  const isPriv = req.headers.role === 'edit' || req.commercial.role === 'admin';
+  const rows = isPriv
+    ? db.prepare('SELECT * FROM bdc_envois ORDER BY created_at DESC LIMIT 100').all()
+    : db.prepare('SELECT * FROM bdc_envois WHERE commercial=? ORDER BY created_at DESC LIMIT 100').all(req.commercial.nom);
+
+  const upd = db.prepare("UPDATE bdc_envois SET statut=?, docusign_status=?, updated_at=datetime('now') WHERE id=?");
+  let refreshed = 0;
+  for (const r of rows) {
+    if (r.statut !== 'envoye' || refreshed >= 10) continue;
+    try {
+      const { status } = await docusignSend.getEnvelopeStatus(r.envelope_id);
+      const mapped = DS_STATUT_MAP[status] || r.statut;
+      if (mapped !== r.statut || status !== r.docusign_status) upd.run(mapped, status, r.id);
+      r.statut = mapped; r.docusign_status = status;
+      refreshed++;
+    } catch (e) {
+      console.warn(`[BDC-DOCUSIGN] refresh enveloppe ${r.envelope_id}: ${e.message}`);
+    }
+  }
+  res.json(rows);
+});
+
 // ── EMISSIONS - LECTURE ───────────────────────────────────────────────────────
 app.get('/api/emissions', (req, res) => {
   const { media, mois, annee, search, statut, resp_edit } = req.query;

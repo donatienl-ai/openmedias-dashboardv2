@@ -539,6 +539,12 @@ td { padding: 10px 14px; font-size: 13px; }
 .info-banner { display: flex; align-items: flex-start; gap: 9px; border-radius: var(--radius-sm); padding: 10px 14px; font-size: 12px; font-weight: 500; margin-bottom: 16px; }
 .info-banner.neutral { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
 .info-banner.bdc { background: var(--bdc-bg); border: 1px solid rgba(245,212,0,0.45); color: var(--bdc-text); }
+/* Suivi des envois DocuSign (vue BDC) */
+.ds-row { display: flex; align-items: center; gap: 12px; padding: 10px 4px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.ds-chip { display: inline-block; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.ds-chip.envoye { background: var(--bdc-bg); color: var(--bdc-text); }
+.ds-chip.signe { background: var(--green-dim); color: var(--green); }
+.ds-chip.refuse, .ds-chip.annule { background: var(--surface2); color: var(--red); border: 1px solid var(--border); }
 .info-banner.warning { background: var(--bdc-bg); border: 1px solid rgba(245,212,0,0.35); color: var(--bdc-text); }
 
 /* ── TOAST ───────────────────────────────────── */
@@ -968,6 +974,14 @@ td { padding: 10px 14px; font-size: 13px; }
 
         <div id="bdc2-genererStatus" style="font-size:12px;color:var(--text-dim);margin-bottom:8px">&nbsp;</div>
         <button type="button" class="btn-primary" style="width:100%;padding:14px;font-size:14px" onclick="bdcGenererPdf()">Générer le PDF</button>
+
+        <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+          <div class="form-label" style="margin-bottom:10px">✍️ Envoi pour signature électronique (DocuSign)</div>
+          <div class="form-group"><label class="form-label">Email du signataire</label><input class="form-input" type="email" id="bdc2-signerEmail" placeholder="jean.dupont@acme.fr"></div>
+          <div class="form-group"><label class="form-label">Message (optionnel)</label><textarea class="form-textarea" id="bdc2-signerMessage" rows="2" placeholder="Bonjour, veuillez trouver le bon de commande à signer…"></textarea></div>
+          <button type="button" class="btn-secondary" style="width:100%;padding:12px;font-size:13px" onclick="bdcEnvoyerDocusign()">Envoyer via DocuSign</button>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Le PDF envoyé est identique à celui du bouton « Générer le PDF ». La signature se place automatiquement sur le bloc « Signature du client ».</div>
+        </div>
       </div>
 
       <div class="bdc-preview-col">
@@ -975,6 +989,14 @@ td { padding: 10px 14px; font-size: 13px; }
           <iframe id="bdc2-previewFrame" title="Aperçu du BDC"></iframe>
         </div>
       </div>
+    </div>
+
+    <div class="param-card" style="margin-top:24px">
+      <div class="param-section-title" style="margin-bottom:12px;display:flex;align-items:center">
+        <span class="dot" style="background:var(--accent)"></span>Suivi des envois DocuSign
+        <button type="button" class="btn-secondary" style="margin-left:auto;font-size:11px" onclick="bdcLoadEnvois()">↻ Rafraîchir les statuts</button>
+      </div>
+      <div id="bdc2-envois" style="font-size:12px;color:var(--text-muted)">Chargement…</div>
     </div>
   </div>
 
@@ -3355,6 +3377,7 @@ async function bdcImporterSalesforce(){
     if(f.contact)document.getElementById('bdc2-contact').value=f.contact;
     if(f.adresse)document.getElementById('bdc2-adresse').value=f.adresse;
     if(f.respEmission)document.getElementById('bdc2-respEmission').value=f.respEmission;
+    if(f.email)document.getElementById('bdc2-signerEmail').value=f.email;
     status.textContent='Piste importée.';
     bdcSchedulePreview();
   }catch(e){
@@ -3442,6 +3465,56 @@ async function bdcGenererPdf(){
   }
 }
 
+// ── Envoi pour signature via DocuSign ────────────────────────────────────────
+// Le PDF envoyé est celui de « Générer le PDF » (même route moteur côté
+// serveur). Le suivi vit dans le bloc « Suivi des envois DocuSign » sous
+// l'éditeur ; les statuts sont rafraîchis à chaque affichage de la vue.
+const DS_STATUT_LABEL={envoye:'✉️ Envoyé',signe:'✅ Signé',refuse:'❌ Refusé',annule:'🚫 Annulé'};
+
+async function bdcEnvoyerDocusign(){
+  const fields=bdcCollectFields();
+  const status=document.getElementById('bdc2-genererStatus');
+  const signerEmail=document.getElementById('bdc2-signerEmail').value.trim();
+  const signerMessage=document.getElementById('bdc2-signerMessage').value.trim();
+  if(!fields.entreprise||!fields.montantHT){status.textContent='Entreprise et montant HT sont requis.';return;}
+  if(!signerEmail){status.textContent="Email du signataire requis pour l'envoi DocuSign.";return;}
+  if(!confirm(`Envoyer le BDC de ${fields.entreprise} pour signature à ${signerEmail} ?`))return;
+  status.textContent='Génération du PDF + envoi DocuSign en cours… (10-20 s)';
+  try{
+    const r=await fetch(`${API}/bdc/docusign/send`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-commercial-id':commercialId},
+      body:JSON.stringify({...fields,signerEmail,signerMessage}),
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.error||'Erreur inconnue');
+    status.textContent=`BDC envoyé pour signature à ${signerEmail} ✓`;
+    bdcLoadEnvois();
+  }catch(e){
+    status.textContent='Erreur : '+e.message;
+  }
+}
+
+async function bdcLoadEnvois(){
+  const el=document.getElementById('bdc2-envois');
+  try{
+    const rows=await fetch(`${API}/bdc/docusign/envois`,{headers:{'x-commercial-id':commercialId}}).then(r=>r.json());
+    if(!Array.isArray(rows)||!rows.length){el.innerHTML='<div style="padding:8px 4px;color:var(--text-muted)">Aucun envoi DocuSign pour le moment.</div>';return;}
+    el.innerHTML=rows.map(r=>{
+      const date=(r.created_at||'').slice(0,16).replace('T',' ');
+      const montant=r.montant_ht?` · ${Number(r.montant_ht).toLocaleString('fr-FR')} € HT`:'';
+      return `<div class="ds-row">
+        <span class="ds-chip ${r.statut}">${DS_STATUT_LABEL[r.statut]||r.statut}</span>
+        <span style="font-weight:700">${r.entreprise||''}</span>
+        <span style="color:var(--text-dim)">${r.contact||''} &lt;${r.email||''}&gt;${montant}</span>
+        <span style="margin-left:auto;color:var(--text-muted);font-size:11px">${date}${r.commercial?` · ${r.commercial}`:''}</span>
+      </div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML=`<div style="padding:8px 4px;color:var(--red)">Erreur de chargement : ${e.message}</div>`;
+  }
+}
+
 // Pre-remplissage (depuis un creneau ou vide) + reset des champs non fournis,
 // pour ne jamais laisser trainer les valeurs d'un precedent BDC genere.
 function bdcPrefill(fields){
@@ -3467,12 +3540,15 @@ function bdcPrefill(fields){
   }
   bdcToggleDateMode();
   document.getElementById('bdc2-genererStatus').textContent='';
+  document.getElementById('bdc2-signerEmail').value = fields.signerEmail || '';
+  document.getElementById('bdc2-signerMessage').value = '';
   bdcLoadDefaults();
 }
 function bdcOnShow(){
   bdcInit();
   bdcScalePreview();
   bdcSchedulePreview();
+  bdcLoadEnvois();
 }
 async function openMesCreneauxModal(){
   document.getElementById('modal-title').textContent='Mes créneaux BDC';

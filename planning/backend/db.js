@@ -72,6 +72,25 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   );
+
+  -- Suivi des BDC envoyés pour signature via DocuSign (planning, vue BDC).
+  -- statut métier : envoye | signe | refuse | annule ; docusign_status = statut
+  -- brut DocuSign ('sent', 'completed', 'declined', 'voided'…), rafraîchi à la
+  -- demande depuis l'API (pas de webhook DocuSign Connect pour l'instant).
+  CREATE TABLE IF NOT EXISTS bdc_envois (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    envelope_id TEXT UNIQUE NOT NULL,
+    entreprise TEXT,
+    contact TEXT,
+    email TEXT,
+    template TEXT,
+    montant_ht REAL,
+    statut TEXT DEFAULT 'envoye',
+    docusign_status TEXT,
+    commercial TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 // Migration : lien Drive (pièce jointe du post) ajouté après coup — try/catch
 // au cas où social_posts existait déjà (déployé) sans cette colonne.

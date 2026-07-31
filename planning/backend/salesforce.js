@@ -102,7 +102,7 @@ async function getLeadForBdc(rawIdOrUrl) {
 
   const { accessToken, instanceUrl } = await getAuth();
   const soql = encodeURIComponent(
-    "SELECT Id, Company, FirstName, LastName, Name, Street, PostalCode, City, Owner.Name " +
+    "SELECT Id, Company, FirstName, LastName, Name, Email, Street, PostalCode, City, Owner.Name " +
     "FROM Lead WHERE Id = '" + leadId + "'"
   );
   const res = await fetch(`${instanceUrl}/services/data/v59.0/query?q=${soql}`, {
@@ -120,6 +120,7 @@ async function getLeadForBdc(rawIdOrUrl) {
       contact: lead.Name || [lead.FirstName, lead.LastName].filter(Boolean).join(' '),
       adresse,
       respEmission: (lead.Owner && lead.Owner.Name) || '',
+      email: lead.Email || '',
     },
   };
 }
