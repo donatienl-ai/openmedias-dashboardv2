@@ -3501,7 +3501,12 @@ async function bdcEnvoyerDocusign(){
       return;
     }
     if(!r.ok)throw new Error(d.error||'Erreur inconnue');
-    status.textContent=`BDC envoyé pour signature à ${signerEmail} ✓`;
+    // Le serveur pose aussi le créneau jaune "BDC en attente" sur le planning
+    // de diffusion (ou le signale s'il existait déjà / s'il est sans date).
+    let msg=`BDC envoyé pour signature à ${signerEmail} ✓`;
+    if(d.emission&&d.emission.statut==='bdc_attente')msg+=d.emission.cree?' — créneau jaune « BDC en attente » ajouté au planning':' — créneau déjà présent sur le planning';
+    else if(d.emission&&d.emission.statut==='a_programmer')msg+=' — ajouté dans « À programmer » (pas de date précise)';
+    status.textContent=msg;
     bdcLoadEnvois();
   }catch(e){
     status.textContent='Erreur : '+e.message;

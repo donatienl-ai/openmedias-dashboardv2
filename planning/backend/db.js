@@ -124,6 +124,10 @@ try { db.exec('ALTER TABLE commercial_users ADD COLUMN docusign_user_id TEXT'); 
 // Migration : userId DocuSign de l'expéditeur, stocké sur chaque envoi pour
 // rafraîchir le statut de l'enveloppe avec SON token (c'est son enveloppe).
 try { db.exec('ALTER TABLE bdc_envois ADD COLUMN sender_ds_user_id TEXT'); } catch(e) {}
+// Migration : émission créée sur le planning à l'envoi du BDC (créneau jaune
+// "BDC en attente") — le lien permet d'éviter les doublons et, plus tard,
+// d'automatiser des transitions de statut.
+try { db.exec('ALTER TABLE bdc_envois ADD COLUMN emission_id INTEGER'); } catch(e) {}
 
 // ── RÔLES + ÉQUIPES DE VENTE (login unique, fusion OpenDashboard) ────────────
 // role : 'commercial' (ses seuls chiffres) | 'manager' (chiffres de son équipe)

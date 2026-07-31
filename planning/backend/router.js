@@ -819,6 +819,50 @@ const docusignSend = require('./docusignSend');
 
 const DS_STATUT_MAP = { sent: 'envoye', delivered: 'envoye', completed: 'signe', declined: 'refuse', voided: 'annule' };
 
+// Template BDC -> média du planning de diffusion (noms de SLOTS_PAR_MEDIA).
+// Sert à poser le créneau jaune "BDC en attente" sur le bon média à l'envoi.
+const BDC_TEMPLATE_MEDIA = {
+  'figaro-48h-hp': 'Le Figaro HP + HP Eco',
+  'bfm-business-vision': 'BFM Business 1&2',
+  'capital-emission': 'Capital',
+};
+
+// À l'envoi DocuSign, le BDC apparaît aussi sur le planning de diffusion en
+// jaune (bdc_attente) — même rendu qu'un créneau bloqué à la main. Dédupliqué :
+// si le commercial avait déjà bloqué ce créneau (même entreprise/média/date),
+// on le réutilise au lieu d'en créer un second. Sans date précise (période
+// libre, ou jour non diffusable), l'émission part en "à programmer" avec une
+// note plutôt que d'être invisible faute de date.
+function upsertEmissionPourBdcEnvoye({ entreprise, templateKey, dateDiffusion, montantHT, commercial }) {
+  const media = BDC_TEMPLATE_MEDIA[templateKey] || null;
+  if (!media) return { id: null, statut: null, cree: false };
+
+  const dateValide = /^\d{4}-\d{2}-\d{2}$/.test(dateDiffusion || '') && !jourNonDiffusable(dateDiffusion)
+    ? dateDiffusion : null;
+
+  const existante = db.prepare(`
+    SELECT id FROM emissions
+    WHERE statut='bdc_attente' AND LOWER(TRIM(entreprise))=LOWER(TRIM(?)) AND media=? AND commercial=?
+      AND COALESCE(date_diffusion,'') = COALESCE(?, '')
+  `).get(entreprise, media, commercial.nom, dateValide);
+  if (existante) return { id: existante.id, statut: 'bdc_attente', cree: false };
+
+  const equipe = commercial.equipe_edito_id
+    ? db.prepare('SELECT nom FROM equipes_edito WHERE id=?').get(commercial.equipe_edito_id)
+    : null;
+  const statutEm = dateValide ? 'bdc_attente' : 'a_programmer';
+  const note = dateValide ? null
+    : '📌 BDC envoyé via DocuSign — date de diffusion à caler (période libre ou jour non diffusable)';
+
+  const r = db.prepare(`
+    INSERT INTO emissions (entreprise,media,date_diffusion,date_diffusion_originale,commercial,resp_edit,statut,montant,notes)
+    VALUES (?,?,?,?,?,?,?,?,?)
+  `).run(entreprise, media, dateValide, dateValide, commercial.nom, equipe ? equipe.nom : null,
+         statutEm, Number(montantHT || 0), note);
+  console.log(`[BDC-DOCUSIGN] créneau planning ${statutEm} id=${r.lastInsertRowid} — ${entreprise} / ${media} / ${dateValide || 'sans date'}`);
+  return { id: r.lastInsertRowid, statut: statutEm, cree: true };
+}
+
 app.post('/api/bdc/docusign/send', requireCommercial, async (req, res) => {
   try {
     const signerEmail = String(req.body.signerEmail || '').trim();
@@ -859,12 +903,27 @@ app.post('/api/bdc/docusign/send', requireCommercial, async (req, res) => {
       senderUserId,
     });
 
-    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial, sender_ds_user_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    // Créneau jaune "BDC en attente" sur le planning de diffusion (dédupliqué).
+    // Ne doit JAMAIS faire échouer l'envoi : le BDC est déjà parti chez DocuSign.
+    let emission = { id: null, statut: null, cree: false };
+    try {
+      emission = upsertEmissionPourBdcEnvoye({
+        entreprise: String(req.body.entreprise || '').trim(),
+        templateKey,
+        dateDiffusion: String(req.body.dateDiffusion || ''),
+        montantHT: req.body.montantHT,
+        commercial: req.commercial,
+      });
+    } catch (e) {
+      console.warn('[BDC-DOCUSIGN] créneau planning non créé:', e.message);
+    }
+
+    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial, sender_ds_user_id, emission_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
       .run(envelopeId, String(req.body.entreprise || '').trim(), signerName, signerEmail,
-           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom, senderUserId);
+           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom, senderUserId, emission.id);
     console.log(`[BDC-DOCUSIGN] enveloppe ${envelopeId} envoyée par ${req.commercial.nom} (depuis son compte) — ${req.body.entreprise} → ${signerEmail}`);
-    res.json({ ok: true, envelopeId });
+    res.json({ ok: true, envelopeId, emission });
   } catch (e) {
     // Consentement individuel DocuSign pas encore accordé : le front affiche
     // le lien d'autorisation (à ouvrir une seule fois, connecté à SON DocuSign).
