@@ -43,8 +43,9 @@ function assertConfigured() {
 /** URL d'autorisation à faire ouvrir UNE FOIS par chaque commercial (consentement JWT). */
 function buildConsentUrl() {
   // Doit correspondre EXACTEMENT à une Redirect URI enregistrée dans l'app
-  // DocuSign (Settings > Apps and Keys > [app] > Redirect URIs).
-  const redirect = process.env.DOCUSIGN_REDIRECT_URI || 'https://account.docusign.com/';
+  // DocuSign (Settings > Apps and Keys > [app] > Redirect URIs) — le défaut
+  // ci-dessous est celle qui y est enregistrée pour OpenMedias.
+  const redirect = process.env.DOCUSIGN_REDIRECT_URI || 'https://openmedias-sales-dashboard.onrender.com';
   const params = new URLSearchParams({
     response_type: 'code',
     scope: 'signature impersonation',
