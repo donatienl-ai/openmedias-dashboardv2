@@ -980,7 +980,7 @@ td { padding: 10px 14px; font-size: 13px; }
           <div class="form-group"><label class="form-label">Email du signataire</label><input class="form-input" type="email" id="bdc2-signerEmail" placeholder="jean.dupont@acme.fr"></div>
           <div class="form-group"><label class="form-label">Message (optionnel)</label><textarea class="form-textarea" id="bdc2-signerMessage" rows="2" placeholder="Bonjour, veuillez trouver le bon de commande à signer…"></textarea></div>
           <button type="button" class="btn-secondary" style="width:100%;padding:12px;font-size:13px" onclick="bdcEnvoyerDocusign()">Envoyer via DocuSign</button>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Le PDF envoyé est identique à celui du bouton « Générer le PDF ». La signature se place automatiquement sur le bloc « Signature du client ».</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Le PDF envoyé est identique à celui du bouton « Générer le PDF ». L'envoi part de TON compte DocuSign (dossier « Envoyés », email en ton nom) — une autorisation te sera demandée une seule fois.</div>
         </div>
       </div>
 
@@ -1284,6 +1284,12 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
     // Rétroplanning communication : édito ET communication (pas sales/commercial).
     if(role==='edit'||role==='com')document.querySelectorAll('.content-only').forEach(el=>el.style.display='');
   }
+  // Générateur de BDC : tout compte de commercial_users (sales, manager, ET
+  // admin — l'admin pilote l'outil et doit pouvoir générer/envoyer des BDC
+  // sans se créer un faux compte "sales"). L'édito au PIN, sans commercialId,
+  // reste exclu : les routes /api/bdc/* exigent un compte (requireCommercial).
+  // Les boutons de BLOCAGE de créneau, eux, restent réservés aux sales.
+  if(commercialId)document.getElementById('nav-bdc').style.display='';
   // Lien direct vers Paramètres depuis l'onglet du dashboard (/planning?view=parametres).
   if(isAccountAdmin && new URLSearchParams(window.location.search).get('view')==='parametres'){
     switchView('parametres');
@@ -3487,6 +3493,13 @@ async function bdcEnvoyerDocusign(){
       body:JSON.stringify({...fields,signerEmail,signerMessage}),
     });
     const d=await r.json().catch(()=>({}));
+    // Consentement DocuSign individuel manquant : le commercial autorise
+    // l'application UNE FOIS (connecté à son propre DocuSign), puis relance.
+    if(r.status===428&&d.consentUrl){
+      status.innerHTML=`Première utilisation : <a href="${d.consentUrl}" target="_blank" rel="noopener" style="color:var(--accent);font-weight:700">autorise DocuSign</a> (connecté à ton compte), puis relance l'envoi.`;
+      window.open(d.consentUrl,'_blank','noopener');
+      return;
+    }
     if(!r.ok)throw new Error(d.error||'Erreur inconnue');
     status.textContent=`BDC envoyé pour signature à ${signerEmail} ✓`;
     bdcLoadEnvois();

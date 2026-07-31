@@ -829,6 +829,25 @@ app.post('/api/bdc/docusign/send', requireCommercial, async (req, res) => {
     if (!signerName) return res.status(400).json({ error: 'Nom du signataire manquant (champ Contact)' });
     if (!String(req.body.entreprise || '').trim()) return res.status(400).json({ error: 'Entreprise manquante' });
 
+    // L'enveloppe part du compte DocuSign DU COMMERCIAL : on résout son userId
+    // DocuSign depuis l'email de son compte planning (une fois, puis stocké).
+    let senderUserId = req.commercial.docusign_user_id;
+    if (!senderUserId) {
+      try {
+        senderUserId = await docusignSend.resolveDocuSignUserId(req.commercial.email);
+        if (senderUserId) {
+          db.prepare('UPDATE commercial_users SET docusign_user_id=? WHERE id=?').run(senderUserId, req.commercial.id);
+        }
+      } catch (e) {
+        console.warn('[BDC-DOCUSIGN] résolution userId:', e.message);
+      }
+      if (!senderUserId) {
+        return res.status(400).json({
+          error: `Aucun compte DocuSign actif trouvé pour ${req.commercial.email}. Demande à Donatien de vérifier que tu as un accès DocuSign avec cet email.`,
+        });
+      }
+    }
+
     const templateKey = req.body.templateKey || 'figaro-48h-hp';
     const pdf = await renderBdcPdf(templateKey, bdcFieldsFromInput(req.body));
     const { envelopeId, status } = await docusignSend.sendBdcEnvelope({
@@ -837,15 +856,21 @@ app.post('/api/bdc/docusign/send', requireCommercial, async (req, res) => {
       signerName,
       signerEmail,
       message: String(req.body.signerMessage || '').trim() || undefined,
+      senderUserId,
     });
 
-    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial)
-                VALUES (?,?,?,?,?,?,?,?,?)`)
+    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial, sender_ds_user_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?)`)
       .run(envelopeId, String(req.body.entreprise || '').trim(), signerName, signerEmail,
-           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom);
-    console.log(`[BDC-DOCUSIGN] enveloppe ${envelopeId} envoyée par ${req.commercial.nom} — ${req.body.entreprise} → ${signerEmail}`);
+           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom, senderUserId);
+    console.log(`[BDC-DOCUSIGN] enveloppe ${envelopeId} envoyée par ${req.commercial.nom} (depuis son compte) — ${req.body.entreprise} → ${signerEmail}`);
     res.json({ ok: true, envelopeId });
   } catch (e) {
+    // Consentement individuel DocuSign pas encore accordé : le front affiche
+    // le lien d'autorisation (à ouvrir une seule fois, connecté à SON DocuSign).
+    if (e.code === 'CONSENT_REQUIRED') {
+      return res.status(428).json({ error: 'consent_required', consentUrl: e.consentUrl });
+    }
     console.error('[BDC-DOCUSIGN]', e);
     res.status(500).json({ error: String(e.message || e) });
   }
@@ -865,7 +890,9 @@ app.get('/api/bdc/docusign/envois', requireCommercial, async (req, res) => {
   for (const r of rows) {
     if (r.statut !== 'envoye' || refreshed >= 10) continue;
     try {
-      const { status } = await docusignSend.getEnvelopeStatus(r.envelope_id);
+      // Le statut se lit avec le token de l'expéditeur (c'est son enveloppe) ;
+      // à défaut (anciens envois centralisés), avec le compte central.
+      const { status } = await docusignSend.getEnvelopeStatus(r.envelope_id, r.sender_ds_user_id || undefined);
       const mapped = DS_STATUT_MAP[status] || r.statut;
       if (mapped !== r.statut || status !== r.docusign_status) upd.run(mapped, status, r.id);
       r.statut = mapped; r.docusign_status = status;

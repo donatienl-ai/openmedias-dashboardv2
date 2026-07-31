@@ -117,6 +117,13 @@ try { db.exec('ALTER TABLE commercial_users ADD COLUMN reset_token_expires TEXT'
 // Migration: flag admin (fusion OpenDashboard) — un commercial admin voit les
 // chiffres de toute l'équipe sur le dashboard, au lieu de ses seuls chiffres.
 try { db.exec('ALTER TABLE commercial_users ADD COLUMN is_admin INTEGER DEFAULT 0'); } catch(e) {}
+// Migration : userId DocuSign du commercial (GUID), résolu automatiquement
+// depuis l'email de son compte au premier envoi de BDC (docusignSend.js) —
+// chaque commercial envoie ses enveloppes depuis SON compte DocuSign.
+try { db.exec('ALTER TABLE commercial_users ADD COLUMN docusign_user_id TEXT'); } catch(e) {}
+// Migration : userId DocuSign de l'expéditeur, stocké sur chaque envoi pour
+// rafraîchir le statut de l'enveloppe avec SON token (c'est son enveloppe).
+try { db.exec('ALTER TABLE bdc_envois ADD COLUMN sender_ds_user_id TEXT'); } catch(e) {}
 
 // ── RÔLES + ÉQUIPES DE VENTE (login unique, fusion OpenDashboard) ────────────
 // role : 'commercial' (ses seuls chiffres) | 'manager' (chiffres de son équipe)
