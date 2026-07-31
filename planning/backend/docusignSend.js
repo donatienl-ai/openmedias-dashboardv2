@@ -181,24 +181,28 @@ async function sendBdcEnvelope({ pdfBuffer, entreprise, signerName, signerEmail,
         recipientId: '1',
         routingOrder: '1',
         tabs: {
-          // Ancrage sur « Signature du client … » (voir note en tête de fichier)
+          // Ancrage sur « Signature du client … » (voir note en tête de fichier).
+          // Le bloc est CENTRÉ dans la page : un XOffset trop grand part du
+          // début de l'ancre et déborde de la page A4 (erreur DocuSign 400
+          // "User Offset exceeds the page boundaries" — vu en prod avec 240).
+          // XOffset reste donc à 0 et les champs s'empilent verticalement.
           signHereTabs: [{
             anchorString: ANCHOR_SIGNATURE,
             anchorUnits: 'pixels',
             anchorXOffset: '0',
             anchorYOffset: '28',
           }],
-          dateSignedTabs: [{
-            anchorString: ANCHOR_SIGNATURE,
-            anchorUnits: 'pixels',
-            anchorXOffset: '240',
-            anchorYOffset: '34',
-          }],
           fullNameTabs: [{
             anchorString: ANCHOR_SIGNATURE,
             anchorUnits: 'pixels',
             anchorXOffset: '0',
-            anchorYOffset: '60',
+            anchorYOffset: '98',
+          }],
+          dateSignedTabs: [{
+            anchorString: ANCHOR_SIGNATURE,
+            anchorUnits: 'pixels',
+            anchorXOffset: '0',
+            anchorYOffset: '128',
           }],
         },
       }],
