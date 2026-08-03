@@ -128,6 +128,9 @@ try { db.exec('ALTER TABLE bdc_envois ADD COLUMN sender_ds_user_id TEXT'); } cat
 // "BDC en attente") — le lien permet d'éviter les doublons et, plus tard,
 // d'automatiser des transitions de statut.
 try { db.exec('ALTER TABLE bdc_envois ADD COLUMN emission_id INTEGER'); } catch(e) {}
+// Migration : date de diffusion saisie sur le BDC au moment de l'envoi — sert
+// à recaler le créneau planning à la bonne date et aux réparations.
+try { db.exec('ALTER TABLE bdc_envois ADD COLUMN date_diffusion TEXT'); } catch(e) {}
 
 // ── RÔLES + ÉQUIPES DE VENTE (login unique, fusion OpenDashboard) ────────────
 // role : 'commercial' (ses seuls chiffres) | 'manager' (chiffres de son équipe)

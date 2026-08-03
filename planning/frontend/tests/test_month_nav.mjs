@@ -150,11 +150,15 @@ async function testHeaderDrivesActiveCalendar() {
      socialNext !== socialStart, `${socialStart} -> ${socialNext}`);
   ok("social : la grille est bien re-rendue", gridAfter !== gridBefore);
 
-  // le post de juillet ne doit plus être visible en août, celui d'août oui
+  // le post de juillet ne doit plus être visible en août, celui d'août oui.
+  // Date épinglée : ce contrôle comparait "le mois prochain" aux deux seuls
+  // posts du jeu de test (juillet/août 2026) — il cassait donc tout seul dès
+  // septembre. On force août 2026, mois qui contient un post, point.
   V(win, "switchView('social')");
   await new Promise((r) => setTimeout(r, 60));
+  V(win, "socialCalendarDate = new Date(2026, 7, 1)");
+  V(win, "renderSocialCalendar()");
   ok("social : le mois affiché contient bien les posts du mois",
-     win.document.getElementById("social-cal-grid").innerHTML.includes("Post de juillet") ||
      win.document.getElementById("social-cal-grid").innerHTML.includes("Post d'aout"));
 
   // --- indépendance des deux états ---

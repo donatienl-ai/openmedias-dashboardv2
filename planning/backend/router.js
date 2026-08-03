@@ -832,32 +832,38 @@ const BDC_TEMPLATE_MEDIA = {
 // si le commercial avait déjà bloqué ce créneau (même entreprise/média/date),
 // on le réutilise au lieu d'en créer un second. Sans date précise (période
 // libre, ou jour non diffusable), l'émission part en "à programmer" avec une
-// note plutôt que d'être invisible faute de date.
+// note et une DATE PROVISOIRE (aujourd'hui) — même convention que le webhook
+// Salesforce, car date_diffusion est NOT NULL (un INSERT à NULL échouait
+// silencieusement : bug vu en prod, aucun créneau créé).
 function upsertEmissionPourBdcEnvoye({ entreprise, templateKey, dateDiffusion, montantHT, commercial }) {
   const media = BDC_TEMPLATE_MEDIA[templateKey] || null;
   if (!media) return { id: null, statut: null, cree: false };
 
+  const entNorm = entreprise.toLowerCase().trim();
   const dateValide = /^\d{4}-\d{2}-\d{2}$/.test(dateDiffusion || '') && !jourNonDiffusable(dateDiffusion)
     ? dateDiffusion : null;
 
-  const existante = db.prepare(`
-    SELECT id FROM emissions
-    WHERE statut='bdc_attente' AND LOWER(TRIM(entreprise))=LOWER(TRIM(?)) AND media=? AND commercial=?
-      AND COALESCE(date_diffusion,'') = COALESCE(?, '')
-  `).get(entreprise, media, commercial.nom, dateValide);
-  if (existante) return { id: existante.id, statut: 'bdc_attente', cree: false };
+  // Dédup : créneau jaune existant (date précise), ou entrée "à programmer"
+  // déjà créée par un envoi DocuSign précédent (repérée par sa note).
+  const existante = dateValide
+    ? db.prepare(`SELECT id FROM emissions WHERE statut='bdc_attente' AND LOWER(TRIM(entreprise))=? AND media=? AND commercial=? AND date_diffusion=?`)
+        .get(entNorm, media, commercial.nom, dateValide)
+    : db.prepare(`SELECT id FROM emissions WHERE statut='a_programmer' AND LOWER(TRIM(entreprise))=? AND media=? AND commercial=? AND notes LIKE '📌 BDC envoyé via DocuSign%'`)
+        .get(entNorm, media, commercial.nom);
+  if (existante) return { id: existante.id, statut: dateValide ? 'bdc_attente' : 'a_programmer', cree: false };
 
   const equipe = commercial.equipe_edito_id
     ? db.prepare('SELECT nom FROM equipes_edito WHERE id=?').get(commercial.equipe_edito_id)
     : null;
   const statutEm = dateValide ? 'bdc_attente' : 'a_programmer';
+  const dateBdd = dateValide || new Date().toISOString().slice(0, 10); // provisoire (NOT NULL)
   const note = dateValide ? null
     : '📌 BDC envoyé via DocuSign — date de diffusion à caler (période libre ou jour non diffusable)';
 
   const r = db.prepare(`
     INSERT INTO emissions (entreprise,media,date_diffusion,date_diffusion_originale,commercial,resp_edit,statut,montant,notes)
     VALUES (?,?,?,?,?,?,?,?,?)
-  `).run(entreprise, media, dateValide, dateValide, commercial.nom, equipe ? equipe.nom : null,
+  `).run(entreprise, media, dateBdd, dateBdd, commercial.nom, equipe ? equipe.nom : null,
          statutEm, Number(montantHT || 0), note);
   console.log(`[BDC-DOCUSIGN] créneau planning ${statutEm} id=${r.lastInsertRowid} — ${entreprise} / ${media} / ${dateValide || 'sans date'}`);
   return { id: r.lastInsertRowid, statut: statutEm, cree: true };
@@ -918,10 +924,11 @@ app.post('/api/bdc/docusign/send', requireCommercial, async (req, res) => {
       console.warn('[BDC-DOCUSIGN] créneau planning non créé:', e.message);
     }
 
-    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial, sender_ds_user_id, emission_id)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial, sender_ds_user_id, emission_id, date_diffusion)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(envelopeId, String(req.body.entreprise || '').trim(), signerName, signerEmail,
-           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom, senderUserId, emission.id);
+           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom, senderUserId, emission.id,
+           String(req.body.dateDiffusion || '').trim() || null);
     console.log(`[BDC-DOCUSIGN] enveloppe ${envelopeId} envoyée par ${req.commercial.nom} (depuis son compte) — ${req.body.entreprise} → ${signerEmail}`);
     res.json({ ok: true, envelopeId, emission });
   } catch (e) {
@@ -946,6 +953,26 @@ app.get('/api/bdc/docusign/envois', requireCommercial, async (req, res) => {
 
   const upd = db.prepare("UPDATE bdc_envois SET statut=?, docusign_status=?, updated_at=datetime('now') WHERE id=?");
   let refreshed = 0;
+
+  // Réparation : les envois sans emission_id (faits avant la création
+  // automatique du créneau, ou dont la création a échoué — ex. bug du INSERT
+  // à date NULL) se voient recréer leur créneau ici, de façon idempotente
+  // grâce à la déduplication d'upsertEmissionPourBdcEnvoye.
+  const updEmission = db.prepare('UPDATE bdc_envois SET emission_id=? WHERE id=?');
+  for (const r of rows) {
+    if (r.emission_id || !r.template || !r.entreprise) continue;
+    try {
+      const compte = db.prepare('SELECT * FROM commercial_users WHERE nom=?').get(r.commercial) || { nom: r.commercial };
+      const em = upsertEmissionPourBdcEnvoye({
+        entreprise: r.entreprise, templateKey: r.template,
+        dateDiffusion: r.date_diffusion || '', montantHT: r.montant_ht, commercial: compte,
+      });
+      if (em.id) updEmission.run(em.id, r.id);
+    } catch (e) {
+      console.warn(`[BDC-DOCUSIGN] réparation créneau envoi ${r.id}: ${e.message}`);
+    }
+  }
+
   for (const r of rows) {
     if (r.statut !== 'envoye' || refreshed >= 10) continue;
     try {
