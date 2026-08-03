@@ -61,6 +61,19 @@ const TEMPLATES = {
   },
 };
 
+// Registre genere depuis les PDF sources (_bdc_work/generate_templates.py) :
+// 47 templates supplementaires avec bannieres liees. Les chemins y sont
+// relatifs a ce dossier (bdc/) -> conversion en absolu au moment du merge.
+const GENERATED = require('./templates.generated');
+for (const [key, cfg] of Object.entries(GENERATED)) {
+  if (TEMPLATES[key]) continue; // ne jamais ecraser un template maintenu a la main
+  TEMPLATES[key] = {
+    ...cfg,
+    template: path.join(__dirname, cfg.template),
+    headerImage: cfg.headerImage ? path.join(__dirname, cfg.headerImage) : null,
+  };
+}
+
 function eur(n) {
   return new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
 }
@@ -114,7 +127,9 @@ function compileBdcHtml(templateKey, fields = {}) {
     delaiReglementLigne3: fields.delaiReglementLigne3 || '',
     delaiReglementLigne4: fields.delaiReglementLigne4 || '',
     totalNetHT: eur(montantHT),
-    tvaLabel: noTva ? 'TVA (exoneration, en €) :' : 'TVA 20% (en €) :',
+    tvaLabel: cfg.lang === 'en'
+      ? (noTva ? 'VAT (exemption, in €) :' : 'VAT 20% (in €) :')
+      : (noTva ? 'TVA (exoneration, en €) :' : 'TVA 20% (en €) :'),
     tva: eur(tva),
     montantTTC: eur(ttc),
   });

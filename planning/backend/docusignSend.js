@@ -23,8 +23,16 @@ const crypto = require('crypto');
 
 const OAUTH_HOST = () => process.env.DOCUSIGN_OAUTH_HOST || 'account.docusign.com';
 
-// Texte d'ancrage présent dans les 3 templates BDC (1re ligne du bloc .signature)
-const ANCHOR_SIGNATURE = 'Signature du client';
+// Textes d'ancrage de la mention de signature, présents dans les templates BDC
+// (1re ligne du bloc .signature) : FR + les deux dialectes EN des templates
+// générés depuis les PDF sources. Chaque ancre est envoyée avec
+// anchorIgnoreIfNotPresent pour qu'un template ne contenant qu'une seule des
+// variantes ignore les autres sans erreur.
+const ANCHORS_SIGNATURE = [
+  'Signature du client',
+  'Client’s signature',   // dialecte EN A (apostrophe courbe U+2019)
+  "Customer's signature", // dialecte EN B (apostrophe droite)
+];
 
 // Cache des tokens par utilisateur impersonné (sub -> {token, baseUri, accountId, expiry})
 const authCache = new Map();
@@ -189,24 +197,27 @@ async function sendBdcEnvelope({ pdfBuffer, entreprise, signerName, signerEmail,
           // nom/date dans les articles. Valeurs calibrées sur un envoi réel :
           // signature dans le blanc sous la mention, nom + date sur la même
           // ligne en dessous (XOffset 120 passe, 240 non).
-          signHereTabs: [{
-            anchorString: ANCHOR_SIGNATURE,
+          signHereTabs: ANCHORS_SIGNATURE.map((anchorString) => ({
+            anchorString,
             anchorUnits: 'pixels',
             anchorXOffset: '0',
             anchorYOffset: '58',
-          }],
-          fullNameTabs: [{
-            anchorString: ANCHOR_SIGNATURE,
+            anchorIgnoreIfNotPresent: 'true',
+          })),
+          fullNameTabs: ANCHORS_SIGNATURE.map((anchorString) => ({
+            anchorString,
             anchorUnits: 'pixels',
             anchorXOffset: '0',
             anchorYOffset: '92',
-          }],
-          dateSignedTabs: [{
-            anchorString: ANCHOR_SIGNATURE,
+            anchorIgnoreIfNotPresent: 'true',
+          })),
+          dateSignedTabs: ANCHORS_SIGNATURE.map((anchorString) => ({
+            anchorString,
             anchorUnits: 'pixels',
             anchorXOffset: '120',
             anchorYOffset: '92',
-          }],
+            anchorIgnoreIfNotPresent: 'true',
+          })),
         },
       }],
     },

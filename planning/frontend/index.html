@@ -3308,9 +3308,13 @@ function genererBdcVierge(){
 // (/api/bdc/...) avec l'auth commerciale existante (header x-commercial-id) --
 // aucune redirection vers un autre domaine.
 let bdcInitialized = false;
+// Valeur demandée par bdcPrefill en attendant que la liste complète des
+// templates soit chargée (bdcLoadTemplates est asynchrone).
+let bdcPendingTemplateKey = null;
 function bdcInit(){
   if(bdcInitialized)return;
   bdcInitialized = true;
+  bdcLoadTemplates();
 
   const dateLibreCheck = document.getElementById('bdc2-dateLibreCheck');
   const datePrecise = document.getElementById('bdc2-datePrecise');
@@ -3334,6 +3338,7 @@ function bdcInit(){
   datePrecise.addEventListener('input', bdcSchedulePreview);
   dateLibre.addEventListener('input', bdcSchedulePreview);
 
+  document.getElementById('bdc2-template').addEventListener('change', ()=>{bdcPendingTemplateKey=null;});
   document.getElementById('bdc2-template').addEventListener('change', bdcLoadDefaults);
   ['bdc2-entreprise','bdc2-contact','bdc2-adresse','bdc2-thematique','bdc2-respEmission',
    'bdc2-montantHT','bdc2-dateDuJour','bdc2-noTva','bdc2-delai1','bdc2-delai2','bdc2-delai3','bdc2-delai4']
@@ -3390,6 +3395,30 @@ async function bdcImporterSalesforce(){
     status.textContent='Erreur : '+e.message;
   }
 }
+// Charge la liste complète des templates (les 3 historiques + les 47 générés
+// depuis les PDF sources) et reconstruit le select avec un groupe par média.
+// Les 3 options codées en dur dans le HTML servent de fallback si l'API échoue.
+async function bdcLoadTemplates(){
+  const sel=document.getElementById('bdc2-template');
+  try{
+    const list=await fetch(`${API}/bdc/templates`,{headers:{'x-commercial-id':commercialId}}).then(r=>r.json());
+    if(!Array.isArray(list)||!list.length)return;
+    const current=bdcPendingTemplateKey||sel.value||'figaro-48h-hp';
+    sel.innerHTML='';
+    const groups={};
+    list.forEach(t=>{
+      if(!groups[t.group]){groups[t.group]=document.createElement('optgroup');groups[t.group].label=t.group;sel.appendChild(groups[t.group]);}
+      const o=document.createElement('option');
+      o.value=t.key;
+      o.textContent=t.label+(t.lang==='en'?' (EN)':'');
+      groups[t.group].appendChild(o);
+    });
+    sel.value=current;
+    if(sel.value!==current)sel.value='figaro-48h-hp';
+    bdcPendingTemplateKey=null;
+  }catch(e){/* fallback : les 3 options en dur restent */}
+}
+
 async function bdcLoadDefaults(){
   const templateKey=document.getElementById('bdc2-template').value;
   try{
@@ -3537,7 +3566,8 @@ async function bdcLoadEnvois(){
 // pour ne jamais laisser trainer les valeurs d'un precedent BDC genere.
 function bdcPrefill(fields){
   bdcInit();
-  document.getElementById('bdc2-template').value = fields.templateKey || 'figaro-48h-hp';
+  bdcPendingTemplateKey = fields.templateKey || 'figaro-48h-hp';
+  document.getElementById('bdc2-template').value = bdcPendingTemplateKey;
   document.getElementById('bdc2-entreprise').value = fields.entreprise || '';
   document.getElementById('bdc2-contact').value = fields.contact || '';
   document.getElementById('bdc2-adresse').value = fields.adresse || '';

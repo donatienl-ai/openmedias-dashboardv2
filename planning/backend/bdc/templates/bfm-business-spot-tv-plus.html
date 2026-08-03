@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Bon de réservation — BFM Business — Spot TV (formule +)</title>
+<style>
+@page { size: A4; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #101010; }
+.page { width: 210mm; height: 297mm; overflow: hidden; display: flex; flex-direction: column; }
+.header-img { width: 100%; display: block; flex: 0 0 auto; }
+.content { padding: 2mm 7mm 0 7mm; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.intro { padding: 0 31mm; }
+.title-bar { background: #1A4999; color: #fff; text-align: center; font-weight: 800; font-size: 18px; letter-spacing: 0.5px; padding: 8px 0; margin: 3mm 0 4mm 0; }
+.field-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3mm; }
+.field-row .label { font-weight: 700; white-space: nowrap; font-size: 12px; }
+.field-row .value { flex: 1; border-bottom: 1.5px dotted #444; font-size: 12px; padding-bottom: 2px; min-height: 13px; }
+.fields-mid { margin-top: 3mm; }
+table.prestation { width: 100%; border-collapse: collapse; margin-top: 4mm; border: 1.5px solid #1A4999; }
+table.prestation th { background: #1A4999; color: #fff; padding: 6px 10px; font-size: 12px; font-weight: 700; text-align: center; }
+table.prestation td { border: 1px solid #1A4999; padding: 6px 10px; font-size: 10.5px; vertical-align: top; }
+table.prestation td.media-name { font-weight: 800; text-align: center; vertical-align: middle; font-size: 12.5px; width: 16%; }
+table.prestation td.amount { text-align: center; vertical-align: middle; font-size: 12px; width: 17%; }
+td.amount .amount-num { display: inline-block; min-width: 55px; border-bottom: 1.5px dotted #444; padding-bottom: 2px; text-align: center; }
+.description { line-height: 1.3; }
+.description .desc-item { margin: 0; }
+.bottom-row { display: flex; justify-content: space-between; gap: 16mm; margin-top: 4mm; }
+.delai { flex: 1; }
+.delai .label { font-weight: 700; font-size: 12px; margin-bottom: 2mm; display: block; }
+.delai .dotted-line { border-bottom: 1px dotted #444; min-height: 4mm; font-size: 10px; line-height: 1.2; padding-bottom: 1px; overflow-wrap: break-word; }
+.totals { flex: 1; }
+.totals .field-row .label { font-size: 12.5px; }
+.signature { color: #1A4999; font-weight: 700; text-align: center; margin-top: 5mm; font-size: 11px; }
+.legal { font-size: 6.1px; text-align: justify; line-height: 1.3; color: #222; margin-top: auto; padding: 0 1mm 2mm 1mm; }
+.footer { flex: 0 0 auto; width: 100%; min-width: 0; background: #103B99; color: #fff; text-align: center; font-size: 9px; font-weight: 700; padding: 4px 0; line-height: 1.4; word-wrap: break-word; }
+</style>
+</head>
+<body>
+<div class="page">
+<img class="header-img" src="{{headerImage}}" alt="" />
+<div class="content">
+<div class="intro">
+<div class="title-bar">BON DE RÉSERVATION</div>
+<div class="fields-top">
+<div class="field-row"><span class="label">ENTREPRISE :</span><span class="value">{{entreprise}}</span></div>
+<div class="field-row"><span class="label">En date du :</span><span class="value">{{dateDuJour}}</span></div>
+<div class="field-row"><span class="label">A l’attention de :</span><span class="value">{{contact}}</span></div>
+<div class="field-row"><span class="label">Adresse :</span><span class="value">{{adresse}}</span></div>
+</div>
+</div>
+<div class="fields-mid">
+<div class="field-row"><span class="label">Thématique :</span><span class="value">{{thematique}}</span></div>
+<div class="field-row"><span class="label">Personne à contacter :</span><span class="value">{{personneContact}}</span></div>
+<div class="field-row"><span class="label">Date de diffusion :</span><span class="value">{{dateDiffusion}}</span></div>
+<div class="field-row"><span class="label">Responsable d’émission :</span><span class="value">{{respEmission}}</span></div>
+</div>
+<table class="prestation">
+<thead>
+<tr><th>Nom / Code</th><th>Description</th><th>PU HT</th><th>Total HT</th></tr>
+</thead>
+<tbody>
+<tr>
+<td class="media-name">BFM BUSINESS</td>
+<td class="description">
+{{#each descriptionItems}}<div class="desc-item">*{{{this}}}</div>
+{{/each}}</td>
+<td class="amount"><span class="amount-num">{{puHT}}</span> €</td>
+<td class="amount"><span class="amount-num">{{totalHT}}</span> €</td>
+</tr>
+</tbody>
+</table>
+<div class="bottom-row">
+<div class="delai">
+<span class="label">Délai de règlement :</span>
+<div class="dotted-line">{{delaiReglementLigne1}}</div>
+<div class="dotted-line">{{delaiReglementLigne2}}</div>
+<div class="dotted-line">{{delaiReglementLigne3}}</div>
+<div class="dotted-line">{{delaiReglementLigne4}}</div>
+</div>
+<div class="totals">
+<div class="field-row"><span class="label">Total net HT (en €) :</span><span class="value">{{totalNetHT}}</span></div>
+<div class="field-row"><span class="label">{{tvaLabel}}</span><span class="value">{{tva}}</span></div>
+<div class="field-row"><span class="label">Montant total TTC (en €) :</span><span class="value">{{montantTTC}}</span></div>
+<div class="signature">Signature du client précédée de la mention<br/>‘Lu et approuvé, bon pour accord’</div>
+</div>
+</div>
+<div class="legal">
+Article 1 : Le prix inclut l’entretien avec une journaliste et son équipe de tournage ainsi que les prestations de montage vidéo. Le règlement de la commande se fera par prélèvement SEPA mis en place lors de la prise de rendez-vous. La signature de ce bon de commande est ferme et définitive. L’annonceur ne pourra le résilier d’aucune manière et pour aucune raison.
+<b>ARTICLE 2 : CLAUSE ATTRIBUTIVE DE COMPÉTENCE TERRITORIALE : TOUT DIFFÉREND EST SOUMIS, À DÉFAUT D’ACCORD AMIABLE, À LA COMPÉTENCE DU TRIBUNAL DE COMMERCE DE PARIS.</b>
+Article 3 : OpenMedias se réserve le droit de refuser tout contenu ne correspondant pas au caractère de la publication sans avoir à en fournir les raisons.
+Article 4 : Les sélections sont assurées par OpenMedias, situé 13 Ter Boulevard Berthier 75017 Paris, tél. 07 85 98 33 73.
+Article 5 : Le client s’engage à payer 50 % du montant total de la prestation sous 15 jours après réception de la facture et les 50 % restants un mois avant la diffusion. À défaut de paiement à l’échéance indiquée sur la facture, l’annonceur devra, en sus du montant principal, payer une clause pénale d’un montant forfaitaire de 15 % des sommes restant dues. En cas de non respect d’une ou plusieurs échéances de règlement indiquées au bon de commande ou à la facture, la somme deviendra de fait exigible dans sa globalité.
+Article 6 : Les périodes de parutions mentionnées n’étant communiquées qu’à titre indicatif, OpenMedias ne sera pas tenu responsable des retards dans la diffusion.
+Article 7 : En cas de refus de prise de rendez-vous avec la rédactrice et son équipe de tournage, d’annulation du rendez-vous avec l’équipe de tournage ou de refus de mise en ligne de l’article, l’annonceur devra régler la totalité de la facture.
+Article 8 : Les éléments produits par OpenMedias resteront la propriété de OpenMedias et l’annonceur aura interdiction de les exploiter de quelque façon que ce soit sans l’autorisation préalable de OpenMedias sous peine de poursuites judiciaires.
+Article 9 : En cas de demande de report de la diffusion par le client, celui-ci devra payer une pénalité d’un montant forfaitaire de 1580 euros pour couvrir les coûts liés à la planification et à la préparation de la diffusion. Cette pénalité sera ajoutée au montant total de la facture et devra être réglée dans un délai de 15 jours après réception de la facture.
+Article 10 : En cas de non-paiement ou de rejet de prélèvement, la direction se réserve le droit de suspendre ou de retirer définitivement la mise en ligne de l’article et/ou de la vidéo tant que la facture ne sera pas réglée dans sa globalité.
+Article 11 : Dans le cadre d’une demande d’annulation de projet par le client, passé un délai de 14 jours, celui-ci s’engage à payer un acompte de 50 % du montant total de la prestation à OpenMedias. OpenMedias se réserve le droit de poursuivre ou non le client concerné en cas de manquement à cet accord.
+</div>
+</div>
+<div class="footer">
+OpenMedias - 13 Ter Boulevard Berthier 75017 Paris - Tél : 07 85 98 33 73 - contact@openmedias.fr RCS PARIS 849 100 243 -<br/>
+N° SIRET 84910024300047 - N° TVA FR37849100243
+</div>
+</div>
+</body>
+</html>

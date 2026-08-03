@@ -19,3 +19,9 @@ radar/scraper/debug_*.html
 radar/scraper/check.log
 radar/scraper/scrape.log
 radar/scraper/__pycache__/
+
+# Générateur BDC — matière source (PDF/PNG clients) et scripts d'extraction.
+# Seuls les produits finis sont commités : planning/backend/bdc/{templates,assets,templates.generated.js}
+BDC PDF/
+Banner BDC/
+_bdc_work/

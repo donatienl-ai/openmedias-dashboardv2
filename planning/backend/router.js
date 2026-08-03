@@ -784,6 +784,34 @@ app.get('/api/bdc/template-defaults', requireCommercial, (req, res) => {
   res.json({ descriptionItems: cfg.descriptionItems });
 });
 
+// Liste des templates pour le sélecteur du générateur (groupés par média).
+// Les 3 templates historiques n'ont pas de label/groupe dans render.js ->
+// métadonnées en dur ici ; les 47 autres viennent du registre généré.
+const BDC_TEMPLATE_META = {
+  'figaro-48h-hp': { label: 'Le Figaro — 48H Home Page', group: 'Le Figaro', lang: 'fr' },
+  'bfm-business-vision': { label: 'BFM Business — Vision d’Entreprises', group: 'BFM', lang: 'fr' },
+  'capital-emission': { label: 'Capital — L’Émission', group: 'Capital', lang: 'fr' },
+};
+const BDC_GROUP_ORDER = ['BFM', 'Le Figaro', 'Capital', 'Challenges', 'TIME', 'Médias spécialisés'];
+
+app.get('/api/bdc/templates', requireCommercial, (req, res) => {
+  const list = Object.entries(BDC_TEMPLATES).map(([key, cfg]) => {
+    const meta = BDC_TEMPLATE_META[key] || {};
+    return {
+      key,
+      label: meta.label || cfg.label || key,
+      group: meta.group || cfg.group || 'Médias spécialisés',
+      lang: meta.lang || cfg.lang || 'fr',
+    };
+  });
+  list.sort((a, b) => {
+    const ga = BDC_GROUP_ORDER.indexOf(a.group), gb = BDC_GROUP_ORDER.indexOf(b.group);
+    if (ga !== gb) return (ga === -1 ? 99 : ga) - (gb === -1 ? 99 : gb);
+    return a.label.localeCompare(b.label, 'fr');
+  });
+  res.json(list);
+});
+
 app.get('/api/bdc/preview', requireCommercial, async (req, res) => {
   try {
     const templateKey = req.query.templateKey || 'figaro-48h-hp';
@@ -821,11 +849,18 @@ const DS_STATUT_MAP = { sent: 'envoye', delivered: 'envoye', completed: 'signe',
 
 // Template BDC -> média du planning de diffusion (noms de SLOTS_PAR_MEDIA).
 // Sert à poser le créneau jaune "BDC en attente" sur le bon média à l'envoi.
+// Les templates générés depuis les PDF sources portent planningMedia /
+// planningSousMedia dans le registre ; les 3 historiques sont en dur ici.
+// planningMedia null = pas de média correspondant sur le planning (pas de créneau).
 const BDC_TEMPLATE_MEDIA = {
-  'figaro-48h-hp': 'Le Figaro HP + HP Eco',
-  'bfm-business-vision': 'BFM Business 1&2',
-  'capital-emission': 'Capital',
+  'figaro-48h-hp': { media: 'Le Figaro HP + HP Eco', sousMedia: null },
+  'bfm-business-vision': { media: 'BFM Business 1&2', sousMedia: null },
+  'capital-emission': { media: 'Capital', sousMedia: null },
 };
+for (const [key, cfg] of Object.entries(BDC_TEMPLATES)) {
+  if (BDC_TEMPLATE_MEDIA[key] || cfg.planningMedia === undefined) continue;
+  if (cfg.planningMedia) BDC_TEMPLATE_MEDIA[key] = { media: cfg.planningMedia, sousMedia: cfg.planningSousMedia || null };
+}
 
 // À l'envoi DocuSign, le BDC apparaît aussi sur le planning de diffusion en
 // jaune (bdc_attente) — même rendu qu'un créneau bloqué à la main. Dédupliqué :
@@ -836,8 +871,13 @@ const BDC_TEMPLATE_MEDIA = {
 // Salesforce, car date_diffusion est NOT NULL (un INSERT à NULL échouait
 // silencieusement : bug vu en prod, aucun créneau créé).
 function upsertEmissionPourBdcEnvoye({ entreprise, templateKey, dateDiffusion, montantHT, commercial }) {
-  const media = BDC_TEMPLATE_MEDIA[templateKey] || null;
-  if (!media) return { id: null, statut: null, cree: false };
+  const mapping = BDC_TEMPLATE_MEDIA[templateKey] || null;
+  if (!mapping) return { id: null, statut: null, cree: false };
+  const media = mapping.media;
+  // Inséré tel quel (valeurs du registre BDC, déjà validées contre
+  // SOUS_MEDIAS_SPECIALISES) — on ne passe PAS par resolveSousMedia qui
+  // n'accepte que les sous-médias de "Médias spécialisés".
+  const sousMedia = mapping.sousMedia || null;
 
   const entNorm = entreprise.toLowerCase().trim();
   const dateValide = /^\d{4}-\d{2}-\d{2}$/.test(dateDiffusion || '') && !jourNonDiffusable(dateDiffusion)
@@ -861,9 +901,9 @@ function upsertEmissionPourBdcEnvoye({ entreprise, templateKey, dateDiffusion, m
     : '📌 BDC envoyé via DocuSign — date de diffusion à caler (période libre ou jour non diffusable)';
 
   const r = db.prepare(`
-    INSERT INTO emissions (entreprise,media,date_diffusion,date_diffusion_originale,commercial,resp_edit,statut,montant,notes)
-    VALUES (?,?,?,?,?,?,?,?,?)
-  `).run(entreprise, media, dateBdd, dateBdd, commercial.nom, equipe ? equipe.nom : null,
+    INSERT INTO emissions (entreprise,media,sous_media,date_diffusion,date_diffusion_originale,commercial,resp_edit,statut,montant,notes)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(entreprise, media, sousMedia, dateBdd, dateBdd, commercial.nom, equipe ? equipe.nom : null,
          statutEm, Number(montantHT || 0), note);
   console.log(`[BDC-DOCUSIGN] créneau planning ${statutEm} id=${r.lastInsertRowid} — ${entreprise} / ${media} / ${dateValide || 'sans date'}`);
   return { id: r.lastInsertRowid, statut: statutEm, cree: true };

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Reservation form — Le Figaro — Émission (EN)</title>
+<style>
+@page { size: A4; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #101010; }
+.page { width: 210mm; height: 297mm; overflow: hidden; display: flex; flex-direction: column; }
+.header-img { width: 100%; display: block; flex: 0 0 auto; }
+.content { padding: 2mm 7mm 0 7mm; flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.intro { padding: 0 31mm; }
+.title-bar { background: #1A4999; color: #fff; text-align: center; font-weight: 800; font-size: 18px; letter-spacing: 0.5px; padding: 8px 0; margin: 3mm 0 4mm 0; }
+.field-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3mm; }
+.field-row .label { font-weight: 700; white-space: nowrap; font-size: 12px; }
+.field-row .value { flex: 1; border-bottom: 1.5px dotted #444; font-size: 12px; padding-bottom: 2px; min-height: 13px; }
+.fields-mid { margin-top: 3mm; }
+table.prestation { width: 100%; border-collapse: collapse; margin-top: 4mm; border: 1.5px solid #1A4999; }
+table.prestation th { background: #1A4999; color: #fff; padding: 6px 10px; font-size: 12px; font-weight: 700; text-align: center; }
+table.prestation td { border: 1px solid #1A4999; padding: 6px 10px; font-size: 10.5px; vertical-align: top; }
+table.prestation td.media-name { font-weight: 800; text-align: center; vertical-align: middle; font-size: 12.5px; width: 16%; }
+table.prestation td.amount { text-align: center; vertical-align: middle; font-size: 12px; width: 17%; }
+td.amount .amount-num { display: inline-block; min-width: 55px; border-bottom: 1.5px dotted #444; padding-bottom: 2px; text-align: center; }
+.description { line-height: 1.3; }
+.description .desc-item { margin: 0; }
+.bottom-row { display: flex; justify-content: space-between; gap: 16mm; margin-top: 4mm; }
+.delai { flex: 1; }
+.delai .label { font-weight: 700; font-size: 12px; margin-bottom: 2mm; display: block; }
+.delai .dotted-line { border-bottom: 1px dotted #444; min-height: 4mm; font-size: 10px; line-height: 1.2; padding-bottom: 1px; overflow-wrap: break-word; }
+.totals { flex: 1; }
+.totals .field-row .label { font-size: 12.5px; }
+.signature { color: #1A4999; font-weight: 700; text-align: center; margin-top: 5mm; font-size: 11px; }
+.legal { font-size: 6.1px; text-align: justify; line-height: 1.3; color: #222; margin-top: auto; padding: 0 1mm 2mm 1mm; }
+.footer { flex: 0 0 auto; width: 100%; min-width: 0; background: #103B99; color: #fff; text-align: center; font-size: 9px; font-weight: 700; padding: 4px 0; line-height: 1.4; word-wrap: break-word; }
+</style>
+</head>
+<body>
+<div class="page">
+<img class="header-img" src="{{headerImage}}" alt="" />
+<div class="content">
+<div class="intro">
+<div class="title-bar">RESERVATION FORM</div>
+<div class="fields-top">
+<div class="field-row"><span class="label">COMPANY:</span><span class="value">{{entreprise}}</span></div>
+<div class="field-row"><span class="label">Date:</span><span class="value">{{dateDuJour}}</span></div>
+<div class="field-row"><span class="label">To the attention of:</span><span class="value">{{contact}}</span></div>
+<div class="field-row"><span class="label">Address:</span><span class="value">{{adresse}}</span></div>
+</div>
+</div>
+<div class="fields-mid">
+<div class="field-row"><span class="label">Topic:</span><span class="value">{{thematique}}</span></div>
+<div class="field-row"><span class="label">Contact person:</span><span class="value">{{personneContact}}</span></div>
+<div class="field-row"><span class="label">Broadcast date:</span><span class="value">{{dateDiffusion}}</span></div>
+<div class="field-row"><span class="label">Program Manager :</span><span class="value">{{respEmission}}</span></div>
+</div>
+<table class="prestation">
+<thead>
+<tr><th>Name / Code</th><th>Description</th><th>Unit Price</th><th>Total (excl. Tax)</th></tr>
+</thead>
+<tbody>
+<tr>
+<td class="media-name">LE FIGARO</td>
+<td class="description">
+{{#each descriptionItems}}<div class="desc-item">*{{{this}}}</div>
+{{/each}}</td>
+<td class="amount"><span class="amount-num">{{puHT}}</span> €</td>
+<td class="amount"><span class="amount-num">{{totalHT}}</span> €</td>
+</tr>
+</tbody>
+</table>
+<div class="bottom-row">
+<div class="delai">
+<span class="label">Payment deadline:</span>
+<div class="dotted-line">{{delaiReglementLigne1}}</div>
+<div class="dotted-line">{{delaiReglementLigne2}}</div>
+<div class="dotted-line">{{delaiReglementLigne3}}</div>
+<div class="dotted-line">{{delaiReglementLigne4}}</div>
+</div>
+<div class="totals">
+<div class="field-row"><span class="label">Total net amount excl. VAT (€):</span><span class="value">{{totalNetHT}}</span></div>
+<div class="field-row"><span class="label">{{tvaLabel}}</span><span class="value">{{tva}}</span></div>
+<div class="field-row"><span class="label">Total amount incl. VAT (€):</span><span class="value">{{montantTTC}}</span></div>
+<div class="signature">Client’s signature preceded by the mention<br/>‘Read and approved, good for agreement’</div>
+</div>
+</div>
+<div class="legal">
+Article 1: The price includes the interview with a journalist and their filming team, as well as video editing services. Payment for the order will be made by SEPA direct debit set up when the appointment is scheduled. The signing of this order form is firm and final. The advertiser may not cancel it in any way or for any reason.
+<b>ARTICLE 2: TERRITORIAL JURISDICTION CLAUSE: ANY DISPUTE SHALL BE SUBMITTED, FAILING AN AMICABLE AGREEMENT, TO THE JURISDICTION OF THE PARIS COMMERCIAL COURT.</b>
+Article 3: OpenMedias reserves the right to refuse any content that does not correspond to the nature of the publication, without having to provide a reason.
+Article 4: Selections are carried out by OpenMedias, located at 13 Ter Boulevard Berthier 75017 Paris, phone: 07 85 98 33 73.
+Article 5: The client agrees to pay 50% of the total amount of the service within 15 days after receiving the invoice, and the remaining 50% one month before publication. If payment is not made by the due date indicated on the invoice, the advertiser must, in addition to the principal amount, pay a penalty fee equal to 15% of the outstanding amounts. In the event of failure to comply with one or more payment deadlines indicated on the order form or invoice, the entire amount will automatically become due.
+Article 6: Since the publication periods mentioned are provided for information purposes only, OpenMedias shall not be held responsible for delays in publication.
+Article 7: In the event of refusal to schedule an appointment with the editor and the filming team, cancellation of the appointment with the filming team, or refusal to publish the article online, the advertiser must pay the full invoice amount.
+Article 8: All materials produced by OpenMedias shall remain the property of OpenMedias, and the advertiser is prohibited from using them in any way without prior authorization from OpenMedias, under penalty of legal action.
+Article 9: In the event of a request by the client to postpone publication, the client must pay a flat-rate penalty of €1,580 to cover costs related to planning and preparation of the publication. This penalty will be added to the total invoice amount and must be paid within 15 days after receiving the invoice.
+Article 10: In the event of non-payment or rejection of the direct debit, management reserves the right to suspend or permanently remove the publication of the article and/or video until the invoice has been paid in full.
+Article 11: If the client requests cancellation of the project after a 14-day period, they agree to pay a deposit of 50% of the total service amount to OpenMedias. OpenMedias reserves the right to pursue or not pursue legal action against the client in case of non-compliance with this agreement.
+</div>
+</div>
+<div class="footer">
+OpenMedias - 13 Ter Boulevard Berthier 75017 Paris - Tél : 07 85 98 33 73 - contact@openmedias.fr RCS PARIS 849 100 243 -<br/>
+N° SIRET 84910024300047 - N° TVA FR37849100243
+</div>
+</div>
+</body>
+</html>
