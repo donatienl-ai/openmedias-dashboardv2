@@ -403,7 +403,7 @@ def test_sources_config():
        f"doublons={[n for n in names if names.count(n) > 1]}")
 
     nous = [c for c in SOURCES if c["source"] == "Nous"]
-    ok("sources : les 5 emissions OpenMedias sont couvertes", len(nous) == 5,
+    ok("sources : les 10 emissions OpenMedias sont couvertes", len(nous) == 10,
        f"{len(nous)} trouvees")
 
 
