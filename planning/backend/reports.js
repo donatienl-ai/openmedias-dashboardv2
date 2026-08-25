@@ -1,4 +1,5 @@
 const cron = require('node-cron');
+const os = require('os');
 
 function setupReports(db) {
   const MAILJET_API_KEY = process.env.MAILJET_API_KEY;
@@ -157,10 +158,29 @@ function setupReports(db) {
   }
 
   // ── KICK-OFF LUNDI — diffusions à venir cette semaine (lundi→vendredi) ──
-  function reportKickoffLundi() {
+  // Idempotence : un seul mail par semaine, même si deux process tournent en
+  // parallèle sur la MÊME base (chevauchement old/new instance pendant un
+  // deploy Render — cause probable des doublons constatés le 24/08/2026).
+  // L'UPDATE conditionnel est atomique en SQLite (verrou d'écriture) : seul le
+  // premier process voit changes=1 et envoie. Si le doublon venait d'une AUTRE
+  // base (vieux service encore actif avec son propre disque), l'empreinte en
+  // pied de mail (hostname/pid/compteur) permet de le repérer.
+  // { force: true } (endpoint de test admin) bypasse la déduplication.
+  function reportKickoffLundi({ force = false } = {}) {
     const today = new Date();
     const vendredi = new Date(today); vendredi.setDate(today.getDate() + 4);
     const fmt = d => d.toISOString().slice(0, 10);
+    const semaine = fmt(today);
+
+    if (!force) {
+      db.prepare("INSERT OR IGNORE INTO config (key,value) VALUES ('kickoff_semaine','')").run();
+      const claim = db.prepare("UPDATE config SET value=? WHERE key='kickoff_semaine' AND value<>?").run(semaine, semaine);
+      if (claim.changes === 0) {
+        console.log(`[KICKOFF] semaine du ${semaine} déjà envoyée — doublon ignoré`);
+        return;
+      }
+    }
+
     const emissions = db.prepare(`
       SELECT * FROM emissions
       WHERE statut NOT IN ('annule','a_programmer')
@@ -184,6 +204,10 @@ function setupReports(db) {
         html += '</ul>';
       }
     }
+    // Empreinte de diagnostic : si un doublon réapparaît, comparer ces lignes
+    // entre les deux mails — hostname/pid différents = un second service tourne.
+    html += `<p style="color:#aaa;font-size:10px;margin-top:16px">instance ${os.hostname()} · pid ${process.pid} · ${emissions.length} diffusion(s) trouvée(s)</p>`;
+    console.log(`[KICKOFF] semaine du ${semaine} — ${emissions.length} diffusion(s) — envoi (instance ${os.hostname()} pid ${process.pid})`);
     sendMail(`Kick-off semaine du ${fmt(today)}`, html);
   }
 

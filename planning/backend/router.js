@@ -1596,7 +1596,9 @@ app.post('/api/admin/test-report', (req, res) => {
     mensuel: reports.reportMensuel,
     hebdo: reports.reportHebdo,
     apercu: reports.reportApercuMoisSuivant,
-    kickoff: reports.reportKickoffLundi,
+    // force:true — le déclenchement manuel de test doit pouvoir renvoyer le
+    // kick-off même si la déduplication anti-doublon l'a déjà marqué "envoyé".
+    kickoff: () => reports.reportKickoffLundi({ force: true }),
     aprogrammer: reports.reportAProgrammerLundi,
     clevel: reports.reportAProgrammerClevel
   };
@@ -1642,8 +1644,16 @@ function checkBdcEnRetard() {
   }
 }
 
-// Tous les jours ouvrés à 9h
-cronBdc.schedule('0 9 * * 1-5', checkBdcEnRetard, { timezone: 'Europe/Paris' });
+// Alerte quotidienne "BDC en attente" — MISE EN PAUSE (26/08/2026, demande de
+// Donatien : un mail par créneau et par jour ouvré = spam de boîte mail).
+// La fonction et l'endpoint de test restent disponibles ; pour réactiver
+// l'envoi automatique : variable d'env BDC_ALERTES_MAIL=1 sur Render.
+if (process.env.BDC_ALERTES_MAIL === '1') {
+  cronBdc.schedule('0 9 * * 1-5', checkBdcEnRetard, { timezone: 'Europe/Paris' });
+  console.log('📧 Alertes BDC en attente ACTIVÉES (BDC_ALERTES_MAIL=1, lun-ven 9h)');
+} else {
+  console.log('⏸️  Alertes BDC en attente EN PAUSE (mettre BDC_ALERTES_MAIL=1 pour réactiver)');
+}
 
 // Déclenchement manuel pour test (édito uniquement)
 app.post('/api/admin/test-bdc-alerte', requireEdit, (req, res) => {
