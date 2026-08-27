@@ -1592,15 +1592,15 @@ app.post('/api/admin/test-report', (req, res) => {
   const isEditRole = req.headers.role === 'edit';
   if (secret !== SF_WEBHOOK_SECRET && !isEditRole) return res.status(403).json({ error: 'Unauthorized' });
   const type = req.body.type;
+  // force:true — le déclenchement manuel de test doit pouvoir renvoyer un
+  // rapport même si la déduplication anti-doublon l'a déjà marqué "envoyé".
   const map = {
-    mensuel: reports.reportMensuel,
-    hebdo: reports.reportHebdo,
-    apercu: reports.reportApercuMoisSuivant,
-    // force:true — le déclenchement manuel de test doit pouvoir renvoyer le
-    // kick-off même si la déduplication anti-doublon l'a déjà marqué "envoyé".
+    mensuel: () => reports.reportMensuel({ force: true }),
+    hebdo: () => reports.reportHebdo({ force: true }),
+    apercu: () => reports.reportApercuMoisSuivant({ force: true }),
     kickoff: () => reports.reportKickoffLundi({ force: true }),
-    aprogrammer: reports.reportAProgrammerLundi,
-    clevel: reports.reportAProgrammerClevel
+    aprogrammer: () => reports.reportAProgrammerLundi({ force: true }),
+    clevel: () => reports.reportAProgrammerClevel({ force: true })
   };
   if (!map[type]) return res.status(400).json({ error: 'type invalide (mensuel|hebdo|apercu|kickoff|aprogrammer|clevel)' });
   map[type]();
@@ -1634,7 +1634,8 @@ function checkBdcEnRetard() {
 
     const html = `<h2>⏰ BDC en attente depuis ${jours} jours ouvrés</h2>
       <p><b>${e.entreprise}</b> — ${e.media} — bloqué par <b>${e.commercial || 'commercial inconnu'}</b>${e.date_diffusion ? ' pour le ' + e.date_diffusion : ''}.</p>
-      <p>Merci de finaliser le BDC (signature) ou de libérer le créneau si l'opération ne se fait plus.</p>`;
+      <p>Merci de finaliser le BDC (signature) ou de libérer le créneau si l'opération ne se fait plus.</p>
+      <p style="color:#aaa;font-size:10px;margin-top:16px">instance ${require('os').hostname()} · service ${process.env.RENDER_SERVICE_NAME || 'local'} · pid ${process.pid} · rev ${(process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || 'dev'}</p>`;
     // sendMailOnly (et non sendMail) : cette alerte ne doit PAS partir à la liste de
     // diffusion générale (REPORT_EMAIL_EDITO/GROWTH, qui inclut Lola) — seulement à
     // Donatien (EMAIL_ADMIN) + au commercial concerné.

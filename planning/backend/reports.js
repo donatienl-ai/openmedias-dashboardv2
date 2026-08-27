@@ -56,6 +56,25 @@ function setupReports(db) {
     return sendMailRaw(subject, html, recipients);
   }
 
+  // Empreinte de diagnostic en pied de chaque mail automatique : si un doublon
+  // réapparaît, comparer cette ligne entre les deux mails — un hostname/pid
+  // différent = un second service tourne encore quelque part avec sa base.
+  function empreinteHtml(extra = '') {
+    const svc = process.env.RENDER_SERVICE_NAME || 'local';
+    const rev = (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || 'dev';
+    return `<p style="color:#aaa;font-size:10px;margin-top:16px">instance ${os.hostname()} · service ${svc} · pid ${process.pid} · rev ${rev}${extra ? ' · ' + extra : ''}</p>`;
+  }
+
+  // Anti-doublon : une seule exécution d'un rapport donné, même si deux
+  // process partagent la MÊME base (chevauchement old/new instance au deploy).
+  // L'UPDATE conditionnel est atomique en SQLite : seul le premier process
+  // voit changes=1. (Ne protège PAS contre un second service avec sa PROPRE
+  // base — c'est pour ça que l'empreinte ci-dessus existe.)
+  function claimReportOnce(key) {
+    db.prepare("INSERT OR IGNORE INTO config (key,value) VALUES (?, '')").run(key);
+    return db.prepare("UPDATE config SET value='1' WHERE key=? AND value<>'1'").run(key).changes === 1;
+  }
+
   function fmtMoney(n) {
     return (n || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) + ' €';
   }
@@ -96,9 +115,13 @@ function setupReports(db) {
   }
 
   // ── RAPPORT MENSUEL — dernier vendredi du mois, données du mois en cours ──
-  function reportMensuel() {
+  function reportMensuel({ force = false } = {}) {
     const now = new Date();
     const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (!force && !claimReportOnce(`mensuel_${period}`)) {
+      console.log(`[MENSUEL] ${period} déjà envoyé — doublon ignoré`);
+      return;
+    }
     const rows = db.prepare(`
       SELECT media, COUNT(*) as nb_emissions, SUM(montant) as ca_diffusion, SUM(IFNULL(upsell,0)) as ca_upsell
       FROM emissions
@@ -109,16 +132,20 @@ function setupReports(db) {
     const moisNom = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
     const html = `<h2>📊 Reporting mensuel — ${moisNom}</h2>
       <p>Diffusions et CA généré ce mois-ci, par média.</p>
-      ${buildTable(rows)}`;
+      ${buildTable(rows)}${empreinteHtml()}`;
     sendMail(`Reporting mensuel — ${moisNom}`, html);
   }
 
   // ── RAPPORT HEBDO — tous les vendredis 11h, semaine écoulée (lundi→vendredi) ──
-  function reportHebdo() {
+  function reportHebdo({ force = false } = {}) {
     const today = new Date();
     const dow = today.getDay() || 7;
     const lundi = new Date(today); lundi.setDate(today.getDate() - (dow - 1));
     const fmt = d => d.toISOString().slice(0, 10);
+    if (!force && !claimReportOnce(`hebdo_${fmt(lundi)}`)) {
+      console.log(`[HEBDO] semaine du ${fmt(lundi)} déjà envoyée — doublon ignoré`);
+      return;
+    }
     const rows = db.prepare(`
       SELECT media, COUNT(*) as nb_emissions, SUM(montant) as ca_diffusion, SUM(IFNULL(upsell,0)) as ca_upsell
       FROM emissions
@@ -128,15 +155,19 @@ function setupReports(db) {
     `).all(fmt(lundi), fmt(today));
     const html = `<h2>📅 Reporting hebdomadaire — semaine du ${fmt(lundi)} au ${fmt(today)}</h2>
       <p>Diffusions réalisées et CA généré cette semaine, par média.</p>
-      ${buildTable(rows)}`;
+      ${buildTable(rows)}${empreinteHtml()}`;
     sendMail(`Reporting hebdomadaire — semaine du ${fmt(lundi)}`, html);
   }
 
   // ── APERÇU MOIS SUIVANT — dernier mercredi du mois, 11h ──
-  function reportApercuMoisSuivant() {
+  function reportApercuMoisSuivant({ force = false } = {}) {
     const now = new Date();
     const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     const period = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`;
+    if (!force && !claimReportOnce(`apercu_${period}`)) {
+      console.log(`[APERCU] ${period} déjà envoyé — doublon ignoré`);
+      return;
+    }
     const rows = db.prepare(`
       SELECT media, COUNT(*) as nb_emissions
       FROM emissions
@@ -153,7 +184,7 @@ function setupReports(db) {
     for (const r of rows) {
       html += `<tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px">${r.media}</td><td style="padding:6px 8px;text-align:right">${r.nb_emissions}</td></tr>`;
     }
-    html += `<tr style="font-weight:bold;background:#f5f5f5"><td style="padding:8px">TOTAL</td><td style="padding:8px;text-align:right">${total}</td></tr></table>`;
+    html += `<tr style="font-weight:bold;background:#f5f5f5"><td style="padding:8px">TOTAL</td><td style="padding:8px;text-align:right">${total}</td></tr></table>${empreinteHtml(total + ' diffusions')}`;
     sendMail(`Aperçu du mois à venir — ${moisNom}`, html);
   }
 
@@ -172,13 +203,9 @@ function setupReports(db) {
     const fmt = d => d.toISOString().slice(0, 10);
     const semaine = fmt(today);
 
-    if (!force) {
-      db.prepare("INSERT OR IGNORE INTO config (key,value) VALUES ('kickoff_semaine','')").run();
-      const claim = db.prepare("UPDATE config SET value=? WHERE key='kickoff_semaine' AND value<>?").run(semaine, semaine);
-      if (claim.changes === 0) {
-        console.log(`[KICKOFF] semaine du ${semaine} déjà envoyée — doublon ignoré`);
-        return;
-      }
+    if (!force && !claimReportOnce(`kickoff_${semaine}`)) {
+      console.log(`[KICKOFF] semaine du ${semaine} déjà envoyée — doublon ignoré`);
+      return;
     }
 
     const emissions = db.prepare(`
@@ -206,7 +233,7 @@ function setupReports(db) {
     }
     // Empreinte de diagnostic : si un doublon réapparaît, comparer ces lignes
     // entre les deux mails — hostname/pid différents = un second service tourne.
-    html += `<p style="color:#aaa;font-size:10px;margin-top:16px">instance ${os.hostname()} · pid ${process.pid} · ${emissions.length} diffusion(s) trouvée(s)</p>`;
+    html += empreinteHtml(emissions.length + ' diffusion(s)');
     console.log(`[KICKOFF] semaine du ${semaine} — ${emissions.length} diffusion(s) — envoi (instance ${os.hostname()} pid ${process.pid})`);
     sendMail(`Kick-off semaine du ${fmt(today)}`, html);
   }
@@ -214,7 +241,12 @@ function setupReports(db) {
   // ── NOTIF INDIVIDUELLE "À PROGRAMMER" — tous les lundis 14h, Eva et Flavie séparément ──
   // Deux colonnes : à gauche ce qui lui est assigné personnellement (resp_edit), à droite
   // ce qui n'est assigné à personne — pour que rien ne traîne oublié dans le panneau.
-  function reportAProgrammerLundi() {
+  function reportAProgrammerLundi({ force = false } = {}) {
+    const dateCle = new Date().toISOString().slice(0, 10);
+    if (!force && !claimReportOnce(`aprogrammer_${dateCle}`)) {
+      console.log(`[A-PROGRAMMER] ${dateCle} déjà envoyé — doublon ignoré`);
+      return;
+    }
     const destinataires = [
       { nom: 'Eva', email: EMAIL_EVA },
       { nom: 'Flavie', email: EMAIL_FLAVIE }
@@ -246,15 +278,21 @@ function setupReports(db) {
           ${renderColonne(`Assignées à ${nom}`, '#2563eb', assignees)}
           <td style="width:0;border-left:1px solid #eee"></td>
           ${renderColonne('Non assignées', '#d97706', nonAssignees)}
-        </tr></table>`;
+        </tr></table>
+        ${empreinteHtml()}`;
 
       sendMailOnly(`📌 À programmer — ${assignees.length} pour toi, ${nonAssignees.length} non assignées`, html, [email]);
     }
   }
 
   // ── NOTIF "C-LEVEL" — tous les lundis 14h, une vue 3 colonnes Flavie / Eva / Lola ──
-  function reportAProgrammerClevel() {
+  function reportAProgrammerClevel({ force = false } = {}) {
     if (!EMAIL_CLEVEL) { console.warn(`⚠️ Pas d'email configuré pour EMAIL_CLEVEL, notif "à programmer" C-level non envoyée`); return; }
+    const dateCle = new Date().toISOString().slice(0, 10);
+    if (!force && !claimReportOnce(`clevel_${dateCle}`)) {
+      console.log(`[C-LEVEL] ${dateCle} déjà envoyé — doublon ignoré`);
+      return;
+    }
     const noms = ['Flavie', 'Eva', 'Lola'];
     const parNom = {};
     for (const nom of noms) {
@@ -275,7 +313,8 @@ function setupReports(db) {
       <p>Répartition des diffusions signées encore sans date ou média confirmé, par responsable édito.</p>
       <table style="width:100%;border-collapse:collapse"><tr>
         ${noms.map(nom => renderColonne(nom, couleurs[nom], parNom[nom])).join('<td style="width:0;border-left:1px solid #eee"></td>')}
-      </tr></table>`;
+      </tr></table>
+      ${empreinteHtml()}`;
 
     const total = noms.reduce((s, n) => s + parNom[n].length, 0);
     sendMailOnly(`📌 À programmer — vue C-level (${total} au total)`, html, [EMAIL_CLEVEL]);
