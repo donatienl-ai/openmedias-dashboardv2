@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const cronBdc = require('node-cron');
+const zlib = require('zlib');
 const { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES } = require('./db');
 const { setupReports } = require('./reports');
 const salesforce = require('./salesforce');
@@ -1662,8 +1663,70 @@ app.post('/api/admin/test-bdc-alerte', requireEdit, (req, res) => {
   res.json({ success: true, message: 'Vérification BDC lancée, vérifie les logs et boîtes mail' });
 });
 
+// ── SAUVEGARDE AUTOMATIQUE DE LA BASE ───────────────────────────────────────
+// Snapshot gzipé de planning.db chaque matin sur le disque persistant Render
+// (/var/data/backups/ en prod — survit aux redéploiements), 30 jours de
+// rétention. Le lundi, le snapshot part aussi en pièce jointe à Donatien
+// (copie HORS du disque — la seule protection contre une perte du volume).
+// db.serialize() fige la base de façon cohérente (WAL compris), pas besoin
+// d'arrêter le service.
+const BACKUP_DIR = path.join(path.dirname(db.name), 'backups');
+
+function backupPlanningDb() {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const jour = new Date().toISOString().slice(0, 10);
+  const dest = path.join(BACKUP_DIR, `planning-${jour}.db.gz`);
+  const gz = zlib.gzipSync(db.serialize());
+  fs.writeFileSync(dest, gz);
+  // Rétention : on ne garde que les 30 derniers jours
+  const limite = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  for (const f of fs.readdirSync(BACKUP_DIR)) {
+    const m = /^planning-(\d{4}-\d{2}-\d{2})\.db\.gz$/.exec(f);
+    if (m && m[1] < limite) fs.unlinkSync(path.join(BACKUP_DIR, f));
+  }
+  console.log(`[BACKUP] ${dest} écrit (${(gz.length / 1024).toFixed(0)} Ko)`);
+  return { dest, size: gz.length, jour };
+}
+
+cronBdc.schedule('17 6 * * *', async () => {
+  try {
+    const b = backupPlanningDb();
+    // Le lundi : copie externalisée par email (limite pièce jointe Mailjet ~15 Mo)
+    if (new Date().getDay() === 1 && EMAIL_ADMIN) {
+      if (b.size > 10 * 1024 * 1024) {
+        console.warn(`[BACKUP] ${(b.size / 1048576).toFixed(1)} Mo — trop gros pour l'email, snapshot local conservé`);
+      } else {
+        await reports.sendMailOnly(
+          `💾 Backup planning — semaine du ${b.jour}`,
+          `<p>Sauvegarde hebdomadaire automatique de la base du planning (fichier SQLite gzipé). Pour restaurer : dézipper et renommer en planning.db.</p><p>Les snapshots quotidiens (30 jours) sont aussi sur le disque persistant Render, dossier <code>backups/</code>.</p>`,
+          [EMAIL_ADMIN],
+          [{ ContentType: 'application/gzip', Filename: path.basename(b.dest), Base64Content: fs.readFileSync(b.dest).toString('base64') }]
+        );
+      }
+    }
+  } catch (e) { console.error('[BACKUP] échec :', e.message); }
+}, { timezone: 'Europe/Paris' });
+
+// Téléchargement manuel du dernier snapshot. Protégé par la clé SERVEUR
+// (x-sf-secret) et volontairement PAS par le header "role" envoyé par le
+// navigateur — la base contient toutes les données, elle ne doit pas être
+// exposée derrière une simple déclaration côté client. Endpoint désactivé si
+// le secret n'a pas été configuré (valeur par défaut 'changeme').
+app.get('/api/admin/backup/latest', (req, res) => {
+  if (SF_WEBHOOK_SECRET === 'changeme') return res.status(503).json({ error: 'Backup désactivé : SF_WEBHOOK_SECRET non configuré' });
+  if (req.headers['x-sf-secret'] !== SF_WEBHOOK_SECRET) return res.status(403).json({ error: 'Unauthorized' });
+  try {
+    const fichiers = fs.readdirSync(BACKUP_DIR).filter(f => /^planning-\d{4}-\d{2}-\d{2}\.db\.gz$/.test(f)).sort();
+    if (!fichiers.length) return res.status(404).json({ error: 'Aucun backup pour le moment' });
+    res.download(path.join(BACKUP_DIR, fichiers[fichiers.length - 1]));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 // Exposé au host OpenDashboard : le router Express (à monter, ex. sous /planning)
 // et checkBdcEnRetard (déjà scheduled ci-dessus via node-cron, mais utile si le
 // host veut aussi l'exposer/tester directement).
 module.exports = app;
 module.exports.checkBdcEnRetard = checkBdcEnRetard;
+module.exports.backupPlanningDb = backupPlanningDb;

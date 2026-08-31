@@ -13,7 +13,7 @@ function setupReports(db) {
   const EMAIL_FLAVIE = process.env.EMAIL_FLAVIE || '';
   const EMAIL_CLEVEL = process.env.EMAIL_CLEVEL || '';
 
-  async function sendMailRaw(subject, html, recipients) {
+  async function sendMailRaw(subject, html, recipients, attachments) {
     if (!MAILJET_API_KEY || !MAILJET_SECRET_KEY) {
       console.error('❌ Mailjet non configuré (MAILJET_API_KEY / MAILJET_SECRET_KEY manquants)');
       return;
@@ -24,14 +24,15 @@ function setupReports(db) {
       return;
     }
     const auth = Buffer.from(`${MAILJET_API_KEY}:${MAILJET_SECRET_KEY}`).toString('base64');
-    const body = {
-      Messages: [{
-        From: { Email: REPORT_FROM_EMAIL, Name: 'Planning Diffusion OpenMedias' },
-        To: dest.map(email => ({ Email: email })),
-        Subject: subject,
-        HTMLPart: html
-      }]
+    const message = {
+      From: { Email: REPORT_FROM_EMAIL, Name: 'Planning Diffusion OpenMedias' },
+      To: dest.map(email => ({ Email: email })),
+      Subject: subject,
+      HTMLPart: html
     };
+    // Pièces jointes Mailjet v3.1 : [{ ContentType, Filename, Base64Content }]
+    if (attachments && attachments.length) message.Attachments = attachments;
+    const body = { Messages: [message] };
     try {
       const res = await fetch('https://api.mailjet.com/v3.1/send', {
         method: 'POST',
@@ -52,8 +53,8 @@ function setupReports(db) {
   }
 
   // Envoi ciblé, sans la liste de diffusion générale (pour les notifications personnelles)
-  async function sendMailOnly(subject, html, recipients) {
-    return sendMailRaw(subject, html, recipients);
+  async function sendMailOnly(subject, html, recipients, attachments) {
+    return sendMailRaw(subject, html, recipients, attachments);
   }
 
   // Empreinte de diagnostic en pied de chaque mail automatique : si un doublon
