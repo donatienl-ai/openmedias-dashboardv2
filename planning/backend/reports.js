@@ -137,10 +137,17 @@ function setupReports(db) {
   }
 
   // ── RAPPORT HEBDO — tous les vendredis 11h, semaine écoulée (lundi→vendredi) ──
+  // Ancrage sur la DERNIÈRE SEMAINE COMPLÈTE (lun→ven), pas sur "aujourd'hui" :
+  // le cron tire le vendredi (lundi = vendredi - 4), mais un déclenchement
+  // manuel un lundi donnait "semaine du X au X" (un seul jour, 0 diffusion) —
+  // vu en prod le 31/08/2026. Désormais : si on est vendredi, semaine en cours ;
+  // sinon, on remonte au vendredi précédent et on prend sa semaine.
   function reportHebdo({ force = false } = {}) {
     const today = new Date();
-    const dow = today.getDay() || 7;
-    const lundi = new Date(today); lundi.setDate(today.getDate() - (dow - 1));
+    const dow = today.getDay(); // 0=dim … 5=ven
+    const vendredi = new Date(today);
+    vendredi.setDate(today.getDate() - ((dow + 2) % 7)); // vendredi de la semaine écoulée (ou aujourd'hui si vendredi)
+    const lundi = new Date(vendredi); lundi.setDate(vendredi.getDate() - 4);
     const fmt = d => d.toISOString().slice(0, 10);
     if (!force && !claimReportOnce(`hebdo_${fmt(lundi)}`)) {
       console.log(`[HEBDO] semaine du ${fmt(lundi)} déjà envoyée — doublon ignoré`);
@@ -152,10 +159,11 @@ function setupReports(db) {
       WHERE statut NOT IN ('annule','bdc_attente','a_programmer')
         AND date_diffusion >= ? AND date_diffusion <= ?
       GROUP BY media ORDER BY (SUM(montant) + SUM(IFNULL(upsell,0))) DESC
-    `).all(fmt(lundi), fmt(today));
-    const html = `<h2>📅 Reporting hebdomadaire — semaine du ${fmt(lundi)} au ${fmt(today)}</h2>
+    `).all(fmt(lundi), fmt(vendredi));
+    const total = rows.reduce((a, r) => a + r.nb_emissions, 0);
+    const html = `<h2>📅 Reporting hebdomadaire — semaine du ${fmt(lundi)} au ${fmt(vendredi)}</h2>
       <p>Diffusions réalisées et CA généré cette semaine, par média.</p>
-      ${buildTable(rows)}${empreinteHtml()}`;
+      ${rows.length ? buildTable(rows) : '<p>Aucune diffusion cette semaine-là.</p>'}${empreinteHtml(total + ' diffusions')}`;
     sendMail(`Reporting hebdomadaire — semaine du ${fmt(lundi)}`, html);
   }
 
