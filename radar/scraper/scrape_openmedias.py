@@ -209,6 +209,47 @@ def clean_title(raw):
     return t.strip()
 
 
+def _best_from_srcset(srcset):
+    """srcset/data-srcset : "url1 128w, url2 224w, ..." -> la meilleure URL
+    (le plus grand descripteur de largeur, ou la derniere entree a defaut)."""
+    if not srcset:
+        return ""
+    best_url, best_w = "", -1
+    for part in srcset.split(","):
+        bits = part.strip().split()
+        if not bits:
+            continue
+        url, w = bits[0], 0
+        if len(bits) > 1 and bits[1].endswith("w"):
+            try:
+                w = int(bits[1][:-1])
+            except ValueError:
+                w = 0
+        if url and w >= best_w:
+            best_w, best_url = w, url
+    return best_url
+
+
+def _find_thumb_img(a):
+    """Retrouve la <img> d'une carte-episode. Beaucoup de sites (WordPress/
+    Elementor notamment) placent l'image plusieurs niveaux au-dessus du lien,
+    dans un wrapper <div> generique qui ne la contient pas directement : on
+    remonte jusqu'a trouver un ancetre qui a reellement une <img>, plutot que
+    de s'arreter au premier <article>/<div>/<li> rencontre (qui peut etre vide)."""
+    img = a.find("img")
+    if img:
+        return img
+    el = a.parent
+    depth = 0
+    while el is not None and getattr(el, "name", None) not in (None, "[document]", "html") and depth < 5:
+        found = el.find("img")
+        if found:
+            return found
+        el = el.parent
+        depth += 1
+    return None
+
+
 def parse_html_page(cfg, url, html, seen):
     """Extrait les épisodes d'une page listing. Retourne une liste de dicts."""
     soup = BeautifulSoup(html, "lxml")
@@ -238,9 +279,11 @@ def parse_html_page(cfg, url, html, seen):
         seen.add(href)
 
         thumb = ""
-        img = a.find("img") or (a.find_parent(["article", "div", "li"]) or soup).find("img")
+        img = _find_thumb_img(a)
         if img:
             thumb = img.get("data-src") or img.get("src") or ""
+            if not thumb:
+                thumb = _best_from_srcset(img.get("data-srcset") or img.get("srcset") or "")
             if thumb.startswith("//"):
                 thumb = "https:" + thumb
 
