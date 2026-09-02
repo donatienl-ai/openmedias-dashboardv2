@@ -293,7 +293,16 @@ def test_merge_real_catalogue():
     check("catalogue reel : aucun ajout a vide", stats["added"], 0)
 
     from scrape_openmedias import TODAY
-    faux_neufs = [r for r in records if r.get("first_seen") == TODAY]
+    # Un run precedent le meme jour a pu legitimement dater des entrees en
+    # TODAY (nouveaux episodes reellement detectes ce matin, par ex.) : ce
+    # n'est un "faux neuf" que si CE merge (scraped=[], donc no-op) vient
+    # de faire passer une entree a TODAY alors qu'elle ne l'etait pas deja
+    # dans le catalogue reel avant merge. Comparer juste apres a TODAY
+    # faisait echouer le test tous les jours ou un run precedent avait deja
+    # trouve du contenu neuf — bloquant le scrape suivant pour rien.
+    orig_first_seen = {r["url"]: r.get("first_seen") for r in real}
+    faux_neufs = [r for r in records
+                  if r.get("first_seen") == TODAY and orig_first_seen.get(r["url"]) != TODAY]
     ok("catalogue reel : aucune entree legacy marquee neuve aujourd'hui",
        len(faux_neufs) == 0, f"{len(faux_neufs)} entrees")
 
