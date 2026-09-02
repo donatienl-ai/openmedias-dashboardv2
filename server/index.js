@@ -299,7 +299,7 @@ async function collectData(preset, range) {
     monthSignatures,
     salesforge: pick(6, { total: 0, detail: [] }),
     bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
-    propalsComptes: pick(8, { total: 0, detail: [] }),
+    propalsComptes: pick(8, { total: 0, totalAmount: 0, detail: [] }),
     // Objectif de CA mensuel (alerte de seuil sur la tuile CA, cf. client) —
     // exposé à TOUT compte connecté (pas juste admin) puisque c'est juste un
     // repère informatif, contrairement au reste de la console admin.
@@ -326,7 +326,7 @@ async function collectCompareData(range) {
     rdvToday: v(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } }),
     rdvBooked: v(2, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } }),
     propals: v(3, { total: 0, totalAmount: 0, detail: [] }),
-    propalsComptes: v(4, { total: 0, detail: [] }),
+    propalsComptes: v(4, { total: 0, totalAmount: 0, detail: [] }),
     signatures: v(5, { total: 0, totalAmount: 0, detail: [] }),
     revenue: v(6, { totalAmount: 0, detail: [] }),
   };

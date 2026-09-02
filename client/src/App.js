@@ -1550,7 +1550,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     pending: fBlock(d.bdc?.pending || { total: 0, detail: [] }),
   };
   // Propositions sur Comptes (statut Salesforce "Proposition envoyée")
-  const propalsComptes = fBlock(d.propalsComptes || { total: 0, detail: [] });
+  const propalsComptes = fBlock(d.propalsComptes || { total: 0, totalAmount: 0, detail: [] }, true);
 
   // Vue fusionnée Pistes + Comptes par commercial, pour le détail de la carte
   // "Propals" (qui affiche la somme des deux) — sans ça le clic sur la carte
@@ -1563,6 +1563,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     for (const r of propalsComptes.detail || []) {
       const e = map.get(r.name) || { name: r.name, leads: 0, comptes: 0, amount: 0 };
       e.comptes = r.count || 0;
+      e.amount = (e.amount || 0) + (r.amount || 0);
       map.set(r.name, e);
     }
     return Array.from(map.values())
@@ -1673,7 +1674,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       ['R1 pris', rdvB.r1, false],
       ['R2 pris', rdvB.r2, false],
       ['Propals pistes', propals, true],
-      ['Propals comptes', propalsComptes, false],
+      ['Propals comptes', propalsComptes, true],
       ['Signatures', sig, true],
       ['CA', rev, true],
       ['RDV SalesForge', sf, false],
@@ -2014,11 +2015,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div
             className="subsec clickable-zone"
-            onClick={() => openModal('Propositions Comptes par commercial', propalsComptes.detail, false, 'c-amber', cmp ? cmpDetail(cmp.propalsComptes) : [])}
+            onClick={() => openModal('Propositions Comptes par commercial', propalsComptes.detail, false, 'c-amber', cmp ? cmpDetail(cmp.propalsComptes) : [], [{ label: 'Estimé', render: (r) => `${fmt(r.amount || 0)} €` }])}
           >
             <div className="subsec-head">
               <span>Comptes</span>
               <b className="c-amber">{propalsComptes.total}</b>
+            </div>
+            <div className="kpi-sub" style={{ marginTop: -4, marginBottom: 6 }}>
+              {fmt(propalsComptes.totalAmount)} € estimés
             </div>
             <TopList rows={propalsComptes.detail} color="c-amber" max={5} />
           </div>
