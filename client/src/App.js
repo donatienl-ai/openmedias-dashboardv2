@@ -2224,11 +2224,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               📺
             </button>
             <button
-              className={`theme-btn with-label ${editMode ? 'active' : ''}`}
+              className={`theme-btn ${editMode ? 'active' : ''}`}
               onClick={() => setEditMode((v) => !v)}
               title={editMode ? 'Terminer la réorganisation' : 'Réorganiser les blocs du dashboard (glisser-déposer)'}
             >
-              {editMode ? '✅ Terminer' : '✏️ Réorganiser'}
+              {editMode ? '✅' : '✏️'}
             </button>
             {isRestrictedCommercial && (
               <button className="theme-btn" onClick={() => setShowMaSemaine(true)} title="Ma semaine">
