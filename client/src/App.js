@@ -24,6 +24,11 @@ function timeLabel(iso) {
 // de backend : c'est une préférence d'affichage personnelle, pas une donnée
 // métier partagée.
 const DEFAULT_BLOCK_ORDER = ['hero', 'money', 'ca12mois', 'activite', 'classements', 'objectifs', 'newsletter', 'synthese'];
+// Vue commercial (comptes role='commercial', cf. isRestrictedCommercial) : on
+// masque tout ce qui suit "CA - 12 mois glissants", sauf le tunnel de
+// conversion (qui reste affiché, sans le podium, via le contenu du bloc
+// "synthese" — cf. plus bas).
+const HIDDEN_BLOCKS_FOR_COMMERCIAL = ['activite', 'classements', 'objectifs', 'newsletter'];
 const BLOCK_LABELS = {
   hero: 'KPI principaux',
   money: 'CA + Signatures',
@@ -1354,6 +1359,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     localStorage.setItem(BLOCK_ORDER_STORAGE_KEY, JSON.stringify(blockOrder));
   }, [blockOrder]);
 
+  // Vue commercial : retire les blocs masqués de l'ordre affiché (l'ordre
+  // choisi par l'utilisateur pour le reste est préservé).
+  const visibleBlockOrder = isRestrictedCommercial
+    ? blockOrder.filter((id) => !HIDDEN_BLOCKS_FOR_COMMERCIAL.includes(id))
+    : blockOrder;
+
   const moveBlock = (id, dir) => {
     setBlockOrder((prev) => {
       const idx = prev.indexOf(id);
@@ -2077,28 +2088,32 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     // Regroupe tunnel de conversion + podium hebdo — regardé en second, après
     // les chiffres du jour/de la période (demande explicite : moins prioritaire
     // au premier coup d'œil que les tuiles chiffrées du dessus).
+    // Vue commercial : seul le tunnel reste, le podium est masqué comme le
+    // reste des blocs sous "CA - 12 mois glissants".
     synthese: (
       <>
         <div className="tile col-12">
           <TileHead dotClass="bg-violet" title={`Tunnel de conversion · ${rangeLabel}`} />
           <ConversionFunnel stages={funnelStages} />
         </div>
-        <div className="tile col-12">
-          <div className="tile-head">
-            <span className="tile-dot bg-amber" />
-            <span className="tile-title">Podium de la semaine</span>
-            <label className="lb-anon-toggle" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-              <input type="checkbox" checked={lbAnonymized} onChange={(e) => setLbAnonymized(e.target.checked)} />
-              Anonymiser
-            </label>
+        {!isRestrictedCommercial && (
+          <div className="tile col-12">
+            <div className="tile-head">
+              <span className="tile-dot bg-amber" />
+              <span className="tile-title">Podium de la semaine</span>
+              <label className="lb-anon-toggle" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={lbAnonymized} onChange={(e) => setLbAnonymized(e.target.checked)} />
+                Anonymiser
+              </label>
+            </div>
+            <Leaderboard
+              callsDetail={weekCalls.detail}
+              rdvDetail={weekRdvMerged}
+              revenueDetail={weekRev.detail}
+              anonymized={lbAnonymized}
+            />
           </div>
-          <Leaderboard
-            callsDetail={weekCalls.detail}
-            rdvDetail={weekRdvMerged}
-            revenueDetail={weekRev.detail}
-            anonymized={lbAnonymized}
-          />
-        </div>
+        )}
       </>
     ),
   };
@@ -2278,7 +2293,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       )}
 
       <div className="dash-blocks">
-        {blockOrder.map((blockId, idx) => {
+        {visibleBlockOrder.map((blockId, idx) => {
           const content = BLOCKS[blockId];
           if (!content && !editMode) return null;
           return (
@@ -2295,7 +2310,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                   <span className="dash-block-handle">⠿</span>
                   <span className="dash-block-name">{BLOCK_LABELS[blockId]}</span>
                   <button className="dash-block-btn" onClick={() => moveBlock(blockId, -1)} disabled={idx === 0} title="Monter">▲</button>
-                  <button className="dash-block-btn" onClick={() => moveBlock(blockId, 1)} disabled={idx === blockOrder.length - 1} title="Descendre">▼</button>
+                  <button className="dash-block-btn" onClick={() => moveBlock(blockId, 1)} disabled={idx === visibleBlockOrder.length - 1} title="Descendre">▼</button>
                 </div>
               )}
               <div className="grid">{content}</div>
