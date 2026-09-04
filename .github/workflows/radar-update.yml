@@ -3,12 +3,17 @@ name: Radar — mise à jour du catalogue
 # Alimente radar/frontend/catalogue.json et radar/frontend/embeddings.json,
 # servis sous /radar par server/index.js.
 #
-# Cron en UTC. Paris est à UTC+2 l'été, UTC+1 l'hiver :
-#   05:00 UTC -> 7h Paris (été) / 6h Paris (hiver)
-#   12:00 UTC -> 14h Paris (été) / 13h Paris (hiver)
+# Cron en UTC. Paris est à UTC+2 l'été, UTC+1 l'hiver — ces horaires visent
+# 10h30 et 14h Paris en été (UTC+2). Le cron ne suit pas le changement
+# d'heure automatiquement : fin octobre (passage à UTC+1), ils glissent
+# d'1h plus tôt côté Paris (9h30 et 13h). Décaler de +1h en UTC fin
+# octobre si besoin de garder 10h30/14h Paris toute l'année :
+#   08:30 UTC -> 10h30 Paris (été) / 9h30 Paris (hiver)
+#   12:00 UTC -> 14h00 Paris (été) / 13h00 Paris (hiver)
 on:
   schedule:
-    - cron: "0 5,12 * * *"
+    - cron: "30 8 * * *"
+    - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
       mode:
