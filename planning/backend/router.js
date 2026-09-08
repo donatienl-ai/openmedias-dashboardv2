@@ -1346,6 +1346,32 @@ app.delete('/api/social-posts/:id', requireContentTeam, (req, res) => {
   res.json({ success: true });
 });
 
+// ── BOÎTE À IDÉES (v1) ────────────────────────────────────────────────────────
+// Idées de posts pas encore datées : panneau latéral du rétroplanning, sur le
+// même principe que "à programmer" (calendrier diffusion) — on glisse une
+// carte sur un jour du calendrier social pour la transformer en social_posts
+// (voir openCreateSocialPostModal côté front), puis l'idée est supprimée ici.
+// Même accès que social_posts : requireContentTeam en écriture, lecture ouverte.
+app.get('/api/social-ideas', (req, res) => {
+  res.json(db.prepare('SELECT * FROM social_ideas ORDER BY created_at DESC').all());
+});
+
+app.post('/api/social-ideas', requireContentTeam, (req, res) => {
+  const title = String(req.body.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'Titre requis' });
+  const channels = parseChannels(req.body.channel);
+  const notes = req.body.notes ? String(req.body.notes).trim() : null;
+  const r = db.prepare(
+    'INSERT INTO social_ideas (title, channel, notes) VALUES (?,?,?)'
+  ).run(title, channels.join(',') || null, notes);
+  res.status(201).json(db.prepare('SELECT * FROM social_ideas WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.delete('/api/social-ideas/:id', requireContentTeam, (req, res) => {
+  db.prepare('DELETE FROM social_ideas WHERE id=?').run(req.params.id);
+  res.json({ success: true });
+});
+
 // Comptes "communication" pour l'assignation des posts — avant, le champ
 // "Assigné à" réutilisait RESP_EDIT_LIST (l'équipe édito, pour l'assignation
 // des ÉMISSIONS), ce qui n'a aucun rapport avec qui doit publier un post

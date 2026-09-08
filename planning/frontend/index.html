@@ -289,6 +289,40 @@ header {
 .a-programmer-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px 0; }
 .cal-day.drag-over { outline: 2px dashed #ff9900; outline-offset: -2px; background: #ff990011; }
 .a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(37,99,235,0.08); }
+
+/* Boîte à idées (rétroplanning réseaux sociaux) — même concept visuel que le
+   panneau "À programmer" ci-dessus : cartes glissables dans un panneau latéral
+   fixe, sauf qu'ici les idées sont ajoutées à la main (pas de source auto). */
+.idea-box-panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px;
+}
+.idea-box-panel-title { font-weight: 700; font-size: 12px; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+#idea-box-cards-wrap { max-height: calc(100vh - var(--header-stack-height, 100px) - 260px); overflow-y: auto; }
+.idea-box-card {
+  background: var(--surface2); border: 1px solid var(--border);
+  box-shadow: inset 3px 0 0 var(--accent);
+  border-radius: var(--radius-sm); padding: 8px 24px 8px 12px; margin-bottom: 8px;
+  cursor: grab; font-size: 12px; position: relative;
+}
+.idea-box-card:active { cursor: grabbing; opacity: 0.6; }
+.idea-box-card .idc-title { font-weight: 600; }
+.idea-box-card .idc-del {
+  position: absolute; top: 6px; right: 8px; cursor: pointer; color: var(--text-muted);
+  font-size: 13px; line-height: 1;
+}
+.idea-box-card .idc-del:hover { color: #dc2626; }
+.idea-box-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px 0; }
+.idea-box-add-row { display: flex; gap: 6px; margin-top: 10px; }
+.idea-box-add-row input {
+  flex: 1; min-width: 0; font-size: 12px; padding: 6px 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+}
+.idea-box-add-row button {
+  font-size: 12px; padding: 6px 10px; border-radius: var(--radius-sm); border: none;
+  background: var(--accent); color: #fff; cursor: pointer; white-space: nowrap;
+}
+.social-cal-day.drag-over-idea { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(37,99,235,0.08); }
 .media-tab { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; transition: all 0.15s; box-shadow: var(--shadow); }
 .media-tab:hover { color: var(--text); border-color: var(--text-muted); }
 .media-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(79,110,247,0.3); }
@@ -1044,6 +1078,9 @@ td { padding: 10px 14px; font-size: 13px; }
   </div>
 
   <div class="view" id="view-social">
+    <div id="social-side-panels-wrap" class="side-panels-wrap content-only" style="display:none">
+      <div id="idea-box-panel" class="idea-box-panel"></div>
+    </div>
     <div class="report-header">
       <h2 style="font-size:16px;font-weight:700">📱 Réseaux sociaux — rétroplanning</h2>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -1571,7 +1608,7 @@ function switchView(v){
   if(v==='reporting')loadReporting();
   if(v==='parametres')loadParametres();
   if(v==='bdc')bdcOnShow();
-  if(v==='social')loadSocial();
+  if(v==='social'){loadSocial();loadIdeaBox();}
   // Le sélecteur de mois est partagé : en changeant de vue on change le
   // calendrier qu'il pilote, donc le mois qu'il doit afficher.
   updateMonthLabel();
@@ -1599,6 +1636,9 @@ let socialCalendarDate=new Date();
 let socialZoom=(()=>{const z=localStorage.getItem('social-zoom');return ['mois','semaine','3jours','jour'].includes(z)?z:'mois';})();
 let socialSubview='calendar';
 let socialFilterChannels=new Set(); // vide = tous les canaux
+let socialIdeasCache=[];
+let draggedIdea=null; // idée en cours de glisser-déposer vers le calendrier
+let socialIdeaBeingConverted=null; // id de l'idée à supprimer si le post est bien créé
 const SOCIAL_STATUS_LABEL={a_faire:'À faire',pret:'Prêt',publie:'Publié'};
 const SOCIAL_STATUS_ORDER=['a_faire','pret','publie'];
 const SOCIAL_CHANNEL_ICON={Instagram:'📷',LinkedIn:'💼',YouTube:'▶️',Newsletter:'✉️'};
@@ -1747,7 +1787,7 @@ function renderSocialCalendar(){
       const outside=d.getMonth()!==m;
       if(outside && i>=35 && d.getDate()>7)break; // pas de 6e ligne inutile
       cells.push(`
-        <div class="social-cal-day${outside?' outside':''}${dStr===todayStr?' today':''}" onclick="openCreateSocialPostModal('${dStr}')">
+        <div class="social-cal-day${outside?' outside':''}${dStr===todayStr?' today':''}" onclick="openCreateSocialPostModal('${dStr}')" ondragover="allowDropIdeaBox(event)" ondrop="dropOnIdeaBox(event,'${dStr}')">
           <div class="social-cal-daynum">${d.getDate()}</div>
           ${(postsByDate[dStr]||[]).map(p=>chipHtml(p,false)).join('')}
         </div>
@@ -1778,7 +1818,7 @@ function renderSocialCalendar(){
   if(socialZoom==='jour'){
     const dStr=fmtDate(dates[0]);
     const dayPosts=postsByDate[dStr]||[];
-    grid.innerHTML=`<div class="social-cal-day${dStr===todayStr?' today':''}" style="min-height:55vh;cursor:default">
+    grid.innerHTML=`<div class="social-cal-day${dStr===todayStr?' today':''}" style="min-height:55vh;cursor:default" ondragover="allowDropIdeaBox(event)" ondrop="dropOnIdeaBox(event,'${dStr}')">
       ${dayPosts.length?dayPosts.map(p=>{
         const chs=socialChannelsOf(p);
         const icons=chs.map(c=>SOCIAL_CHANNEL_ICON[c]||'').join(' ');
@@ -1799,7 +1839,7 @@ function renderSocialCalendar(){
   // Semaine / 3 jours : grandes cases, chips avec pastille de statut
   grid.innerHTML=dates.map(d=>{
     const dStr=fmtDate(d);
-    return `<div class="social-cal-day${dStr===todayStr?' today':''}" onclick="openCreateSocialPostModal('${dStr}')">
+    return `<div class="social-cal-day${dStr===todayStr?' today':''}" onclick="openCreateSocialPostModal('${dStr}')" ondragover="allowDropIdeaBox(event)" ondrop="dropOnIdeaBox(event,'${dStr}')">
       <div class="social-cal-daynum">${d.getDate()}</div>
       ${(postsByDate[dStr]||[]).map(p=>chipHtml(p,true)).join('')}
     </div>`;
@@ -1922,18 +1962,23 @@ function socialImageFieldHtml(){
     </div>`;
 }
 
-function openCreateSocialPostModal(prefillDate){
+function openCreateSocialPostModal(prefillDate,prefillIdea){
   socialPickedImageData=null;
+  // Idée glissée depuis la boîte à idées : pré-remplit le titre (et les
+  // canaux, si l'idée en avait) ; l'idée n'est supprimée qu'une fois le post
+  // effectivement créé (cf. confirmCreateSocialPost), pas dès l'ouverture du
+  // modal — sinon une idée se perd si on annule.
+  socialIdeaBeingConverted=prefillIdea?prefillIdea.id:null;
   document.getElementById('modal-title').textContent='Ajouter un post';
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-body').innerHTML=`
-    <div class="form-group"><label class="form-label">Canaux</label>${socialChannelCheckboxesHtml([])}</div>
-    <div class="form-group" style="margin-top:12px"><label class="form-label">Titre</label><input class="form-input" id="social-title" placeholder="Ex : Teaser campagne rentrée"></div>
+    <div class="form-group"><label class="form-label">Canaux</label>${socialChannelCheckboxesHtml(prefillIdea?socialChannelsOf(prefillIdea):[])}</div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Titre</label><input class="form-input" id="social-title" placeholder="Ex : Teaser campagne rentrée" value="${prefillIdea?prefillIdea.title:''}"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Date de publication</label><input class="form-input" type="date" id="social-date" value="${typeof prefillDate==='string'?prefillDate:''}"></div>
     <div class="form-group" style="margin-top:12px"><label class="form-label">Assigné à</label><select class="form-select" id="social-assigned">${socialAssignedOptionsHtml()}</select></div>
     ${socialImageFieldHtml()}
     <div class="form-group" style="margin-top:12px"><label class="form-label">Lien Drive (dossier source, optionnel)</label><input class="form-input" id="social-drive" placeholder="https://drive.google.com/…"></div>
-    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes / légende</label><textarea class="form-input" id="social-notes" rows="3" placeholder="Texte du post, brief…"></textarea></div>
+    <div class="form-group" style="margin-top:12px"><label class="form-label">Notes / légende</label><textarea class="form-input" id="social-notes" rows="3" placeholder="Texte du post, brief…">${prefillIdea&&prefillIdea.notes?prefillIdea.notes:''}</textarea></div>
   `;
   document.getElementById('modal-footer').innerHTML=`
     <button class="btn-secondary" onclick="closeModal()">Annuler</button>
@@ -1950,6 +1995,13 @@ async function confirmCreateSocialPost(){
   if(!channel.length){showToast('Sélectionne au moins un canal','error');return;}
   if(!title||!scheduledDate){showToast('Titre et date requis','error');return;}
   await fetch(`${API}/social-posts`,{method:'POST',headers:{'Content-Type':'application/json',role},body:JSON.stringify({channel,title,scheduledDate,assignedTo,driveLink,notes,imageData:socialPickedImageData})});
+  // Post créé à partir d'une idée glissée sur le calendrier : elle a fait son
+  // office, on la retire de la boîte à idées.
+  if(socialIdeaBeingConverted){
+    await fetch(`${API}/social-ideas/${socialIdeaBeingConverted}`,{method:'DELETE',headers:{role}});
+    socialIdeaBeingConverted=null;
+    loadIdeaBox();
+  }
   closeModal();
   loadSocial();
   showToast('Post ajouté au rétroplanning');
@@ -2614,7 +2666,74 @@ async function dropOnAProgrammer(event){
 document.addEventListener('dragleave', e => {
   if(e.target.classList&&e.target.classList.contains('cal-day'))e.target.classList.remove('drag-over');
   if(e.target.id==='a-programmer-panel')e.target.classList.remove('drag-over-panel');
+  if(e.target.classList&&e.target.classList.contains('social-cal-day'))e.target.classList.remove('drag-over-idea');
 });
+
+// ── BOÎTE À IDÉES (rétroplanning réseaux sociaux) — v1 ───────────────────────
+// Même principe que "À programmer" ci-dessus : panneau latéral de cartes
+// glissables, sauf que les idées sont saisies à la main (pas de source auto
+// comme les diffusions Salesforce) et qu'on ne glisse que dans un sens —
+// idée -> jour du calendrier (pas de retour post -> idée pour cette v1).
+async function loadIdeaBox(){
+  if(role!=='edit'&&role!=='com')return;
+  socialIdeasCache=await fetch(`${API}/social-ideas`,{headers:{role}}).then(r=>r.json());
+  renderIdeaBox();
+}
+function renderIdeaBox(){
+  const panel=document.getElementById('idea-box-panel');
+  if(!panel)return;
+  const addRowHtml=`<div class="idea-box-add-row">
+      <input type="text" id="idea-box-new-title" placeholder="Nouvelle idée…" onkeydown="if(event.key==='Enter')submitNewIdea()">
+      <button onclick="submitNewIdea()">+ Ajouter</button>
+    </div>`;
+  if(!socialIdeasCache.length){
+    panel.innerHTML=`<div class="idea-box-panel-title"><span>💡 Boîte à idées</span></div>
+      <div class="idea-box-empty">Aucune idée pour l'instant — glissez-en une sur le calendrier une fois ajoutée.</div>
+      ${addRowHtml}`;
+    return;
+  }
+  panel.innerHTML=`<div class="idea-box-panel-title"><span>💡 Boîte à idées (${socialIdeasCache.length})</span></div>
+    <div id="idea-box-cards-wrap">
+      ${socialIdeasCache.map(idea=>`<div class="idea-box-card" draggable="true" ondragstart="dragStartIdea(event,${idea.id})" title="Glisser vers une date du calendrier">
+        <span class="idc-del" onclick="event.stopPropagation();deleteIdea(${idea.id})" title="Supprimer cette idée">✕</span>
+        <div class="idc-title">${idea.title}</div>
+      </div>`).join('')}
+    </div>
+    ${addRowHtml}`;
+}
+async function submitNewIdea(){
+  const input=document.getElementById('idea-box-new-title');
+  const title=input.value.trim();
+  if(!title)return;
+  input.value='';
+  await fetch(`${API}/social-ideas`,{method:'POST',headers:{'Content-Type':'application/json',role},body:JSON.stringify({title})});
+  loadIdeaBox();
+}
+async function deleteIdea(id){
+  await fetch(`${API}/social-ideas/${id}`,{method:'DELETE',headers:{role}});
+  loadIdeaBox();
+}
+function dragStartIdea(event,id){
+  event.stopPropagation();
+  const idea=socialIdeasCache.find(i=>i.id===id);
+  if(!idea)return;
+  draggedIdea=idea;
+  event.dataTransfer.setData('text/plain',id);
+  event.dataTransfer.effectAllowed='move';
+}
+function allowDropIdeaBox(event){
+  if(!draggedIdea)return;
+  event.preventDefault();
+  event.currentTarget.classList.add('drag-over-idea');
+}
+function dropOnIdeaBox(event,dateStr){
+  event.preventDefault();
+  event.currentTarget.classList.remove('drag-over-idea');
+  if(!draggedIdea)return;
+  const idea=draggedIdea;
+  draggedIdea=null;
+  openCreateSocialPostModal(dateStr,idea);
+}
 
 // ── CALENDRIER ──────────────────────────────────────────────────────────────
 // Option d'affichage des mardis/jeudis (jours NON diffusés) : colonnes grisées

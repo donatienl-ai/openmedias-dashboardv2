@@ -73,6 +73,19 @@ db.exec(`
     updated_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- Boîte à idées du rétroplanning communication (v1) : idées de posts pas
+  -- encore datées, glissées sur le calendrier pour devenir un social_posts
+  -- (voir /api/social-ideas). channel/notes optionnels dès la v1 pour ne pas
+  -- avoir à migrer la table plus tard, mais la saisie rapide côté panneau ne
+  -- demande qu'un titre.
+  CREATE TABLE IF NOT EXISTS social_ideas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    channel TEXT,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
   -- Suivi des BDC envoyés pour signature via DocuSign (planning, vue BDC).
   -- statut métier : envoye | signe | refuse | annule ; docusign_status = statut
   -- brut DocuSign ('sent', 'completed', 'declined', 'voided'…), rafraîchi à la
