@@ -290,15 +290,21 @@ header {
 .cal-day.drag-over { outline: 2px dashed #ff9900; outline-offset: -2px; background: #ff990011; }
 .a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(37,99,235,0.08); }
 
-/* Boîte à idées (rétroplanning réseaux sociaux) — même concept visuel que le
-   panneau "À programmer" ci-dessus : cartes glissables dans un panneau latéral
-   fixe, sauf qu'ici les idées sont ajoutées à la main (pas de source auto). */
-.idea-box-panel {
+/* Boîte à idées (rétroplanning réseaux sociaux) — même contenu que le panneau
+   "À programmer" (cartes glissables), mais en popover ancré sous un bouton de
+   la barre d'outils plutôt qu'en panneau latéral fixe sous le header : sur cet
+   onglet, cette zone est déjà occupée par la barre d'outils du calendrier
+   social (+ Ajouter un post, filtre canaux, zoom Mois/Semaine/3 jours/
+   Journée), d'où le chevauchement visuel avec un panneau toujours affiché
+   qui reproduisait tel quel le calcul de position d'"À programmer". */
+.idea-box-menu {
+  position: fixed; width: 280px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 12px;
+  z-index: 500;
 }
 .idea-box-panel-title { font-weight: 700; font-size: 12px; color: var(--accent); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-#idea-box-cards-wrap { max-height: calc(100vh - var(--header-stack-height, 100px) - 260px); overflow-y: auto; }
+#idea-box-cards-wrap { max-height: 320px; overflow-y: auto; }
 .idea-box-card {
   background: var(--surface2); border: 1px solid var(--border);
   box-shadow: inset 3px 0 0 var(--accent);
@@ -1078,9 +1084,6 @@ td { padding: 10px 14px; font-size: 13px; }
   </div>
 
   <div class="view" id="view-social">
-    <div id="social-side-panels-wrap" class="side-panels-wrap content-only" style="display:none">
-      <div id="idea-box-panel" class="idea-box-panel"></div>
-    </div>
     <div class="report-header">
       <h2 style="font-size:16px;font-weight:700">📱 Réseaux sociaux — rétroplanning</h2>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -1091,6 +1094,10 @@ td { padding: 10px 14px; font-size: 13px; }
         <div class="ms-filter" id="social-channel-filter-wrap">
           <button type="button" class="form-select ms-filter-btn" id="social-filter-channel-btn" onclick="toggleSocialChannelFilterMenu(event)">Tous les canaux</button>
           <div class="ms-filter-menu" id="social-channel-filter-menu" style="display:none"></div>
+        </div>
+        <div class="content-only" id="idea-box-wrap" style="display:none">
+          <button type="button" class="btn-secondary" id="idea-box-toggle-btn" onclick="toggleIdeaBoxMenu(event)">💡 Idées</button>
+          <div class="idea-box-menu" id="idea-box-panel" style="display:none"></div>
         </div>
         <button class="btn-primary" onclick="openCreateSocialPostModal()">+ Ajouter un post</button>
       </div>
@@ -1697,6 +1704,8 @@ function toggleSocialChannelFilterMenu(event){
   const menu=document.getElementById('social-channel-filter-menu');
   const willOpen=menu.style.display==='none';
   document.querySelectorAll('.ms-filter-menu').forEach(m=>m.style.display='none');
+  const ideaBoxMenu=document.getElementById('idea-box-panel');
+  if(ideaBoxMenu)ideaBoxMenu.style.display='none';
   if(!willOpen)return;
   renderSocialChannelFilterMenu();
   const rect=event.currentTarget.getBoundingClientRect();
@@ -2682,6 +2691,8 @@ async function loadIdeaBox(){
 function renderIdeaBox(){
   const panel=document.getElementById('idea-box-panel');
   if(!panel)return;
+  const toggleBtn=document.getElementById('idea-box-toggle-btn');
+  if(toggleBtn)toggleBtn.textContent=socialIdeasCache.length?`💡 Idées (${socialIdeasCache.length})`:'💡 Idées';
   const addRowHtml=`<div class="idea-box-add-row">
       <input type="text" id="idea-box-new-title" placeholder="Nouvelle idée…" onkeydown="if(event.key==='Enter')submitNewIdea()">
       <button onclick="submitNewIdea()">+ Ajouter</button>
@@ -2734,6 +2745,25 @@ function dropOnIdeaBox(event,dateStr){
   draggedIdea=null;
   openCreateSocialPostModal(dateStr,idea);
 }
+// Popover ancré sous le bouton "💡 Idées" (même principe que le filtre canaux
+// juste à côté dans la barre d'outils, cf. toggleSocialChannelFilterMenu) —
+// plutôt qu'un panneau fixe sous le header, qui chevauchait cette barre
+// d'outils sur cet onglet.
+function toggleIdeaBoxMenu(event){
+  const menu=document.getElementById('idea-box-panel');
+  const willOpen=menu.style.display==='none';
+  document.getElementById('social-channel-filter-menu').style.display='none';
+  if(!willOpen){menu.style.display='none';return;}
+  renderIdeaBox();
+  const rect=event.currentTarget.getBoundingClientRect();
+  const width=280;
+  menu.style.left=`${Math.max(8,rect.right-width)}px`;
+  menu.style.top=`${rect.bottom+6}px`;
+  menu.style.display='block';
+}
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#idea-box-wrap'))document.getElementById('idea-box-panel').style.display='none';
+});
 
 // ── CALENDRIER ──────────────────────────────────────────────────────────────
 // Option d'affichage des mardis/jeudis (jours NON diffusés) : colonnes grisées
