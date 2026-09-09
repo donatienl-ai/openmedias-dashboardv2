@@ -72,7 +72,7 @@ function loadRosterFromDb() {
       `SELECT nom, role, actif FROM commercial_users WHERE COALESCE(role, 'commercial') IN (${placeholders})`
     )
     .all(...ROSTER_ROLES);
-  return rows
+  const entries = rows
     .map((r) => {
       const nom = (r.nom || '').trim();
       const words = nom.split(/\s+/);
@@ -85,8 +85,22 @@ function loadRosterFromDb() {
         aliases: ALIASES[last] || [],
       };
     })
-    .filter((s) => s.display)
-    .sort((a, b) => a.last.localeCompare(b.last));
+    .filter((s) => s.display);
+
+  // Deux comptes peuvent partager le même nom (ex: quelqu'un désactivé puis
+  // réembauché avec un NOUVEAU compte plutôt que réactivé — ça arrive) : sans
+  // dédoublonnage, la même personne apparaîtrait deux fois dans le roster
+  // (doublon visuel dans "Sales visibles", et surtout un CA compté deux fois
+  // dès qu'un total scope plusieurs lignes du même `display`, ex. le total
+  // d'une équipe). On garde une seule entrée par nom normalisé, en
+  // privilégiant le compte actif s'il y en a un.
+  const byName = new Map();
+  for (const s of entries) {
+    const key = normalize(s.display);
+    const existing = byName.get(key);
+    if (!existing || (!existing.actif && s.actif)) byName.set(key, s);
+  }
+  return [...byName.values()].sort((a, b) => a.last.localeCompare(b.last));
 }
 
 /**
