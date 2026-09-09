@@ -1,54 +1,85 @@
 // ==========================================
 //  ROSTER DES COMMERCIAUX OPENMEDIAS
-//  Liste de référence + matching de noms
+//  Dérivé en direct des comptes commercial_users (SQLite, planning.db) —
+//  remplace l'ancienne liste SALES figée à la main dans ce fichier. Un
+//  nouveau commercial apparaît désormais dans toutes les métriques (CA,
+//  propals, propositions comptes, calls, RDV, objectifs...) dès que son
+//  compte existe (⚙️ Paramètres → Comptes / rétroplanning → Comptes),
+//  sans jamais retoucher ce fichier — c'est justement l'ancien pas manuel
+//  qui restait systématiquement oublié à chaque embauche.
 // ==========================================
-// Les sources (Aircall, Calendly, Salesforce) renvoient les noms
-// dans des formats variés ("Streith Noemie", "Noémie Streith", etc.).
-// On matche sur le NOM DE FAMILLE normalisé (sans accent, minuscule).
-
-// Liste officielle : { display: nom affiché, last: nom de famille pour matching,
-//                      aliases?: [tokens supplémentaires] si un outil orthographie autrement }
-export const SALES = [
-  { display: 'Romy ABDEN', last: 'abden' },
-  { display: 'Clauvaine Battery', last: 'battery' },
-  { display: 'Anastasia Bendali', last: 'bendali' },
-  { display: 'Tim Cattiaux', last: 'cattiaux' },
-  { display: 'David CHEA', last: 'chea' },
-  { display: 'Antoine Corre', last: 'corre' },
-  { display: 'Lucas Dias', last: 'dias' },
-  { display: 'Imane DOENLEN', last: 'doenlen' },
-  { display: 'Thomas Durand', last: 'durand' },
-  { display: 'Jérémie GARO', last: 'garo' },
-  { display: 'Louis Hubert', last: 'hubert' },
-  { display: 'Thomas Jallais', last: 'jallais' },
-  { display: 'Paul Jouannet', last: 'jouannet' },
-  { display: 'Thaivin Jousselin', last: 'jousselin' },
-  { display: 'Moni Kek', last: 'kek' },
-  { display: 'Adrien Lassus', last: 'lassus' },
-  { display: 'Donatien LEFEBURE', last: 'lefebure' },
-  { display: 'Louna LORION', last: 'lorion' },
-  { display: 'Mickael MARCIANO', last: 'marciano' },
-  { display: 'Yanis Mehal', last: 'mehal' },
-  { display: 'Manon MEUNIER', last: 'meunier' },
-  { display: 'François Millet', last: 'millet' },
-  { display: 'Theo Molina', last: 'molina' },
-  { display: 'Lisa Neveu', last: 'neveu' },
-  { display: 'Fabio Poisson', last: 'poisson' },
-  { display: 'Nicolas Poulain', last: 'poulain' },
-  { display: 'Quentin PUREN', last: 'puren' },
-  { display: 'Fouad Senhadji', last: 'senhadji' },
-  { display: 'Rémi Simon', last: 'simon' },
-  { display: 'Noemie Streith', last: 'streith', aliases: ['streight'] },
-  { display: 'Valentin Tobni', last: 'tobni' },
-];
+// Les sources (Aircall, Calendly, Salesforce) renvoient les noms dans des
+// formats variés ("Streith Noemie", "Noémie Streith", etc.). On matche sur le
+// NOM DE FAMILLE normalisé (sans accent, minuscule) — dérivé automatiquement
+// du dernier mot du nom du compte (commercial_users.nom), donc lui aussi sans
+// entretien manuel.
+const { db: planningDb } = (await import('../planning/backend/db.js')).default;
 
 /** Enlève accents + minuscule + trim. */
 function normalize(str) {
   return (str || '')
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .trim();
+}
+
+// Alias ponctuels pour des fautes d'orthographe récurrentes d'un outil tiers
+// (Aircall/Calendly) qu'on ne peut pas déduire du nom du compte — à ne pas
+// confondre avec un commercial manquant : ça n'empêche jamais un nouveau
+// compte d'apparaître, ça élargit juste le matching d'un nom déjà connu.
+// Clé = nom de famille normalisé du compte.
+const ALIASES = {
+  streith: ['streight'],
+};
+
+// Rôles qui comptent comme "commerciaux" pour les métriques CA/propals/etc.
+// (edito/communication n'ont pas accès au dashboard commercial — cf.
+// planning/backend/router.js VALID_ROLES et son commentaire "pas d'accès
+// dashboard" — les inclure ici ne ferait qu'ajouter des lignes à 0 qui ne
+// matcheront jamais rien dans Salesforce/Aircall/Calendly).
+const ROSTER_ROLES = ['commercial', 'manager', 'admin'];
+
+// Requêtes potentiellement très fréquentes (une par enregistrement Salesforce/
+// Aircall/Calendly dans une boucle de matching) : un cache mémoire de
+// quelques secondes évite de retaper la même requête SQLite des centaines de
+// fois par appel API, tout en restant assez court pour qu'un compte tout
+// juste créé apparaisse dès le rechargement suivant du dashboard (pas besoin
+// d'un redéploiement).
+const ROSTER_CACHE_TTL_MS = 15000;
+let rosterCache = null;
+let rosterCacheAt = 0;
+
+function loadRosterFromDb() {
+  const placeholders = ROSTER_ROLES.map(() => '?').join(',');
+  const rows = planningDb
+    .prepare(
+      `SELECT nom, role FROM commercial_users WHERE actif = 1 AND COALESCE(role, 'commercial') IN (${placeholders})`
+    )
+    .all(...ROSTER_ROLES);
+  return rows
+    .map((r) => {
+      const nom = (r.nom || '').trim();
+      const words = nom.split(/\s+/);
+      const last = normalize(words[words.length - 1] || nom);
+      return { display: nom, last, role: r.role || 'commercial', aliases: ALIASES[last] || [] };
+    })
+    .filter((s) => s.display)
+    .sort((a, b) => a.last.localeCompare(b.last));
+}
+
+/**
+ * Liste de référence des commerciaux, dérivée en direct de commercial_users
+ * (actif=1, role commercial/manager/admin). Toujours à jour (à quelques
+ * secondes de cache près, cf. ROSTER_CACHE_TTL_MS) — pas de liste à
+ * maintenir à la main.
+ */
+export function getRoster() {
+  const now = Date.now();
+  if (rosterCache && now - rosterCacheAt < ROSTER_CACHE_TTL_MS) return rosterCache;
+  rosterCache = loadRosterFromDb();
+  rosterCacheAt = now;
+  return rosterCache;
 }
 
 /**
@@ -59,7 +90,7 @@ function normalize(str) {
 export function matchSale(rawName) {
   const norm = normalize(rawName);
   if (!norm) return null;
-  const found = SALES.find(
+  const found = getRoster().find(
     (s) => norm.includes(s.last) || (s.aliases || []).some((a) => norm.includes(normalize(a)))
   );
   return found ? found.display : rawName;
@@ -71,7 +102,7 @@ export function matchSale(rawName) {
  * Renvoie un tableau trié par valeur décroissante (puis alphabétique).
  */
 export function buildFullList(dataMap, withAmount = false) {
-  const rows = SALES.map((s) => {
+  const rows = getRoster().map((s) => {
     const entry = dataMap.get(s.display) || {};
     // On propage tous les champs de l'entrée (ex: inbound/outbound pour les calls)
     const base = { name: s.display, ...entry, count: entry.count || 0 };

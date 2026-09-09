@@ -23,7 +23,7 @@ import { resolveRange, comparisonRange, previousQuarterStart } from './dateRange
 import { getBdc, getCacheStats as getDocusignCacheStats } from './docusign.js';
 import { getRawUsers } from './aircall.js';
 import { getRawHosts } from './calendly.js';
-import { SALES } from './roster.js';
+import { getRoster } from './roster.js';
 import { sendEmail, getMessageStatus } from './mailer.js';
 import { buildReportHtml } from './reportHtml.js';
 import { startScheduler, getSchedulerState } from './scheduler.js';
@@ -161,9 +161,21 @@ app.get('/api/teams', requireAuth, (req, res) => {
   res.json({ teams: teamsWithRosterMembers() });
 });
 // Liste des noms du roster (pour construire les cases à cocher membres d'équipe
-// côté planning, qui n'a pas accès à server/roster.js directement).
-app.get('/api/admin/roster', requireAdmin, (req, res) => {
-  res.json({ names: SALES.map((s) => s.display) });
+// côté planning, qui n'a pas accès à server/roster.js directement, et pour la
+// liste "Sales" + le filtre "Managers" côté client — cf. client/src/App.js).
+// Roster désormais dérivé en direct de commercial_users (voir roster.js) :
+// ouvert à tout compte connecté, pas seulement admin, sinon un commercial/
+// manager ordinaire ne verrait jamais les nouveaux collègues dans son propre
+// filtre "Sales". `names` reste un tableau de chaînes (contrat déjà utilisé
+// par planning/frontend/index.html) ; `managers` est un sous-ensemble ajouté
+// pour que le rôle Manager/Sales du dashboard n'ait plus besoin lui non plus
+// d'une liste figée à la main (cf. client/src/teams.js MANAGERS).
+app.get('/api/admin/roster', requireAuth, (req, res) => {
+  const roster = getRoster();
+  res.json({
+    names: roster.map((s) => s.display),
+    managers: roster.filter((s) => s.role === 'manager').map((s) => s.display),
+  });
 });
 app.post('/api/admin/teams', requireAdmin, (req, res) => {
   try {
@@ -184,7 +196,7 @@ app.patch('/api/admin/teams/:id', requireAdmin, (req, res) => {
       // désormais basés sur les comptes, plus sur une simple liste de noms).
       for (const name of next) {
         if (current.has(name)) continue;
-        const entry = SALES.find((s) => s.display === name);
+        const entry = getRoster().find((s) => s.display === name);
         const account = findAccountByRosterName(name, entry?.last);
         if (!account) throw new Error(`Aucun compte pour « ${name} » — créez-lui d'abord un compte dans Comptes.`);
         setAccountTeam(account.id, req.params.id);
@@ -192,7 +204,7 @@ app.patch('/api/admin/teams/:id', requireAdmin, (req, res) => {
       // Retraits
       for (const name of current) {
         if (next.has(name)) continue;
-        const entry = SALES.find((s) => s.display === name);
+        const entry = getRoster().find((s) => s.display === name);
         const account = findAccountByRosterName(name, entry?.last);
         if (account) setAccountTeam(account.id, null);
       }
@@ -224,7 +236,7 @@ app.get('/api/debug/names', async (req, res) => {
       getRawUsers(r),
       getRawHosts(r),
     ]);
-    const rosterNames = SALES.map((s) => s.display);
+    const rosterNames = getRoster().map((s) => s.display);
     const annotate = (rows) =>
       rows.map((x) => ({ ...x, matched: rosterNames.includes(x.matchedTo) }));
     res.json({
@@ -374,13 +386,13 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         const members = getTeamMembers(req.commercial.team_id);
         const names = resolveTeamDisplayNames(members.length ? members : [req.commercial]);
         if (!names.length) {
-          console.warn(`[SCOPE] équipe "${req.commercial.team_id}" du manager "${req.commercial.nom}" — aucun membre reconnu dans roster.js SALES, verra des données vides.`);
+          console.warn(`[SCOPE] équipe "${req.commercial.team_id}" du manager "${req.commercial.nom}" — aucun membre de l'équipe reconnu dans le roster (roster.js, dérivé de commercial_users), verra des données vides.`);
         }
         return res.json(scopeDataToCommercial(full, names.length ? names : [req.commercial.nom]));
       }
       const displayName = resolveDisplayName(req.commercial);
       if (!displayName) {
-        console.warn(`[SCOPE] commercial "${req.commercial.nom}" (id=${req.commercial.id}) introuvable dans roster.js SALES — verra des données vides sur /api/dashboard.`);
+        console.warn(`[SCOPE] commercial "${req.commercial.nom}" (id=${req.commercial.id}) introuvable dans le roster (roster.js, dérivé de commercial_users) — verra des données vides sur /api/dashboard. Vérifier son rôle (commercial/manager/admin) et son statut actif.`);
       }
       return res.json(scopeDataToCommercial(full, displayName || req.commercial.nom));
     }

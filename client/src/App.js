@@ -592,7 +592,7 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
 // bouton "⚙️ Paramètres" (visible pour les comptes admin, cf. topbar).
 
 // ---------- PARAMÈTRES ADMIN (équipes + sales visibles) ----------
-function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, teams = [], onTeamsChanged, objectifs = [], onObjectifsChanged }) {
+function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, teams = [], onTeamsChanged, objectifs = [], onObjectifsChanged, allSales = ALL_SALES }) {
   const [newTeamLabel, setNewTeamLabel] = useState('');
   const [openTeamId, setOpenTeamId] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -700,7 +700,7 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, t
               </div>
               {openTeamId === t.id && (
                 <div className="set-team-members">
-                  {ALL_SALES.map((s) => (
+                  {allSales.map((s) => (
                     <label className="set-row" key={s}>
                       <span className="set-name">{s}</span>
                       <input
@@ -742,7 +742,7 @@ function SettingsModal({ open, hidden, onToggle, onShowAll, onClose, password, t
               Tout réafficher ({hidden.size} masqué{hidden.size > 1 ? 's' : ''})
             </button>
           )}
-          {ALL_SALES.map((s) => (
+          {allSales.map((s) => (
             <label className="set-row" key={s}>
               <span className={`set-name ${hidden.has(s) ? 'off' : ''}`}>{s}</span>
               <input
@@ -1254,6 +1254,25 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   }, [password]);
   useEffect(() => { loadTeams(); }, [loadTeams]);
 
+  // Roster (liste "Sales" + qui est manager) : dérivé côté serveur en direct
+  // de commercial_users (cf. server/roster.js et /api/admin/roster) — un
+  // nouveau commercial apparaît ici dès que son compte existe, sans jamais
+  // retoucher client/src/teams.js. ALL_SALES/MANAGERS n'y restent qu'en
+  // valeur de repli le temps du premier chargement.
+  const [allSales, setAllSales] = useState(ALL_SALES);
+  const [managersDynamic, setManagersDynamic] = useState(MANAGERS);
+  const loadRoster = useCallback(async () => {
+    try {
+      const r = await fetch('api/admin/roster', { headers: credHeaders(password) });
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d.names) && d.names.length) setAllSales(d.names);
+        if (Array.isArray(d.managers)) setManagersDynamic(d.managers);
+      }
+    } catch { /* silencieux : on garde la dernière liste connue */ }
+  }, [password]);
+  useEffect(() => { loadRoster(); }, [loadRoster]);
+
   // Objectifs individuels de CA mensuel (planning.db, cf. server/index.js /api/objectifs)
   const [objectifs, setObjectifs] = useState([]); // [{ commercialId, displayName, monthlyObjective }]
   const loadObjectifs = useCallback(async () => {
@@ -1527,7 +1546,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   // allowed = Set des noms autorisés, ou null = pas de filtre
   const allowed = allowedNames(teamFilter, saleFilter, teams);
   const hidden = new Set(hiddenSales);
-  const isManager = (name) => MANAGERS.includes(name);
+  const isManager = (name) => managersDynamic.includes(name);
   const roleOk = (name) => !roleFilter || (roleFilter === 'managers' ? isManager(name) : !isManager(name));
   const keepRow = (r) => (!allowed || allowed.has(r.name)) && !hidden.has(r.name) && roleOk(r.name);
   const filterRows = (rows) => (rows || []).filter(keepRow);
@@ -2215,7 +2234,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                   ? myTeamMembers
                   : teamFilter
                     ? (teams.find((t) => t.id === teamFilter)?.members || [])
-                    : ALL_SALES
+                    : allSales
                 ).filter((s) => !hidden.has(s) && roleOk(s)).map((s) => ({ value: s, label: s }))}
                 current={saleFilter}
                 onPick={(v) => setSaleFilter(v)}
@@ -2407,6 +2426,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         onTeamsChanged={loadTeams}
         objectifs={objectifs}
         onObjectifsChanged={loadObjectifs}
+        allSales={allSales}
       />
 
       <DetailModal

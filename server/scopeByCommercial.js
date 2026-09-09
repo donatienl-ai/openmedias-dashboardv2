@@ -11,9 +11,7 @@
 // reconstruire les totaux en sommant ces lignes — sans toucher aux
 // connecteurs eux-mêmes. Un commercial seul = cas particulier d'une équipe à
 // une personne.
-import { matchSale, SALES } from './roster.js';
-
-const ROSTER_DISPLAYS = new Set(SALES.map((s) => s.display));
+import { matchSale, getRoster } from './roster.js';
 
 // Champs d'agrégat courants dans ce projet, tous dérivés du `detail`.
 const AGG_FIELDS = {
@@ -69,17 +67,21 @@ export function scopeDataToCommercial(data, displayNameOrNames) {
 }
 
 /**
- * Résout le nom de roster (SALES[].display) correspondant à un compte
- * commercial connecté, à partir de son `nom` (commercial_users.nom).
- * Renvoie null si aucun match trouvé dans roster.js (le commercial verra alors
- * des zéros partout — à corriger en ajoutant/alignant l'entrée dans SALES).
+ * Résout le nom de roster (getRoster()[].display) correspondant à un compte
+ * commercial connecté, à partir de son `nom` (commercial_users.nom). Le
+ * roster étant désormais dérivé en direct de commercial_users (voir
+ * roster.js), ce cas ne devrait plus se produire pour un compte actif au
+ * bon rôle — il reste possible pour un compte inactif ou hors des rôles
+ * commercial/manager/admin (edito, communication), qui n'a jamais de
+ * chiffres à voir de toute façon.
  */
 export function resolveDisplayName(commercial) {
   if (!commercial || !commercial.nom) return null;
   const matched = matchSale(commercial.nom);
   // matchSale renvoie le nom brut tel quel s'il ne trouve aucune correspondance
-  // dans SALES — dans ce cas ce n'est pas un display valide du roster.
-  return matched && ROSTER_DISPLAYS.has(matched) ? matched : null;
+  // dans le roster — dans ce cas ce n'est pas un display valide.
+  const rosterDisplays = new Set(getRoster().map((s) => s.display));
+  return matched && rosterDisplays.has(matched) ? matched : null;
 }
 
 /**

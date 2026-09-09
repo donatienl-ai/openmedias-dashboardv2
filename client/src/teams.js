@@ -2,6 +2,13 @@
 //  ÉQUIPES OPENMEDIAS (filtrage front)
 // ==========================================
 // Les noms doivent correspondre aux `display` du roster serveur.
+//
+// ALL_SALES et MANAGERS ci-dessous ne sont plus la source de vérité : elles
+// ne servent que de valeur de repli le temps du tout premier rendu, avant
+// que App.js ait reçu la réponse de GET /api/admin/roster (qui dérive
+// désormais ces deux listes en direct de commercial_users, voir
+// server/roster.js — un nouveau commercial y apparaît dès que son compte
+// existe, sans jamais toucher ce fichier). Inutile de les tenir à jour.
 
 export const TEAMS = [
   {
