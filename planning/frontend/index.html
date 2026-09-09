@@ -1183,6 +1183,7 @@ td { padding: 10px 14px; font-size: 13px; }
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn-secondary" onclick="loadSalesforceCommerciaux()">🔄 Depuis Salesforce (commerciaux)</button>
         <button class="btn-secondary" onclick="openManualAccountModal()">✍️ Créer manuellement (édito, communication...)</button>
+        <button class="btn-secondary" onclick="openHistoriqueAccountModal()" title="Commercial parti de l'entreprise, sans compte existant : garde sa trace sur le dashboard sans lui donner d'accès de connexion">🗂️ Profil historique (sans accès)</button>
       </div>
       <div id="sf-commerciaux-list" class="param-table" style="display:none"></div>
       <div class="param-sep"></div>
@@ -4363,6 +4364,35 @@ async function confirmCreateManualAccount(){
   closeModal();
   await loadParametres();
   showToast('Compte créé, email d\'invitation envoyé ✓','success');
+}
+
+// Profil "historique" : commercial parti de l'entreprise, dont le compte n'a
+// jamais existé dans ce système (migré depuis l'ancienne liste codée en dur —
+// cf. server/roster.js). Contrairement à openManualAccountModal ci-dessus, ne
+// demande qu'un nom : pas d'email, pas d'invitation envoyée, actif=0 dès la
+// création. Sert juste à garder sa trace sur le dashboard (visible/masquable
+// comme n'importe qui via "Sales visibles"), sans lui donner un accès réel.
+function openHistoriqueAccountModal(){
+  document.getElementById('modal-title').textContent='Ajouter un profil historique';
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML=`
+    <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="newacc-hist-nom" placeholder="Ex: Clauvaine Battery"></div>
+    <div class="info-banner neutral" style="margin-top:10px">🗂️ Aucun email ni mot de passe utilisable ne sera créé, aucune invitation envoyée. Cette personne apparaîtra juste dans les listes du dashboard (masquable via ⚙️ Sales visibles), marquée inactive d'emblée — à utiliser pour un commercial parti dont le compte n'a jamais existé ici.</div>
+  `;
+  document.getElementById('modal-footer').innerHTML=`
+    <button class="btn-secondary" onclick="closeModal()">Annuler</button>
+    <button class="btn-primary" onclick="confirmCreateHistoriqueAccount()">Ajouter</button>
+  `;
+}
+async function confirmCreateHistoriqueAccount(){
+  const nom=document.getElementById('newacc-hist-nom').value.trim();
+  if(!nom){showToast('Nom requis','warning');return;}
+  const r=await fetch(`${API}/admin/commerciaux/historique`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom})});
+  const d=await r.json();
+  if(!r.ok){showToast(d.error||'Erreur','warning');return;}
+  closeModal();
+  await loadParametres();
+  showToast('Profil historique ajouté (sans accès) ✓','success');
 }
 
 function renderCommerciauxList(){

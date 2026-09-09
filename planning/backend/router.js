@@ -1567,6 +1567,35 @@ app.post('/api/admin/commerciaux', requireEdit, (req, res) => {
   }
 });
 
+// Profil "historique" (commercial parti de l'entreprise dont le compte n'a
+// jamais existé dans commercial_users — migré depuis l'ancienne liste codée en
+// dur, cf. server/roster.js et client/src/teams.js DEFAULT_HIDDEN) : garde une
+// trace sur le dashboard, visible/masquable comme n'importe qui via
+// "Sales visibles", SANS donner d'accès de connexion réel. Différent de la
+// création normale ci-dessus : pas d'email demandé (généré en interne, jamais
+// communiqué à personne), pas d'invitation envoyée, actif=0 dès la création.
+// Demandé par Lina le 09/09/2026 pour réintégrer d'anciens commerciaux.
+app.post('/api/admin/commerciaux/historique', requireEdit, (req, res) => {
+  const nom = String(req.body.nom || '').trim();
+  if (!nom) return res.status(400).json({ error: 'Nom requis' });
+  const role = VALID_ROLES.includes(req.body.role) ? req.body.role : 'commercial';
+  try {
+    // Email jamais communiqué à personne : juste une valeur unique pour
+    // satisfaire la contrainte UNIQUE NOT NULL de la colonne. Domaine .invalid
+    // (RFC 2606, réservé pour ne jamais correspondre à une vraie boîte mail).
+    const slug = nom.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '.').replace(/(^\.|\.$)/g, '') || 'profil';
+    const email = `historique.${slug}.${crypto.randomBytes(4).toString('hex')}@archive.openmedias.invalid`;
+    const placeholder = crypto.randomBytes(32).toString('hex');
+    const r = db.prepare(
+      `INSERT INTO commercial_users (email,password_hash,nom,role,actif) VALUES (?,?,?,?,0)`
+    ).run(email, hashPassword(placeholder), nom, role);
+    res.status(201).json({ id: r.lastInsertRowid, historique: true });
+  } catch (e) {
+    res.status(400).json({ error: String(e.message || e) });
+  }
+});
+
 // Renvoie l'email d'invitation (ex: le premier est resté sans réponse, ou perdu).
 app.post('/api/admin/commerciaux/:id/resend-invite', requireEdit, (req, res) => {
   const user = db.prepare('SELECT * FROM commercial_users WHERE id=?').get(req.params.id);
