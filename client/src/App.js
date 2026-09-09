@@ -1343,16 +1343,25 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   }, []);
   const [hiddenSales, setHiddenSales] = useState(() => {
     // Si l'utilisateur n'a jamais touché aux paramètres sur ce navigateur,
-    // on applique le masquage par défaut (hors-équipe sauf Thomas Durand).
+    // on applique le masquage par défaut (DEFAULT_HIDDEN, vide depuis le
+    // 09/09/2026 — tout le monde visible par défaut, cf. teams.js).
+    //
+    // Clé renommée 'om_hidden_sales' -> 'om_hidden_sales_v2' à cette même
+    // date : les anciens navigateurs avaient déjà persisté l'ancienne liste
+    // de 12 noms masqués par défaut (l'effet ci-dessous la réécrivait au
+    // premier rendu), donc changer seulement DEFAULT_HIDDEN n'aurait rien
+    // changé pour eux. La nouvelle clé les fait repartir sur le nouveau
+    // défaut (vide) une seule fois ; tout choix de masquage fait ensuite est
+    // à nouveau mémorisé normalement, sous la nouvelle clé.
     try {
-      const saved = localStorage.getItem('om_hidden_sales');
+      const saved = localStorage.getItem('om_hidden_sales_v2');
       return saved !== null ? JSON.parse(saved) : DEFAULT_HIDDEN;
     } catch { return DEFAULT_HIDDEN; }
   });
 
   // Persiste la liste des sales masqués
   useEffect(() => {
-    localStorage.setItem('om_hidden_sales', JSON.stringify(hiddenSales));
+    localStorage.setItem('om_hidden_sales_v2', JSON.stringify(hiddenSales));
   }, [hiddenSales]);
 
   const toggleHidden = (name) =>

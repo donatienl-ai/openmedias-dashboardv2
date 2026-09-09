@@ -90,21 +90,18 @@ export function allowedNames(teamId, saleName, teamsList = TEAMS) {
  * Sales masqués PAR DÉFAUT (hors équipe, sauf Thomas Durand qui reste visible).
  * Appliqué uniquement au premier chargement (navigateur sans réglage sauvegardé) ;
  * modifiable ensuite via ⚙️ Paramètres.
+ *
+ * Vidée le 09/09/2026 : tout le monde (y compris les comptes désactivés/
+ * partis, conservés dans commercial_users pour l'historique de CA — voir
+ * server/roster.js) est visible par défaut désormais. Ce réglage est un pur
+ * filtre d'affichage côté navigateur (localStorage) : il ne touche jamais au
+ * champ `actif` en base, donc ne réactive/désactive aucun compte. Ancienne
+ * liste conservée ci-dessous pour référence si on veut la restaurer :
+ *   Romy ABDEN, Clauvaine Battery, Tim Cattiaux, Louis Hubert,
+ *   Thomas Jallais, Thaivin Jousselin, Donatien LEFEBURE, Yanis Mehal,
+ *   François Millet, Theo Molina, Fouad Senhadji, Rémi Simon
  */
-export const DEFAULT_HIDDEN = [
-  'Romy ABDEN',
-  'Clauvaine Battery',
-  'Tim Cattiaux',
-  'Louis Hubert',
-  'Thomas Jallais',
-  'Thaivin Jousselin',
-  'Donatien LEFEBURE',
-  'Yanis Mehal',
-  'François Millet',
-  'Theo Molina',
-  'Fouad Senhadji',
-  'Rémi Simon',
-];
+export const DEFAULT_HIDDEN = [];
 
 /** Managers (filtre Rôle : Managers vs Sales). */
 export const MANAGERS = [
