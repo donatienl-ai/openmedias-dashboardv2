@@ -1,14 +1,19 @@
 // ==========================================
 //  ROSTER DES COMMERCIAUX OPENMEDIAS
-//  Dérivé en direct des comptes commercial_users (SQLite, planning.db) —
-//  remplace l'ancienne liste SALES figée à la main dans ce fichier. Un
-//  nouveau commercial apparaît désormais dans toutes les métriques (CA,
-//  propals, propositions comptes, calls, RDV, objectifs...) dès que son
-//  compte existe (⚙️ Paramètres → Comptes / rétroplanning → Comptes),
-//  sans jamais retoucher ce fichier — c'est justement l'ancien pas manuel
-//  qui restait systématiquement oublié à chaque embauche. Un commercial qui
-//  quitte reste dans ce roster (désactivé ≠ supprimé) pour ne pas perdre son
-//  historique de vente sur les périodes passées — voir la note plus bas.
+//  Fusionne deux sources (voir loadRosterFromDb) :
+//   1) les comptes commercial_users (SQLite, planning.db) — la source
+//      vivante. Un nouveau commercial y apparaît dans toutes les métriques
+//      (CA, propals, propositions comptes, calls, RDV, objectifs...) dès que
+//      son compte existe (⚙️ Paramètres → Comptes / rétroplanning →
+//      Comptes), sans jamais retoucher ce fichier.
+//   2) STATIC_SALES ci-dessous — l'ancienne liste figée à la main, conservée
+//      pour ne pas perdre l'historique de CA des commerciaux qui n'ont
+//      jamais eu de compte (avant la mise en place des comptes) ou dont le
+//      compte a été supprimé plutôt que désactivé. Un compte réel l'emporte
+//      toujours sur une entrée statique du même nom.
+//  Un commercial qui quitte reste dans ce roster (désactivé ≠ supprimé) pour
+//  ne pas perdre son historique de vente sur les périodes passées — voir la
+//  note plus bas.
 // ==========================================
 // Les sources (Aircall, Calendly, Salesforce) renvoient les noms dans des
 // formats variés ("Streith Noemie", "Noémie Streith", etc.). On matche sur le
@@ -34,6 +39,53 @@ function normalize(str) {
 const ALIASES = {
   streith: ['streight'],
 };
+
+// Historique conservé de l'ANCIEN roster figé à la main (avant le passage à
+// commercial_users comme source). Certains de ces noms n'ont jamais eu de
+// compte (embauchés avant l'existence des comptes commerciaux, ou compte
+// supprimé depuis plutôt que désactivé) — sans cette liste, leur CA
+// disparaîtrait purement et simplement du détail par commercial sur les
+// périodes passées où ils vendaient (constaté : écart de CA sur juillet dès
+// qu'un ou plusieurs sales sont masqués, cf. fBlock côté client qui
+// recalcule le total à partir des lignes visibles de `detail` — un nom
+// absent du détail n'est jamais recompté). Cette liste ne bouge donc plus :
+// un NOUVEAU commercial n'a JAMAIS besoin d'y être ajouté (voir
+// loadRosterFromDb, qui fusionne ceci avec commercial_users — un compte réel
+// l'emporte toujours sur une entrée d'ici pour le même nom). Elle ne sert
+// qu'à ne pas perdre les profils d'avant la bascule.
+const STATIC_SALES = [
+  { display: 'Romy ABDEN', last: 'abden' },
+  { display: 'Clauvaine Battery', last: 'battery' },
+  { display: 'Anastasia Bendali', last: 'bendali' },
+  { display: 'Tim Cattiaux', last: 'cattiaux' },
+  { display: 'David CHEA', last: 'chea' },
+  { display: 'Antoine Corre', last: 'corre' },
+  { display: 'Lucas Dias', last: 'dias' },
+  { display: 'Imane DOENLEN', last: 'doenlen' },
+  { display: 'Thomas Durand', last: 'durand' },
+  { display: 'Jérémie GARO', last: 'garo' },
+  { display: 'Louis Hubert', last: 'hubert' },
+  { display: 'Thomas Jallais', last: 'jallais' },
+  { display: 'Paul Jouannet', last: 'jouannet' },
+  { display: 'Thaivin Jousselin', last: 'jousselin' },
+  { display: 'Moni Kek', last: 'kek' },
+  { display: 'Adrien Lassus', last: 'lassus' },
+  { display: 'Donatien LEFEBURE', last: 'lefebure' },
+  { display: 'Louna LORION', last: 'lorion' },
+  { display: 'Mickael MARCIANO', last: 'marciano' },
+  { display: 'Yanis Mehal', last: 'mehal' },
+  { display: 'Manon MEUNIER', last: 'meunier' },
+  { display: 'François Millet', last: 'millet' },
+  { display: 'Theo Molina', last: 'molina' },
+  { display: 'Lisa Neveu', last: 'neveu' },
+  { display: 'Fabio Poisson', last: 'poisson' },
+  { display: 'Nicolas Poulain', last: 'poulain' },
+  { display: 'Quentin PUREN', last: 'puren' },
+  { display: 'Fouad Senhadji', last: 'senhadji' },
+  { display: 'Rémi Simon', last: 'simon' },
+  { display: 'Noemie Streith', last: 'streith', aliases: ['streight'] },
+  { display: 'Valentin Tobni', last: 'tobni' },
+];
 
 // Rôles qui comptent comme "commerciaux" pour les métriques CA/propals/etc.
 // (edito/communication n'ont pas accès au dashboard commercial — cf.
@@ -72,7 +124,7 @@ function loadRosterFromDb() {
       `SELECT nom, role, actif FROM commercial_users WHERE COALESCE(role, 'commercial') IN (${placeholders})`
     )
     .all(...ROSTER_ROLES);
-  const entries = rows
+  const dbEntries = rows
     .map((r) => {
       const nom = (r.nom || '').trim();
       const words = nom.split(/\s+/);
@@ -83,24 +135,40 @@ function loadRosterFromDb() {
         role: r.role || 'commercial',
         actif: !!r.actif,
         aliases: ALIASES[last] || [],
+        _source: 'db',
       };
     })
     .filter((s) => s.display);
 
-  // Deux comptes peuvent partager le même nom (ex: quelqu'un désactivé puis
-  // réembauché avec un NOUVEAU compte plutôt que réactivé — ça arrive) : sans
-  // dédoublonnage, la même personne apparaîtrait deux fois dans le roster
-  // (doublon visuel dans "Sales visibles", et surtout un CA compté deux fois
-  // dès qu'un total scope plusieurs lignes du même `display`, ex. le total
-  // d'une équipe). On garde une seule entrée par nom normalisé, en
-  // privilégiant le compte actif s'il y en a un.
+  const staticEntries = STATIC_SALES.map((s) => ({
+    display: s.display,
+    last: s.last,
+    role: s.role || 'commercial',
+    actif: false,
+    aliases: s.aliases || ALIASES[s.last] || [],
+    _source: 'static',
+  }));
+
+  // Fusionne les deux sources par nom normalisé (accents/casse ignorés) :
+  // - un compte réel (commercial_users) l'emporte toujours sur une entrée
+  //   STATIC_SALES du même nom (ex: quelqu'un présent dans l'ancienne liste
+  //   ET qui a depuis un vrai compte) ;
+  // - deux comptes réels pour le même nom (réembauche avec un nouveau
+  //   compte plutôt qu'une réactivation) : on garde l'actif ;
+  // - un nom qui n'existe QUE dans STATIC_SALES (jamais eu de compte, ou
+  //   compte supprimé) reste présent grâce à cette fusion.
   const byName = new Map();
-  for (const s of entries) {
+  for (const s of staticEntries) byName.set(normalize(s.display), s);
+  for (const s of dbEntries) {
     const key = normalize(s.display);
-    const existing = byName.get(key);
-    if (!existing || (!existing.actif && s.actif)) byName.set(key, s);
+    const current = byName.get(key);
+    if (!current || current._source === 'static' || (!current.actif && s.actif)) {
+      byName.set(key, s);
+    }
   }
-  return [...byName.values()].sort((a, b) => a.last.localeCompare(b.last));
+  return [...byName.values()]
+    .map(({ _source, ...rest }) => rest)
+    .sort((a, b) => a.last.localeCompare(b.last));
 }
 
 /**
