@@ -6,7 +6,9 @@
 //  propals, propositions comptes, calls, RDV, objectifs...) dès que son
 //  compte existe (⚙️ Paramètres → Comptes / rétroplanning → Comptes),
 //  sans jamais retoucher ce fichier — c'est justement l'ancien pas manuel
-//  qui restait systématiquement oublié à chaque embauche.
+//  qui restait systématiquement oublié à chaque embauche. Un commercial qui
+//  quitte reste dans ce roster (désactivé ≠ supprimé) pour ne pas perdre son
+//  historique de vente sur les périodes passées — voir la note plus bas.
 // ==========================================
 // Les sources (Aircall, Calendly, Salesforce) renvoient les noms dans des
 // formats variés ("Streith Noemie", "Noémie Streith", etc.). On matche sur le
@@ -40,6 +42,19 @@ const ALIASES = {
 // matcheront jamais rien dans Salesforce/Aircall/Calendly).
 const ROSTER_ROLES = ['commercial', 'manager', 'admin'];
 
+// IMPORTANT : on ne filtre PAS sur actif=1 ici. Un commercial qui quitte est
+// désactivé (pour couper sa connexion), pas supprimé — mais son historique de
+// vente reste bien réel. Filtrer sur actif ferait disparaître sa ligne de
+// TOUS les détails par commercial (CA, propals...) dès sa désactivation, y
+// compris sur les périodes passées où il travaillait encore ici : un rapport
+// annuel perdrait alors une partie du CA réellement généré. L'ancienne liste
+// SALES figée à la main avait ce comportement par accident (personne n'y
+// retirait jamais un nom qui partait, il finissait juste masqué via "Sales
+// visibles") — on le reproduit ici volontairement. Un commercial parti reste
+// donc dans le roster pour toujours ; s'il faut le sortir de la vue courante
+// du dashboard, ⚙️ Paramètres → Sales visibles fait déjà exactement ça, sans
+// toucher à l'historique.
+
 // Requêtes potentiellement très fréquentes (une par enregistrement Salesforce/
 // Aircall/Calendly dans une boucle de matching) : un cache mémoire de
 // quelques secondes évite de retaper la même requête SQLite des centaines de
@@ -54,7 +69,7 @@ function loadRosterFromDb() {
   const placeholders = ROSTER_ROLES.map(() => '?').join(',');
   const rows = planningDb
     .prepare(
-      `SELECT nom, role FROM commercial_users WHERE actif = 1 AND COALESCE(role, 'commercial') IN (${placeholders})`
+      `SELECT nom, role, actif FROM commercial_users WHERE COALESCE(role, 'commercial') IN (${placeholders})`
     )
     .all(...ROSTER_ROLES);
   return rows
@@ -62,7 +77,13 @@ function loadRosterFromDb() {
       const nom = (r.nom || '').trim();
       const words = nom.split(/\s+/);
       const last = normalize(words[words.length - 1] || nom);
-      return { display: nom, last, role: r.role || 'commercial', aliases: ALIASES[last] || [] };
+      return {
+        display: nom,
+        last,
+        role: r.role || 'commercial',
+        actif: !!r.actif,
+        aliases: ALIASES[last] || [],
+      };
     })
     .filter((s) => s.display)
     .sort((a, b) => a.last.localeCompare(b.last));
@@ -70,9 +91,9 @@ function loadRosterFromDb() {
 
 /**
  * Liste de référence des commerciaux, dérivée en direct de commercial_users
- * (actif=1, role commercial/manager/admin). Toujours à jour (à quelques
- * secondes de cache près, cf. ROSTER_CACHE_TTL_MS) — pas de liste à
- * maintenir à la main.
+ * (role commercial/manager/admin — actif ou non, voir la note ci-dessus).
+ * Toujours à jour (à quelques secondes de cache près, cf.
+ * ROSTER_CACHE_TTL_MS) — pas de liste à maintenir à la main.
  */
 export function getRoster() {
   const now = Date.now();
