@@ -312,7 +312,13 @@ header {
   cursor: grab; font-size: 12px; position: relative;
 }
 .idea-box-card:active { cursor: grabbing; opacity: 0.6; }
-.idea-box-card .idc-title { font-weight: 600; }
+.idea-box-card .idc-title { font-weight: 600; cursor: text; border-radius: 4px; padding: 1px 3px; margin: -1px -3px; }
+.idea-box-card .idc-title:hover { background: rgba(79,110,247,0.1); }
+.idea-box-card .idc-title-input {
+  font: inherit; font-weight: 600; width: 100%; box-sizing: border-box;
+  border: 1px solid var(--accent); border-radius: 4px; padding: 1px 3px; margin: -1px -3px;
+  background: var(--surface); color: var(--text);
+}
 .idea-box-card .idc-del {
   position: absolute; top: 6px; right: 8px; cursor: pointer; color: var(--text-muted);
   font-size: 13px; line-height: 1;
@@ -1646,6 +1652,7 @@ let socialSubview='calendar';
 let socialFilterChannels=new Set(); // vide = tous les canaux
 let socialIdeasCache=[];
 let draggedIdea=null; // idée en cours de glisser-déposer vers le calendrier
+let editingIdeaId=null; // id de l'idée en cours d'édition inline (clic sur le titre)
 let socialIdeaBeingConverted=null; // id de l'idée à supprimer si le post est bien créé
 const SOCIAL_STATUS_LABEL={a_faire:'À faire',pret:'Prêt',publie:'Publié'};
 const SOCIAL_STATUS_ORDER=['a_faire','pret','publie'];
@@ -2706,12 +2713,41 @@ function renderIdeaBox(){
   }
   panel.innerHTML=`<div class="idea-box-panel-title"><span>💡 Boîte à idées (${socialIdeasCache.length})</span></div>
     <div id="idea-box-cards-wrap">
-      ${socialIdeasCache.map(idea=>`<div class="idea-box-card" draggable="true" ondragstart="dragStartIdea(event,${idea.id})" title="Glisser vers une date du calendrier">
+      ${socialIdeasCache.map(idea=>{
+        const editing=editingIdeaId===idea.id;
+        return `<div class="idea-box-card" draggable="${!editing}" ondragstart="dragStartIdea(event,${idea.id})" title="${editing?'':'Glisser vers une date du calendrier, ou cliquer le titre pour le modifier'}">
         <span class="idc-del" onclick="event.stopPropagation();deleteIdea(${idea.id})" title="Supprimer cette idée">✕</span>
-        <div class="idc-title">${idea.title}</div>
-      </div>`).join('')}
+        ${editing
+          ? `<input type="text" class="idc-title-input" id="idea-box-edit-input-${idea.id}" value="${idea.title.replace(/"/g,'&quot;')}"
+               onclick="event.stopPropagation()"
+               onkeydown="event.stopPropagation();if(event.key==='Enter'){event.preventDefault();saveEditIdea(${idea.id});}else if(event.key==='Escape'){event.preventDefault();cancelEditIdea();}"
+               onblur="saveEditIdea(${idea.id})">`
+          : `<div class="idc-title" onclick="event.stopPropagation();startEditIdea(${idea.id})" title="Cliquer pour modifier">${idea.title}</div>`}
+      </div>`;
+      }).join('')}
     </div>
     ${addRowHtml}`;
+  if(editingIdeaId!=null){
+    const input=document.getElementById(`idea-box-edit-input-${editingIdeaId}`);
+    if(input){input.focus();input.select();}
+  }
+}
+function startEditIdea(id){
+  editingIdeaId=id;
+  renderIdeaBox();
+}
+function cancelEditIdea(){
+  editingIdeaId=null;
+  renderIdeaBox();
+}
+async function saveEditIdea(id){
+  if(editingIdeaId!==id)return; // déjà sauvegardé/annulé (blur après Enter/Escape)
+  const input=document.getElementById(`idea-box-edit-input-${id}`);
+  const title=input?input.value.trim():'';
+  editingIdeaId=null;
+  if(!title||title===socialIdeasCache.find(i=>i.id===id)?.title){renderIdeaBox();return;}
+  await fetch(`${API}/social-ideas/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role},body:JSON.stringify({title})});
+  loadIdeaBox();
 }
 async function submitNewIdea(){
   const input=document.getElementById('idea-box-new-title');
