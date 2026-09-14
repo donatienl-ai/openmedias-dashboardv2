@@ -547,9 +547,47 @@ function PeriodSelector({ current, label, onApply }) {
 // ---------- FILTRE ÉQUIPE / SALES ----------
 function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
   const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  // Le menu était positionné en pur CSS (position:absolute; right:0, ancré au
+  // bord droit du bouton) : pour un bouton proche du bord gauche de l'écran
+  // (ex. "Rôle", le premier de la rangée), un menu plus large que l'espace
+  // disponible à sa gauche déborde hors de la fenêtre — bug remonté par
+  // plusieurs personnes ("menu déroulant" tronqué/mal placé). On calcule
+  // désormais la position en JS à l'ouverture (et au redimensionnement) et on
+  // la borne pour qu'elle reste toujours entièrement visible, quel que soit
+  // le bouton ou la largeur d'écran — même principe que les popovers déjà
+  // recalculés en JS ailleurs dans l'app (ex. filtre canaux du planning).
+  const [menuStyle, setMenuStyle] = useState(null);
+  useEffect(() => {
+    if (!open) return;
+    const MENU_WIDTH = 220; // doit rester cohérent avec le min-width CSS de .period-menu
+    const MARGIN = 8;
+    // En dessous de 640px, le menu burger mobile impose déjà
+    // `.topbar-controls-panel.open .period-menu { position: static; ... }`
+    // (le menu doit rester dans le flux, en pleine largeur, sous le bouton).
+    // Un style inline `position: fixed` l'emporterait toujours sur cette règle
+    // CSS (peu importe le media query) et casserait ce layout mobile. On laisse
+    // donc `menuStyle` à null sur mobile pour que le CSS garde la main, et on
+    // ne calcule le positionnement JS que sur desktop, où le bug était signalé.
+    const place = () => {
+      if (window.innerWidth <= 640) {
+        setMenuStyle(null);
+        return;
+      }
+      const btn = btnRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const maxLeft = window.innerWidth - MENU_WIDTH - MARGIN;
+      const left = Math.max(MARGIN, Math.min(rect.right - MENU_WIDTH, maxLeft));
+      setMenuStyle({ position: 'fixed', top: rect.bottom + 8, left, minWidth: Math.max(MENU_WIDTH, rect.width) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open]);
   return (
     <div className="period">
-      <button className={`period-btn ${current ? 'filter-active' : ''}`} onClick={() => setOpen((o) => !o)}>
+      <button ref={btnRef} className={`period-btn ${current ? 'filter-active' : ''}`} onClick={() => setOpen((o) => !o)}>
         <span className="period-cal">{icon}</span>
         <span className="period-label">{label}</span>
         <span className="period-caret">▾</span>
@@ -557,7 +595,7 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
       {open && (
         <>
           <div className="period-backdrop" onClick={() => setOpen(false)} />
-          <div className="period-menu filter-menu">
+          <div className="period-menu filter-menu" style={menuStyle || undefined}>
             <button
               className={`period-item ${!current ? 'active' : ''}`}
               onClick={() => { setOpen(false); onPick(null); }}
