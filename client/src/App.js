@@ -579,7 +579,14 @@ function FilterDropdown({ icon, label, items, current, onPick, allLabel }) {
       const rect = btn.getBoundingClientRect();
       const maxLeft = window.innerWidth - MENU_WIDTH - MARGIN;
       const left = Math.max(MARGIN, Math.min(rect.right - MENU_WIDTH, maxLeft));
-      setMenuStyle({ position: 'fixed', top: rect.bottom + 8, left, minWidth: Math.max(MENU_WIDTH, rect.width) });
+      const width = Math.max(MENU_WIDTH, rect.width);
+      // Le CSS garde `.period-menu { right: 0; }` (utilisé par le menu Période
+      // juste au-dessus, qui lui reste en position:absolute). Avec
+      // position:fixed + left ET right tous les deux définis et pas de width
+      // explicite, le navigateur étire l'élément entre les deux au lieu de
+      // garder sa largeur — d'où le menu qui prenait toute la largeur de
+      // l'écran. Il faut donc annuler `right` et fixer `width` explicitement.
+      setMenuStyle({ position: 'fixed', top: rect.bottom + 8, left, right: 'auto', width, minWidth: width });
     };
     place();
     window.addEventListener('resize', place);
