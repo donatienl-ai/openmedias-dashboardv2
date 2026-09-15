@@ -770,6 +770,25 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-tab.active .finance-tab-count { background: var(--accent); color: #fff; }
 .finance-tab-more-select { margin-left: 2px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; color: var(--text-dim); font-size: 13px; font-weight: 700; padding: 8px 28px 8px 14px; cursor: pointer; font-family: 'Inter', sans-serif; }
 .finance-tab-more-select.active { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
+/* Ligne onglets + recherche fusionnée (au lieu d'une carte "recherche" à
+   part) — .finance-tabs garde son padding/fond propres, la recherche est
+   juste un voisin flex aligné à droite, jamais régénéré par
+   renderFinanceTabs() donc la saisie/le focus ne sont jamais perdus. */
+.finance-tabs-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.finance-tabs-row .finance-tabs { margin-bottom: 0; flex: 1 1 auto; }
+.finance-search-inline { flex: 0 1 240px; min-width: 180px; }
+.finance-search-inline .form-input { width: 100%; }
+/* Lien discret pour déplier le détail complet de la synchro (tous statuts
+   Pennylane), replié par défaut car redondant avec les compteurs des onglets. */
+.finance-sync-detail-toggle { background: none; border: none; color: var(--text-muted); font-size: 11px; font-weight: 600; text-decoration: underline; cursor: pointer; padding: 0; font-family: 'Inter', sans-serif; }
+.finance-sync-detail-toggle:hover { color: var(--accent); }
+/* Sous 900px, on masque les deux colonnes les moins critiques pour la relance
+   (Téléphone, Montant HT — déjà visible en TTC) plutôt que de forcer un
+   scroll horizontal permanent sur le tableau. */
+@media (max-width: 900px) {
+  #finance-invoices-table th:nth-child(5), #finance-invoices-table td:nth-child(5),
+  #finance-invoices-table th:nth-child(8), #finance-invoices-table td:nth-child(8) { display: none; }
+}
 
 /* Filtre de période (Tout/Semaine/Mois/Année) sur la date d'échéance, avec
    navigation précédent/suivant quand une période calendaire est active. */
@@ -870,6 +889,7 @@ td { padding: 10px 14px; font-size: 13px; }
       <h2 style="font-size:16px;font-weight:700">💶 Recouvrement</h2>
       <div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span id="finance-last-sync" style="font-size:11px;color:var(--text-muted)"></span>
+        <button type="button" class="finance-sync-detail-toggle" id="finance-sync-detail-toggle" onclick="toggleFinanceSyncOverview()">Détail de la synchro</button>
         <button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()">↻ Synchroniser Pennylane</button>
       </div>
     </div>
@@ -877,19 +897,24 @@ td { padding: 10px 14px; font-size: 13px; }
          seulement les factures dues) : repère de cohérence face au propre
          tableau de bord Pennylane ("Toutes X" / Brouillon / Encaissée /
          Annulée / Avoir…) pour vérifier que la synchro a bien tout ramené —
-         cf. renderFinanceSyncOverview(). -->
-    <div id="finance-sync-overview" style="font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
+         cf. renderFinanceSyncOverview(). Replié par défaut (derrière le lien
+         "Détail de la synchro" ci-dessus) : les mêmes compteurs sont déjà
+         portés par la barre d'onglets juste en dessous, l'afficher en
+         permanence faisait doublon (relevé dans l'audit UX). -->
+    <div id="finance-sync-overview" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
     <div class="report-grid" id="finance-kpis"></div>
     <!-- Filtre de période sur la date d'ÉCHÉANCE (Semaine/Mois/Année,
          périodes calendaires avec navigation précédent/suivant) — restreint
          à la fois les onglets et le tableau ci-dessous. Cf. renderFinancePeriodBar(). -->
     <div class="finance-period-bar" id="finance-period-bar"></div>
     <!-- Barre de classement façon Pennylane (Toutes/À traiter/À venir/En
-         retard/Plus, chacun avec son compteur) — cf. renderFinanceTabs(). -->
-    <div class="finance-tabs" id="finance-tabs"></div>
-    <div class="media-table-card" style="margin-bottom:10px;padding:14px 16px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input class="form-input" style="max-width:280px;flex:1" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
+         retard/Plus, chacun avec son compteur) — cf. renderFinanceTabs(). La
+         recherche est fusionnée dans la même ligne (au lieu d'une carte à
+         part) pour réduire l'empilement de blocs avant le tableau. -->
+    <div class="finance-tabs-row">
+      <div class="finance-tabs" id="finance-tabs"></div>
+      <div class="finance-search-inline">
+        <input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
       </div>
     </div>
     <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
@@ -1058,6 +1083,21 @@ let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
 // venir/En retard/Plus) — remplace l'ancien select de statut + case "en
 // retard uniquement" par des chips cliquables avec compteur en direct.
 let financeActiveFilter='all';
+// Tri du tableau (colonne cliquée + sens) — les en-têtes du tableau n'étaient
+// pas triables ici alors que d'autres tableaux de l'app le sont déjà
+// (.sortable-th), gênant sur un métier de relance où trier par échéance ou
+// montant restant dû est souvent le premier réflexe (relevé dans l'audit UX).
+let financeSortKey=null; // 'deadline' | 'retard' | 'montant' | null
+let financeSortDir=1; // 1 = croissant, -1 = décroissant
+function setFinanceSort(key){
+  if(financeSortKey===key)financeSortDir=-financeSortDir;
+  else{financeSortKey=key;financeSortDir=1;}
+  renderFinanceInvoices();
+}
+function financeSortArrow(key){
+  if(financeSortKey!==key)return '';
+  return `<span class="sort-arrow">${financeSortDir===1?'▲':'▼'}</span>`;
+}
 
 // Filtre de période (Tout/Semaine/Mois/Année), sur la date d'ÉCHÉANCE de la
 // facture, en périodes CALENDAIRES (semaine lundi-dimanche, mois civil,
@@ -1176,15 +1216,25 @@ const PENNYLANE_STATUS_LABEL={
   estimate_invoiced:'Devis facturé', estimate_denied:'Devis refusé',
   inconnu:'Sans statut',
 };
+let financeSyncOverviewOpen=false;
+let financeKpisCache=null;
+function toggleFinanceSyncOverview(){
+  financeSyncOverviewOpen=!financeSyncOverviewOpen;
+  renderFinanceSyncOverview(financeKpisCache);
+}
 function renderFinanceSyncOverview(k){
   const wrap=document.getElementById('finance-sync-overview');
+  const toggle=document.getElementById('finance-sync-detail-toggle');
   if(!wrap)return;
-  const overview=k&&k.syncOverview;
-  if(!overview||!overview.total){wrap.innerHTML='';return;}
+  if(k)financeKpisCache=k;
+  const overview=financeKpisCache&&financeKpisCache.syncOverview;
+  if(toggle)toggle.textContent=financeSyncOverviewOpen?'Masquer le détail':'Détail de la synchro';
+  if(!financeSyncOverviewOpen||!overview||!overview.total){wrap.style.display='none';wrap.innerHTML='';return;}
   const parts=Object.entries(overview.byStatus||{})
     .sort((a,b)=>b[1]-a[1])
     .map(([status,n])=>`${PENNYLANE_STATUS_LABEL[status]||status} ${n}`)
     .join(' · ');
+  wrap.style.display='';
   wrap.innerHTML=`Synchro Pennylane — Toutes ${overview.total} · ${parts}`;
 }
 function renderFinanceKpis(k){
@@ -1196,8 +1246,8 @@ function renderFinanceKpis(k){
   const nonActionable=(k.montantEnRetard||0)-(k.montantActionable||0);
   wrap.innerHTML=`
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s)</div></div>
-    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''}</div></div>
-    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
+    <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''}</div></div>
+    <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${k.periodJours}j glissants)</div></div>
     <div class="kpi-card" style="grid-column:1/-1">
       <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
@@ -1257,6 +1307,23 @@ const PENNYLANE_TAB_STATUSES={
   partially_paid:['partially_paid'],
   cancelled:['cancelled','partially_cancelled'],
   credit_note:['credit_note'],
+  archived:['archived'],
+};
+// Couleur par statut brut Pennylane, appliquée à l'onglet quand il est actif —
+// avant, tous les onglets passaient au même bleu "accent" une fois cliqués,
+// qu'il s'agisse d'un statut critique (En retard) ou neutre (Annulée),
+// obligeant à lire le texte pour juger de la gravité (relevé dans l'audit UX).
+const FINANCE_TAB_COLOR={
+  all: {bg:'var(--accent-dim)', fg:'var(--accent)'},
+  draft: {bg:'var(--surface2)', fg:'var(--text-dim)'},
+  incomplete: {bg:'var(--gold-dim)', fg:'var(--gold)'},
+  upcoming: {bg:'var(--accent-dim)', fg:'var(--accent)'},
+  late: {bg:'var(--red-dim)', fg:'#dc2626'},
+  paid: {bg:'var(--green-dim)', fg:'var(--green)'},
+  partially_paid: {bg:'rgba(13,148,136,0.12)', fg:'#0d9488'},
+  cancelled: {bg:'var(--surface2)', fg:'var(--text-dim)'},
+  credit_note: {bg:'rgba(139,92,246,0.14)', fg:'#8b5cf6'},
+  archived: {bg:'var(--surface2)', fg:'var(--text-muted)'},
 };
 function financeMatchesFilter(inv,filter){
   if(filter==='all')return true;
@@ -1281,7 +1348,13 @@ function renderFinanceTabs(){
   for(const key of Object.keys(PENNYLANE_TAB_STATUSES)){
     counts[key]=list.filter((i)=>financeMatchesFilter(i,key)).length;
   }
-  const chip=(key,label)=>`<button type="button" class="finance-tab ${financeActiveFilter===key?'active':''}" onclick="setFinanceFilter('${key}')">${label} <span class="finance-tab-count">${counts[key]}</span></button>`;
+  const chip=(key,label,title)=>{
+    const active=financeActiveFilter===key;
+    const c=FINANCE_TAB_COLOR[key]||FINANCE_TAB_COLOR.all;
+    const style=active?` style="background:${c.bg};color:${c.fg}"`:'';
+    const countStyle=active?` style="background:${c.fg};color:#fff"`:'';
+    return `<button type="button" class="finance-tab ${active?'active':''}"${style} onclick="setFinanceFilter('${key}')"${title?` title="${title}"`:''}>${label} <span class="finance-tab-count"${countStyle}>${counts[key]}</span></button>`;
+  };
   wrap.innerHTML=`
     ${chip('all','Toutes')}
     ${chip('draft','Brouillon')}
@@ -1289,9 +1362,10 @@ function renderFinanceTabs(){
     ${chip('upcoming','À venir')}
     ${chip('late','En retard')}
     ${chip('paid','Encaissée')}
-    ${chip('partially_paid','Partiellement encaissée')}
+    ${chip('partially_paid','Part. encaissée','Partiellement encaissée')}
     ${chip('cancelled','Annulée')}
     ${chip('credit_note','Avoir')}
+    ${chip('archived','Archivée')}
   `;
 }
 function renderFinanceInvoices(){
@@ -1308,9 +1382,24 @@ function renderFinanceInvoices(){
     wrap.innerHTML='<div class="idea-box-empty" style="padding:24px 0">Aucune facture à afficher — synchronisez Pennylane, ou ajustez les filtres.</div>';
     return;
   }
+  if(financeSortKey){
+    const dir=financeSortDir;
+    const sortVal=(inv)=>{
+      if(financeSortKey==='deadline')return inv.deadline||'';
+      if(financeSortKey==='retard')return inv.daysLate!=null?inv.daysLate:-Infinity;
+      if(financeSortKey==='montant')return inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+      return 0;
+    };
+    list=[...list].sort((a,b)=>{
+      const va=sortVal(a),vb=sortVal(b);
+      if(va<vb)return -1*dir;
+      if(va>vb)return 1*dir;
+      return 0;
+    });
+  }
   const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
   wrap.innerHTML=`<table>
-    <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th>Échéance</th><th>Retard</th><th>Montant HT</th><th>Montant TTC</th><th>Statut</th></tr></thead>
+    <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Échéance${financeSortArrow('deadline')}</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th>Montant HT</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
     <tbody>${list.map(inv=>`<tr>
       <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button></td>
       <td>${inv.customerName||'—'}</td>
