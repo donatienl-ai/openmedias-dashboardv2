@@ -213,7 +213,20 @@ async function syncFinance(db) {
       status=excluded.status, synced_at=excluded.synced_at
   `);
 
+  // BUG CORRIGÉ : une facture déjà en base (importée avant l'ajout de
+  // SYNC_SINCE, ou lors d'un test avec une valeur différente) mais dont la
+  // date tombe désormais AVANT SYNC_SINCE n'est plus jamais re-demandée à
+  // Pennylane (le filtre `date gteq SYNC_SINCE` l'exclut du fetch) — sa copie
+  // locale restait donc figée pour toujours, avec un statut/reste-dû périmé.
+  // C'est ce qui provoquait des incohérences du type "payée sur Pennylane
+  // mais encore affichée en retard chez nous" (ex. Betao AB). On purge donc
+  // à chaque synchro tout ce qui est hors de la fenêtre suivie — cohérent
+  // avec la demande initiale ("importer depuis septembre 2025") : une facture
+  // plus ancienne n'a de toute façon plus sa place dans l'outil.
+  const purgeOldInvoices = db.prepare('DELETE FROM pennylane_invoices WHERE date_emission < ?');
+
   const runAll = db.transaction(() => {
+    const purged = purgeOldInvoices.run(SYNC_SINCE).changes;
     for (const c of customers) {
       const contact = contactsById.get(String(c.id));
       upsertCustomer.run(
@@ -248,10 +261,16 @@ async function syncFinance(db) {
         computedStatus(inv)
       );
     }
+    return purged;
   });
-  runAll();
+  const invoicesPurged = runAll();
 
-  return { invoicesSynced: invoices.length, customersSynced: customers.length, syncedAt: new Date().toISOString() };
+  return {
+    invoicesSynced: invoices.length,
+    customersSynced: customers.length,
+    invoicesPurged,
+    syncedAt: new Date().toISOString(),
+  };
 }
 
 // Un lien PDF public (`public_file_url`) est bien renvoyé par Pennylane, mais

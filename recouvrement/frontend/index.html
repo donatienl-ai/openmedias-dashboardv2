@@ -1218,7 +1218,8 @@ async function syncFinance(){
     const r=await fetch(`${API}/finance/sync`,{method:'POST',headers:financeHeaders()});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||'Échec de la synchro');
-    document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date(d.syncedAt).toLocaleString('fr-FR')} (${d.invoicesSynced} facture(s), ${d.customersSynced} client(s))`;
+    const purgeInfo=d.invoicesPurged?` · ${d.invoicesPurged} facture(s) hors-fenêtre purgée(s)`:'';
+    document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date(d.syncedAt).toLocaleString('fr-FR')} (${d.invoicesSynced} facture(s), ${d.customersSynced} client(s)${purgeInfo})`;
     showToast('Synchro Pennylane effectuée');
     await refreshFinanceInvoices();
   }catch(e){

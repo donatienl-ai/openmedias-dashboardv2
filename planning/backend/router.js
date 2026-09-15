@@ -1424,7 +1424,7 @@ function joursDeRetard(deadline) {
 app.post('/api/finance/sync', requireFinance, async (req, res) => {
   try {
     const result = await pennylane.syncFinance(db);
-    console.log(`[FINANCE] sync Pennylane OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s)`);
+    console.log(`[FINANCE] sync Pennylane OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s), ${result.invoicesPurged} facture(s) hors-fenêtre purgée(s)`);
     res.json({ ok: true, ...result });
   } catch (e) {
     console.error('[FINANCE] sync Pennylane KO :', e.message);
