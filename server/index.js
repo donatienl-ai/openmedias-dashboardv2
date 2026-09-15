@@ -377,6 +377,11 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     if (req.commercial && ['edito', 'communication'].includes(req.commercial.role)) {
       return res.status(403).json({ error: "Ce compte n'a pas accès au dashboard — rendez-vous sur /planning" });
     }
+    // Finance non plus : son outil dédié est /recouvrement (onglet séparé,
+    // pas un onglet du dashboard ni du planning — voir App.js).
+    if (req.commercial && req.commercial.role === 'finance') {
+      return res.status(403).json({ error: "Ce compte n'a pas accès au dashboard — rendez-vous sur /recouvrement" });
+    }
     const preset = req.query.preset || 'today';
     const range = resolveRange(preset, req.query.start, req.query.end);
     const full = await dashboardCache.get(preset, range);
@@ -405,7 +410,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 // ---------- CA MENSUEL SUR N MOIS GLISSANTS (graphique d'évolution) ----------
 app.get('/api/revenue-by-month', requireAuth, async (req, res) => {
   try {
-    if (req.commercial && ['edito', 'communication'].includes(req.commercial.role)) {
+    if (req.commercial && ['edito', 'communication', 'finance'].includes(req.commercial.role)) {
       return res.status(403).json({ error: "Ce compte n'a pas accès au dashboard" });
     }
     const months = parseInt(req.query.months, 10) || 12;
@@ -686,6 +691,20 @@ const { default: planningRouter } = await import('../planning/backend/router.js'
 const planningFrontendDir = path.join(__dirname, '..', 'planning', 'frontend');
 app.use('/planning', express.static(planningFrontendDir));
 app.use('/planning', planningRouter);
+
+// ---------- RECOUVREMENT (Pennylane, fusionné sous /recouvrement) ----------
+// Gros onglet séparé, pas un sous-onglet du planning : son propre slug /
+// front autonome (recouvrement/frontend/index.html), mais RÉUTILISE le même
+// planningRouter (déjà chargé ci-dessus, un seul require donc un seul jeu de
+// crons/side-effects) — les routes /api/finance/*, /api/auth/*, /api/meta
+// qu'il expose sont indépendantes du reste du planning et n'ont pas besoin
+// d'être dupliquées dans un routeur à part. Express autorise un même Router
+// monté sous plusieurs préfixes sans souci (aucune route interne ne suppose
+// un chemin absolu, sauf le lien d'invitation qui pointe volontairement vers
+// /planning/?invite=... quel que soit le rôle invité).
+const recouvrementFrontendDir = path.join(__dirname, '..', 'recouvrement', 'frontend');
+app.use('/recouvrement', express.static(recouvrementFrontendDir));
+app.use('/recouvrement', planningRouter);
 
 // ---------- RADAR ÉDITORIAL (fusionné sous /radar) ----------
 // Même patron que /planning : un front autonome (radar/frontend/index.html, sans

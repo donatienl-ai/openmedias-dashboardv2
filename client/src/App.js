@@ -2212,6 +2212,14 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                 émissions couvrent le thème d'un prospect, chez nous vs chez les
                 concurrents. Ouvert à tous les rôles, donc pas de condition. */}
             <button className="app-switch-btn" onClick={() => { window.location.href = '/radar'; }}>📡 Radar</button>
+            {/* Recouvrement (recouvrement/frontend, servi sous /recouvrement,
+                réutilise l'API du planning) : outil dédié au rôle finance —
+                seuls les comptes finance et admin y ont accès (finance est
+                redirigé directement dessus après connexion, cf. plus haut ;
+                un admin, lui, garde accès à tout, d'où ce bouton ici). */}
+            {isAdmin && (
+              <button className="app-switch-btn" onClick={() => { window.location.href = '/recouvrement'; }}>💶 Recouvrement</button>
+            )}
             {/* Réglages (comptes/rôles/équipes/reporting) : un seul endroit, dans
                 le planning, réservé aux comptes admin. */}
             {isAdmin && (
@@ -2529,6 +2537,12 @@ export default function App() {
           window.location.href = '/planning';
           return;
         }
+        // Idem pour finance, mais vers son propre outil (/recouvrement) —
+        // pas un onglet du planning ni du dashboard.
+        if (cred.mode === 'commercial' && cred.role === 'finance') {
+          window.location.href = '/recouvrement';
+          return;
+        }
         setPassword(cred);
         setCheckingSession(false);
         return;
@@ -2550,6 +2564,10 @@ export default function App() {
           };
           if (['edito', 'communication'].includes(cred.role)) {
             window.location.href = '/planning';
+            return;
+          }
+          if (cred.role === 'finance') {
+            window.location.href = '/recouvrement';
             return;
           }
           sessionStorage.setItem('om_cred', JSON.stringify(cred));
@@ -2586,6 +2604,12 @@ export default function App() {
     // est directement le planning (redirection immédiate après connexion).
     if (cred.mode === 'commercial' && ['edito', 'communication'].includes(cred.role)) {
       window.location.href = '/planning';
+      return;
+    }
+    // Finance non plus — sa landing page est /recouvrement (gros onglet séparé,
+    // pas nested dans le planning).
+    if (cred.mode === 'commercial' && cred.role === 'finance') {
+      window.location.href = '/recouvrement';
       return;
     }
     setPassword(cred);

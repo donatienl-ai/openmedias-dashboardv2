@@ -53,13 +53,21 @@ async function pennylaneFetch(pathAndQuery, attempt = 1) {
 }
 
 // Récupère toutes les pages d'un endpoint (pagination par curseur — cf. doc
-// Pennylane "Use Cursor-Based Pagination").
-async function getAllPaginated(endpoint) {
+// Pennylane "Use Cursor-Based Pagination"). Le paramètre de taille de page
+// documenté (v2) est `limit` (1-100) — PAS `per_page` (nom v1) : avec le
+// mauvais nom, Pennylane l'ignore silencieusement et retombe sur son défaut
+// de 20/page, ce qui marchait quand même (le curseur `meta.next_cursor` fait
+// toujours foi) mais multipliait les allers-retours pour rien.
+// `filter`, si fourni, est un objet/tableau passé tel quel en JSON dans le
+// paramètre `filter` documenté par Pennylane (ex. filtrer les factures par
+// date : cf. syncFinance ci-dessous).
+async function getAllPaginated(endpoint, filter) {
   const items = [];
   let cursor = null;
   for (;;) {
-    const params = new URLSearchParams({ per_page: '100' });
+    const params = new URLSearchParams({ limit: '100' });
     if (cursor) params.set('cursor', cursor);
+    if (filter) params.set('filter', JSON.stringify(filter));
     const json = await pennylaneFetch(`/${endpoint}?${params.toString()}`);
     const batch = Array.isArray(json) ? json : (json.items || []);
     items.push(...batch);
@@ -67,6 +75,17 @@ async function getAllPaginated(endpoint) {
     if (!cursor || !batch.length) break;
   }
   return items;
+}
+
+// Le `status` documenté par Pennylane inclut déjà 'draft'/'credit_note' comme
+// valeurs possibles (pas seulement les statuts de paiement 'paid'/'late'/...),
+// mais on ne parie pas dessus : si jamais `status` manque, on retombe sur les
+// booléens dédiés `draft`/`credit_note` qui eux sont garantis par la doc.
+function computedStatus(invoice) {
+  if (invoice.status) return invoice.status;
+  if (invoice.draft) return 'draft';
+  if (invoice.credit_note) return 'credit_note';
+  return null;
 }
 
 function customerIdOf(invoice) {
@@ -117,17 +136,26 @@ async function fetchPrimaryContact(contactsUrl) {
   }
 }
 
-// Synchro COMPLÈTE à chaque appel (V1) : au volume annoncé (quelques
-// centaines à ~1-2 milliers de factures/an pour 4-5M€ de CA), rester simple
-// l'emporte sur une synchro incrémentale via /customer_invoices/changes —
-// qui de toute façon ne conserve que 4 semaines d'historique et ne suffirait
-// pas seule à un tout premier chargement. À revisiter si le volume grossit
-// au point de rendre une synchro complète trop lente/coûteuse en requêtes.
+// Synchro COMPLÈTE (pas incrémentale) à chaque appel, mais bornée à
+// SYNC_SINCE (V1) : au volume annoncé (quelques centaines à ~1-2 milliers de
+// factures/an pour 4-5M€ de CA) et sur la seule fenêtre pertinente pour le
+// recouvrement, rester simple l'emporte sur une synchro incrémentale via
+// /customer_invoices/changes — qui de toute façon ne conserve que 4 semaines
+// d'historique et ne suffirait pas seule à un tout premier chargement. À
+// revisiter si le volume grossit au point de rendre ça trop lent/coûteux.
 // NB : un appel /contacts par client s'ajoute désormais à chaque synchro
 // (voir fetchPrimaryContact) — plus lent qu'avant, mais c'est le seul moyen
 // d'obtenir un nom/mail/tel de contact réel plutôt que la seule société.
+// Point de départ de l'historique importé : les factures antérieures à cette
+// date ne sont plus pertinentes pour le recouvrement (avant la mise en place
+// de l'outil) et les exclure réduit d'autant le nombre de pages/appels API à
+// chaque synchro. Ajustable sans redéploiement via PENNYLANE_SYNC_SINCE (ex.
+// "2025-01-01") si le besoin change.
+const SYNC_SINCE = process.env.PENNYLANE_SYNC_SINCE || '2025-09-01';
+
 async function syncFinance(db) {
-  const invoices = await getAllPaginated('customer_invoices');
+  const invoiceFilter = [{ field: 'date', operator: 'gteq', value: SYNC_SINCE }];
+  const invoices = await getAllPaginated('customer_invoices', invoiceFilter);
   const customers = await getAllPaginated('customers');
 
   if (process.env.PENNYLANE_DEBUG_RAW === '1') {
@@ -188,9 +216,13 @@ async function syncFinance(db) {
       );
     }
     for (const inv of invoices) {
-      // Brouillons/avoirs exclus : rien à recouvrer dessus (pas de deadline
-      // de paiement exploitable) — inutile de polluer le cache avec.
-      if (inv.draft || inv.credit_note) continue;
+      // Brouillons/avoirs/annulées sont désormais bien enregistrés (avec leur
+      // statut Pennylane d'origine) plutôt que sautés : ils n'ont rien à voir
+      // avec le recouvrement (exclus de /api/finance/invoices et /kpis via le
+      // filtre sur `status`, voir router.js), mais les compter permet de
+      // vérifier d'un coup d'œil que la synchro a bien ramené tout ce que
+      // Pennylane annonce dans son propre tableau de bord (Toutes/Brouillon/
+      // Encaissée/Annulée/Avoir…), pas seulement les factures encore dues.
       const a = amountsOf(inv);
       upsertInvoice.run(
         String(inv.id),
@@ -202,7 +234,7 @@ async function syncFinance(db) {
         a.ht,
         a.remainingTtc,
         a.remainingHt,
-        inv.status || null
+        computedStatus(inv)
       );
     }
   });

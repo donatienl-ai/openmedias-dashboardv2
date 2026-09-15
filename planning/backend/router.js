@@ -1432,6 +1432,16 @@ app.post('/api/finance/sync', requireFinance, async (req, res) => {
   }
 });
 
+// Statuts Pennylane NATIFS (colonne `status`, le statut brut renvoyé par
+// Pennylane — à ne pas confondre avec `internal_status`, notre propre suivi
+// de recouvrement) qui ne représentent pas une facture à recouvrer : un
+// brouillon n'a pas été envoyé, un avoir/une annulation n'est pas une dette.
+// On les synchronise quand même (voir pennylane.js) pour pouvoir en afficher
+// le compte — cf. /api/finance/kpis, syncOverview — mais ils ne doivent
+// jamais apparaître dans la liste de travail ni fausser les KPI d'encours.
+const PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete'];
+const HORS_RECOUVREMENT_PLACEHOLDERS = PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',');
+
 // Liste des factures encore dues (remaining_amount > 0 — une facture soldée
 // n'a plus rien à faire dans un outil de RELANCE), avec jours de retard
 // calculés à la volée (jamais stockés : sinon désynchronisé dès le lendemain).
@@ -1442,7 +1452,8 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     FROM pennylane_invoices i
     LEFT JOIN pennylane_customers c ON c.id = i.customer_id
     WHERE i.remaining_amount > 0
-  `).all();
+      AND (i.status IS NULL OR i.status NOT IN (${HORS_RECOUVREMENT_PLACEHOLDERS}))
+  `).all(...PENNYLANE_HORS_RECOUVREMENT);
   const { statut, q, retard_only } = req.query;
   const qLower = q ? String(q).trim().toLowerCase() : '';
   let list = rows.map((r) => ({
@@ -1484,18 +1495,39 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
 // (Days Sales Outstanding — formule classique : encours clients TTC / CA TTC
 // facturé sur la période × nb de jours de la période ; période glissante de
 // 90 jours, assez large pour lisser un mois calme, assez courte pour rester réactive).
+// Statuts qu'on considère déjà "pris en charge" autrement qu'en relance
+// active (un litige en cours ou une promesse de paiement obtenue n'attend pas
+// une relance du jour) — même exclusion que le digest mail quotidien
+// (reports.js/reportRelancesQuotidien), pour que le chiffre affiché ici colle
+// à ce qui part réellement dans le mail du matin.
+const FINANCE_STATUTS_NON_ACTIONABLES = ['litige', 'promesse_paiement', 'solde'];
+
 app.get('/api/finance/kpis', requireFinance, (req, res) => {
-  const unpaid = db.prepare('SELECT remaining_amount, deadline FROM pennylane_invoices WHERE remaining_amount > 0').all();
+  const unpaid = db.prepare(`
+    SELECT remaining_amount, deadline, internal_status FROM pennylane_invoices
+    WHERE remaining_amount > 0 AND (status IS NULL OR status NOT IN (${HORS_RECOUVREMENT_PLACEHOLDERS}))
+  `).all(...PENNYLANE_HORS_RECOUVREMENT);
   let totalEncours = 0;
   let montantEnRetard = 0;
   let nbEnRetard = 0;
+  let montantActionable = 0;
+  let nbActionable = 0;
   const aging = { j0_30: 0, j31_60: 0, j61_90: 0, j90_plus: 0 };
+  const parStatut = {}; // vue "pipeline" : répartition de l'encours par statut interne, retard ou pas
   for (const inv of unpaid) {
     totalEncours += inv.remaining_amount;
+    const statut = inv.internal_status || 'a_relancer';
+    if (!parStatut[statut]) parStatut[statut] = { count: 0, montant: 0 };
+    parStatut[statut].count += 1;
+    parStatut[statut].montant += inv.remaining_amount;
     const daysLate = joursDeRetard(inv.deadline);
     if (daysLate !== null && daysLate > 0) {
       nbEnRetard += 1;
       montantEnRetard += inv.remaining_amount;
+      if (!FINANCE_STATUTS_NON_ACTIONABLES.includes(statut)) {
+        nbActionable += 1;
+        montantActionable += inv.remaining_amount;
+      }
       if (daysLate <= 30) aging.j0_30 += inv.remaining_amount;
       else if (daysLate <= 60) aging.j31_60 += inv.remaining_amount;
       else if (daysLate <= 90) aging.j61_90 += inv.remaining_amount;
@@ -1510,14 +1542,30 @@ app.get('/api/finance/kpis', requireFinance, (req, res) => {
     .get(periodStart.toISOString().slice(0, 10)).total || 0;
   const dso = caPeriode > 0 ? Math.round((totalEncours / caPeriode) * PERIOD_DAYS) : null;
   const tauxDeRetard = totalEncours > 0 ? Math.round((montantEnRetard / totalEncours) * 1000) / 10 : 0;
+  // Aperçu de synchro : répartition par statut BRUT Pennylane, sur TOUT ce qui
+  // a été synchronisé (pas seulement l'encours dû) — sert de repère de
+  // cohérence face au propre tableau de bord Pennylane (son onglet "Toutes X"
+  // / Brouillon / Encaissée / Annulée / Avoir...), pas à filtrer le travail
+  // de recouvrement lui-même.
+  const statusCounts = db.prepare('SELECT status, COUNT(*) AS n FROM pennylane_invoices GROUP BY status').all();
+  const syncOverview = { total: 0, byStatus: {} };
+  for (const row of statusCounts) {
+    const key = row.status || 'inconnu';
+    syncOverview.byStatus[key] = row.n;
+    syncOverview.total += row.n;
+  }
   res.json({
     totalEncours,
     montantEnRetard,
     nbFacturesEnRetard: nbEnRetard,
     nbFacturesTotal: unpaid.length,
+    montantActionable,
+    nbFacturesActionable: nbActionable,
     tauxDeRetard,
     dso,
     aging,
+    parStatut,
+    syncOverview,
     periodJours: PERIOD_DAYS,
   });
 });
