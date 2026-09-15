@@ -765,6 +765,16 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-tab.active .finance-tab-count { background: var(--accent); color: #fff; }
 .finance-tab-more-select { margin-left: 2px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; color: var(--text-dim); font-size: 13px; font-weight: 700; padding: 8px 28px 8px 14px; cursor: pointer; font-family: 'Inter', sans-serif; }
 .finance-tab-more-select.active { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
+
+/* Filtre de période (Tout/Semaine/Mois/Année) sur la date d'échéance, avec
+   navigation précédent/suivant quand une période calendaire est active. */
+.finance-period-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.finance-period-modes { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; box-shadow: var(--shadow); }
+.finance-period-mode { background: none; border: none; color: var(--text-dim); font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-family: 'Inter', sans-serif; }
+.finance-period-mode:hover { background: var(--surface2); color: var(--text); }
+.finance-period-mode.active { background: var(--accent-dim); color: var(--accent); }
+.finance-period-nav { display: flex; align-items: center; gap: 6px; }
+.finance-period-label { font-size: 12px; font-weight: 700; color: var(--text); min-width: 140px; text-align: center; }
 </style>
 </head>
 <body>
@@ -859,6 +869,10 @@ td { padding: 10px 14px; font-size: 13px; }
          cf. renderFinanceSyncOverview(). -->
     <div id="finance-sync-overview" style="font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
     <div class="report-grid" id="finance-kpis"></div>
+    <!-- Filtre de période sur la date d'ÉCHÉANCE (Semaine/Mois/Année,
+         périodes calendaires avec navigation précédent/suivant) — restreint
+         à la fois les onglets et le tableau ci-dessous. Cf. renderFinancePeriodBar(). -->
+    <div class="finance-period-bar" id="finance-period-bar"></div>
     <!-- Barre de classement façon Pennylane (Toutes/À traiter/À venir/En
          retard/Plus, chacun avec son compteur) — cf. renderFinanceTabs(). -->
     <div class="finance-tabs" id="finance-tabs"></div>
@@ -1029,6 +1043,88 @@ let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
 // retard uniquement" par des chips cliquables avec compteur en direct.
 let financeActiveFilter='all';
 
+// Filtre de période (Tout/Semaine/Mois/Année), sur la date d'ÉCHÉANCE de la
+// facture, en périodes CALENDAIRES (semaine lundi-dimanche, mois civil,
+// année civile) — navigables via financePeriodShift(-1/+1). "Tout" (mode
+// par défaut) ne restreint rien : ce filtre est purement un affichage par-
+// dessus les données déjà synchronisées, il ne touche jamais à la synchro
+// elle-même (on a explicitement retiré tout filtre de date de syncFinance()
+// pour éviter que des factures sortent du champ suivi et se figent).
+let financePeriodMode='all'; // 'all' | 'week' | 'month' | 'year'
+let financePeriodAnchor=new Date(); // date de référence, déplacée par la navigation
+
+function financePeriodBounds(){
+  if(financePeriodMode==='all')return null;
+  const d=financePeriodAnchor;
+  if(financePeriodMode==='week'){
+    const dow=(d.getDay()+6)%7; // 0=lundi … 6=dimanche
+    const start=new Date(d.getFullYear(),d.getMonth(),d.getDate()-dow);
+    const end=new Date(start.getFullYear(),start.getMonth(),start.getDate()+6,23,59,59,999);
+    return {start,end};
+  }
+  if(financePeriodMode==='month'){
+    const start=new Date(d.getFullYear(),d.getMonth(),1);
+    const end=new Date(d.getFullYear(),d.getMonth()+1,0,23,59,59,999);
+    return {start,end};
+  }
+  if(financePeriodMode==='year'){
+    const start=new Date(d.getFullYear(),0,1);
+    const end=new Date(d.getFullYear(),11,31,23,59,59,999);
+    return {start,end};
+  }
+  return null;
+}
+function financeMatchesPeriod(inv){
+  const bounds=financePeriodBounds();
+  if(!bounds)return true;
+  if(!inv.deadline)return false; // pas d'échéance (ex. brouillon) : hors période dès qu'une période est active
+  const dl=new Date(`${inv.deadline}T00:00:00`);
+  return dl>=bounds.start&&dl<=bounds.end;
+}
+function financePeriodLabel(){
+  const bounds=financePeriodBounds();
+  if(!bounds)return '';
+  if(financePeriodMode==='week'){
+    return `${bounds.start.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})} – ${bounds.end.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})}`;
+  }
+  if(financePeriodMode==='month'){
+    const s=bounds.start.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+    return s.charAt(0).toUpperCase()+s.slice(1);
+  }
+  return String(bounds.start.getFullYear());
+}
+function setFinancePeriodMode(mode){
+  financePeriodMode=mode;
+  financePeriodAnchor=new Date(); // on repart de "maintenant" à chaque changement de granularité
+  renderFinancePeriodBar();
+  renderFinanceTabs();
+  renderFinanceInvoices();
+}
+function financePeriodShift(delta){
+  const d=new Date(financePeriodAnchor);
+  if(financePeriodMode==='week')d.setDate(d.getDate()+delta*7);
+  else if(financePeriodMode==='month')d.setMonth(d.getMonth()+delta);
+  else if(financePeriodMode==='year')d.setFullYear(d.getFullYear()+delta);
+  financePeriodAnchor=d;
+  renderFinancePeriodBar();
+  renderFinanceTabs();
+  renderFinanceInvoices();
+}
+function renderFinancePeriodBar(){
+  const wrap=document.getElementById('finance-period-bar');
+  if(!wrap)return;
+  const modes=[['all','Tout'],['week','Semaine'],['month','Mois'],['year','Année']];
+  const modeBtns=modes.map(([key,label])=>`<button type="button" class="finance-period-mode ${financePeriodMode===key?'active':''}" onclick="setFinancePeriodMode('${key}')">${label}</button>`).join('');
+  const nav=financePeriodMode==='all'?'':`
+    <div class="finance-period-nav">
+      <button type="button" class="btn-icon" onclick="financePeriodShift(-1)" title="Période précédente">‹</button>
+      <span class="finance-period-label">${financePeriodLabel()}</span>
+      <button type="button" class="btn-icon" onclick="financePeriodShift(1)" title="Période suivante">›</button>
+    </div>
+  `;
+  wrap.innerHTML=`<div class="finance-period-modes">${modeBtns}</div>${nav}`;
+}
+
 function financeHeaders(json){
   const h={'x-commercial-id':commercialId};
   if(json)h['Content-Type']='application/json';
@@ -1045,6 +1141,7 @@ async function refreshFinanceInvoices(){
   financeInvoicesCache=Array.isArray(invoices)?invoices:[];
   renderFinanceSyncOverview(kpis);
   renderFinanceKpis(kpis);
+  renderFinancePeriodBar();
   renderFinanceTabs();
   renderFinanceInvoices();
 }
@@ -1175,7 +1272,7 @@ function setFinanceFilter(key){
 function renderFinanceTabs(){
   const wrap=document.getElementById('finance-tabs');
   if(!wrap)return;
-  const list=financeInvoicesCache;
+  const list=financeInvoicesCache.filter(financeMatchesPeriod);
   const counts={all:list.length};
   for(const key of Object.keys(PENNYLANE_TAB_STATUSES)){
     counts[key]=list.filter((i)=>financeMatchesFilter(i,key)).length;
@@ -1198,6 +1295,7 @@ function renderFinanceInvoices(){
   if(!wrap)return;
   const q=(document.getElementById('finance-search')?.value||'').trim().toLowerCase();
   let list=financeInvoicesCache.filter(inv=>{
+    if(!financeMatchesPeriod(inv))return false;
     if(!financeMatchesFilter(inv,financeActiveFilter))return false;
     if(q&&!(String(inv.invoiceNumber||'').toLowerCase().includes(q)||inv.customerName.toLowerCase().includes(q)||(inv.contactName||'').toLowerCase().includes(q)))return false;
     return true;
