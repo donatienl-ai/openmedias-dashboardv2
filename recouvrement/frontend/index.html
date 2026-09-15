@@ -543,7 +543,7 @@ td { padding: 10px 14px; font-size: 13px; }
    suffit à structurer sans "crier". */
 .param-section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--text); }
 .param-section-title .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
-.kpi-val { font-family: 'Sora', sans-serif; font-size: clamp(20px, 2.3vw, 32px); font-weight: 800; letter-spacing: -0.8px; font-variant-numeric: tabular-nums; overflow-wrap: break-word; }
+.kpi-val { font-family: 'Sora', sans-serif; font-size: clamp(18px, 2.1vw, 30px); font-weight: 800; letter-spacing: -0.8px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi-lbl { font-size: 11px; color: var(--text-muted); font-weight: 600; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
 .media-table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 .ca-bar-wrap { margin-top: 5px; background: var(--surface2); border-radius: 4px; height: 4px; overflow: hidden; }
@@ -1033,6 +1033,11 @@ function closeModal(event){if(event&&event.target!==document.getElementById('mod
 function showToast(msg,type='success'){const el=document.createElement('div');el.className=`toast ${type}`;el.innerHTML=`<span>${type==='success'?'✅':'⚠️'}</span><span>${msg}</span>`;document.body.appendChild(el);setTimeout(()=>el.remove(),4000);}
 function formatDateFR(str){if(!str)return '—';const[y,m,d]=str.split('-');return `${d}/${m}/${y}`;}
 function fmtCA(v){return new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v||0);}
+function fmtCACompact(v){
+  v=v||0;
+  if(Math.abs(v)<10000)return fmtCA(v);
+  return new Intl.NumberFormat('fr-FR',{notation:'compact',style:'currency',currency:'EUR',minimumFractionDigits:0,maximumFractionDigits:1}).format(v);
+}
 
 async function init(){
   meta=await fetch(`${API}/meta`).then(r=>r.json());
@@ -1185,31 +1190,19 @@ function renderFinanceSyncOverview(k){
 function renderFinanceKpis(k){
   const wrap=document.getElementById('finance-kpis');
   if(!wrap||!k)return;
-  const agingTotal=Object.values(k.aging||{}).reduce((s,v)=>s+v,0);
-  const agingSegs=[
-    {key:'j0_30',label:'0-30j',color:'var(--gold)'},
-    {key:'j31_60',label:'31-60j',color:'var(--accent)'},
-    {key:'j61_90',label:'61-90j',color:'#f97316'},
-    {key:'j90_plus',label:'90j+',color:'#dc2626'},
-  ];
   const statutSegs=Object.keys(FINANCE_STATUS_LABEL).map(key=>({key,label:FINANCE_STATUS_LABEL[key],color:FINANCE_STATUS_COLOR[key]}));
   const parStatut=k.parStatut||{};
   const statutTotal=Object.values(parStatut).reduce((s,v)=>s+(v.montant||0),0);
   const nonActionable=(k.montantEnRetard||0)-(k.montantActionable||0);
   wrap.innerHTML=`
-    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val">${fmtCA(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s)</div></div>
-    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui</div><div class="kpi-val" style="color:#dc2626">${fmtCA(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''}</div></div>
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s)</div></div>
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''}</div></div>
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${k.periodJours}j glissants)</div></div>
     <div class="kpi-card" style="grid-column:1/-1">
       <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
       <div class="finance-aging-bar">${statutSegs.map(s=>{const montant=(parStatut[s.key]||{}).montant||0;const pct=statutTotal?montant/statutTotal*100:0;return pct?`<div class="finance-aging-seg" style="width:${pct}%;background:${s.color}" title="${s.label} : ${fmtCA(montant)}"></div>`:'';}).join('')}</div>
       <div class="finance-aging-legend">${statutSegs.filter(s=>(parStatut[s.key]||{}).count).map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${(parStatut[s.key]||{}).count} · ${fmtCA((parStatut[s.key]||{}).montant||0)}</span>`).join('')}</div>
-    </div>
-    <div class="kpi-card" style="grid-column:1/-1">
-      <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Aging de l'encours (par tranche de retard)</div>
-      <div class="finance-aging-bar">${agingSegs.map(s=>{const pct=agingTotal?(k.aging[s.key]||0)/agingTotal*100:0;return pct?`<div class="finance-aging-seg" style="width:${pct}%;background:${s.color}" title="${s.label} : ${fmtCA(k.aging[s.key]||0)}"></div>`:'';}).join('')}</div>
-      <div class="finance-aging-legend">${agingSegs.map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${fmtCA(k.aging[s.key]||0)}</span>`).join('')}</div>
     </div>
   `;
 }
