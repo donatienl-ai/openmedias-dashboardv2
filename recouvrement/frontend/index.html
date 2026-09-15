@@ -1109,8 +1109,15 @@ function renderFinanceKpis(k){
 // d'émission et l'échéance (repère visuel de "combien de temps il reste") ;
 // après échéance, barre rouge dont la longueur croît avec le nombre de jours
 // de retard (plafonnée à 90j de retard pour rester lisible au-delà).
+// Depuis que le tableau affiche AUSSI les factures encaissées/annulées/avoirs
+// (barre d'onglets calquée sur Pennylane, plus seulement les impayées), une
+// vieille facture payée dont l'échéance est passée depuis longtemps ne doit
+// plus s'afficher comme "en retard" en rouge — elle est réglée, ça n'a pas de
+// sens. On neutralise la barre dès que le reste dû est nul/négatif.
 function financeRetardBarHtml(inv){
   const daysLate=inv.daysLate;
+  const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount;
+  if((remaining||0)<=0)return '<span style="font-size:11px;color:var(--text-muted)">Soldée</span>';
   if(daysLate==null)return '<span style="font-size:11px;color:var(--text-muted)">—</span>';
   if(daysLate<=0){
     const emission=inv.dateEmission?new Date(`${inv.dateEmission}T00:00:00`):null;
@@ -1125,32 +1132,35 @@ function financeRetardBarHtml(inv){
   return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:#dc2626"></div></div><div class="finance-retard-label" style="color:#dc2626;font-weight:700">${daysLate}j de retard</div></div>`;
 }
 
-// Statuts déjà "pris en charge" autrement qu'en relance active — même liste
-// que FINANCE_STATUTS_NON_ACTIONABLES côté serveur (router.js /api/finance/kpis
-// et le mail quotidien, reports.js) : un litige en cours ou une promesse de
-// paiement obtenue n'attend pas une relance du jour, une facture soldée non
-// plus. Dupliquée ici faute de pouvoir importer une constante serveur dans
-// ce front statique — à garder synchronisée si la liste change côté serveur.
-const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde'];
-
-// Est-ce qu'une facture correspond au filtre actif de la barre d'onglets —
-// mêmes catégories que le classement Pennylane (Toutes/À traiter/À venir/En
-// retard), plus les statuts internes moins courants regroupés sous "Plus".
-//
-// BUG CORRIGÉ : "À traiter" testait `internalStatus === 'a_relancer'`, qui
-// est la valeur par défaut de TOUTE facture jamais triée manuellement — sur
-// une synchro fraîche (rien encore mis en cours/litige/promesse/soldé), ça
-// correspondait donc à 100% des factures, rendant l'onglet identique à
-// "Toutes" (constaté : 936 des deux côtés). "À traiter" doit vouloir dire
-// "en retard et pas déjà pris en charge autrement" — exactement la même
-// définition que la carte KPI "à relancer aujourd'hui" et le mail quotidien,
-// pour que les trois s'accordent.
+// Barre d'onglets = calque EXACT du classement Pennylane (capture d'écran de
+// référence : Toutes 4298 / Brouillon 2 / À traiter 73 / À venir 24 / En
+// retard 244 / Plus (4) : Encaissée 2931, Partiellement encaissée 3, Annulée
+// 496, Avoir 528) — plus de reclassement maison ici, chaque onglet teste le
+// champ `status` BRUT tel que renvoyé par Pennylane sur la facture (pas notre
+// internalStatus interne, qui reste un attribut séparé éditable dans le
+// tableau ci-dessous pour le suivi de relance).
+// "À traiter" n'a pas de définition publiée par Pennylane (leur doc ne
+// détaille aucun des statuts) — mais status='incomplete' est le seul restant
+// après avoir compté Brouillon/Encaissée/Partiellement encaissée/Annulée/
+// Avoir/À venir/En retard, et ça correspond au chiffre 73 de la référence :
+// c'est notre meilleure hypothèse, à confirmer en ouvrant une facture que
+// Pennylane classe "À traiter" et en vérifiant son statut brut ici.
+// "Annulée" regroupe cancelled ET partially_cancelled (Pennylane n'affiche
+// qu'une seule case Annulée, pas de case séparée pour l'annulation partielle).
+const PENNYLANE_TAB_STATUSES={
+  draft:['draft'],
+  incomplete:['incomplete'],
+  upcoming:['upcoming'],
+  late:['late'],
+  paid:['paid'],
+  partially_paid:['partially_paid'],
+  cancelled:['cancelled','partially_cancelled'],
+  credit_note:['credit_note'],
+};
 function financeMatchesFilter(inv,filter){
   if(filter==='all')return true;
-  if(filter==='a_venir')return inv.daysLate!=null&&inv.daysLate<=0;
-  if(filter==='en_retard')return inv.daysLate>0;
-  if(filter==='a_relancer')return inv.daysLate>0&&!FINANCE_STATUTS_NON_ACTIONABLES.includes(inv.internalStatus);
-  return inv.internalStatus===filter;
+  const statuses=PENNYLANE_TAB_STATUSES[filter];
+  return statuses?statuses.includes(inv.status):false;
 }
 function setFinanceFilter(key){
   if(!key)return; // option placeholder "Plus (N)" sélectionnée sans choix réel
@@ -1166,28 +1176,21 @@ function renderFinanceTabs(){
   const wrap=document.getElementById('finance-tabs');
   if(!wrap)return;
   const list=financeInvoicesCache;
-  const counts={
-    all:list.length,
-    a_relancer:list.filter(i=>financeMatchesFilter(i,'a_relancer')).length,
-    a_venir:list.filter(i=>i.daysLate!=null&&i.daysLate<=0).length,
-    en_retard:list.filter(i=>i.daysLate>0).length,
-    en_cours:list.filter(i=>i.internalStatus==='en_cours').length,
-    litige:list.filter(i=>i.internalStatus==='litige').length,
-    promesse_paiement:list.filter(i=>i.internalStatus==='promesse_paiement').length,
-    solde:list.filter(i=>i.internalStatus==='solde').length,
-  };
+  const counts={all:list.length};
+  for(const key of Object.keys(PENNYLANE_TAB_STATUSES)){
+    counts[key]=list.filter((i)=>financeMatchesFilter(i,key)).length;
+  }
   const chip=(key,label)=>`<button type="button" class="finance-tab ${financeActiveFilter===key?'active':''}" onclick="setFinanceFilter('${key}')">${label} <span class="finance-tab-count">${counts[key]}</span></button>`;
-  const plusKeys=['en_cours','litige','promesse_paiement','solde'];
-  const activeInPlus=plusKeys.includes(financeActiveFilter);
   wrap.innerHTML=`
     ${chip('all','Toutes')}
-    ${chip('a_relancer','À traiter')}
-    ${chip('a_venir','À venir')}
-    ${chip('en_retard','En retard')}
-    <select class="finance-tab-more-select ${activeInPlus?'active':''}" onchange="setFinanceFilter(this.value)">
-      <option value="" ${!activeInPlus?'selected':''}>Plus (${plusKeys.length})</option>
-      ${plusKeys.map(k=>`<option value="${k}" ${financeActiveFilter===k?'selected':''}>${FINANCE_STATUS_LABEL[k]} — ${counts[k]}</option>`).join('')}
-    </select>
+    ${chip('draft','Brouillon')}
+    ${chip('incomplete','À traiter')}
+    ${chip('upcoming','À venir')}
+    ${chip('late','En retard')}
+    ${chip('paid','Encaissée')}
+    ${chip('partially_paid','Partiellement encaissée')}
+    ${chip('cancelled','Annulée')}
+    ${chip('credit_note','Avoir')}
   `;
 }
 function renderFinanceInvoices(){

@@ -1424,7 +1424,7 @@ function joursDeRetard(deadline) {
 app.post('/api/finance/sync', requireFinance, async (req, res) => {
   try {
     const result = await pennylane.syncFinance(db);
-    console.log(`[FINANCE] sync Pennylane OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s)`);
+    console.log(`[FINANCE] sync Pennylane OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s), ${result.invoicesPurged} facture(s) hors-fenêtre purgée(s)`);
     res.json({ ok: true, ...result });
   } catch (e) {
     console.error('[FINANCE] sync Pennylane KO :', e.message);
@@ -1442,18 +1442,23 @@ app.post('/api/finance/sync', requireFinance, async (req, res) => {
 const PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete'];
 const HORS_RECOUVREMENT_PLACEHOLDERS = PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',');
 
-// Liste des factures encore dues (remaining_amount > 0 — une facture soldée
-// n'a plus rien à faire dans un outil de RELANCE), avec jours de retard
-// calculés à la volée (jamais stockés : sinon désynchronisé dès le lendemain).
+// Liste de TOUTES les factures synchronisées, sans filtre par défaut — la
+// barre d'onglets du front reproduit le classement Pennylane lui-même
+// (Toutes/Brouillon/À traiter/À venir/En retard/Encaissée/Partiellement
+// encaissée/Annulée/Avoir), qui a besoin de voir toute facture quel que soit
+// son statut ou son reste-dû (pas seulement celles encore à recouvrer) pour
+// que les compteurs collent à ce qu'affiche Pennylane. Jours de retard
+// calculés à la volée (jamais stockés : sinon désynchronisé dès le
+// lendemain). NB : les KPI de recouvrement (/api/finance/kpis) restent eux
+// bornés aux factures encore dues et pertinentes — cette route-ci sert la
+// vue "annuaire complet", pas le calcul d'encours.
 app.get('/api/finance/invoices', requireFinance, (req, res) => {
   const rows = db.prepare(`
     SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
            c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone
     FROM pennylane_invoices i
     LEFT JOIN pennylane_customers c ON c.id = i.customer_id
-    WHERE i.remaining_amount > 0
-      AND (i.status IS NULL OR i.status NOT IN (${HORS_RECOUVREMENT_PLACEHOLDERS}))
-  `).all(...PENNYLANE_HORS_RECOUVREMENT);
+  `).all();
   const { statut, q, retard_only } = req.query;
   const qLower = q ? String(q).trim().toLowerCase() : '';
   let list = rows.map((r) => ({
