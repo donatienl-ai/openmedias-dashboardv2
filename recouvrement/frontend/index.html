@@ -527,8 +527,13 @@ td { padding: 10px 14px; font-size: 13px; }
   cursor: pointer; font-family: 'Inter', sans-serif;
 }
 .period-apply:hover { background: var(--accent-light); }
-.report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
-.kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); }
+.report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
+/* min-width:0 est le correctif clé : par défaut, un enfant de grid a
+   min-width:auto, donc CSS Grid ne le laisse jamais devenir plus étroit que
+   son contenu — un gros montant ("16 848 623 €") forçait alors la carte à
+   déborder sur ses voisines au lieu de se contenter de la largeur de sa
+   colonne (constaté : chiffres qui débordent sur la carte suivante). */
+.kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); min-width: 0; overflow: hidden; }
 .kpi-eyebrow { display: flex; align-items: center; gap: 7px; font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; color: var(--text-dim); margin-bottom: 10px; }
 .kpi-eyebrow .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
 /* Titres de section Paramètres — même structure que .kpi-eyebrow (puce +
@@ -538,7 +543,7 @@ td { padding: 10px 14px; font-size: 13px; }
    suffit à structurer sans "crier". */
 .param-section-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--text); }
 .param-section-title .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
-.kpi-val { font-family: 'Sora', sans-serif; font-size: 32px; font-weight: 800; letter-spacing: -0.8px; font-variant-numeric: tabular-nums; }
+.kpi-val { font-family: 'Sora', sans-serif; font-size: clamp(20px, 2.3vw, 32px); font-weight: 800; letter-spacing: -0.8px; font-variant-numeric: tabular-nums; overflow-wrap: break-word; }
 .kpi-lbl { font-size: 11px; color: var(--text-muted); font-weight: 600; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
 .media-table-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
 .ca-bar-wrap { margin-top: 5px; background: var(--surface2); border-radius: 4px; height: 4px; overflow: hidden; }
@@ -768,11 +773,17 @@ td { padding: 10px 14px; font-size: 13px; }
 
 /* Filtre de période (Tout/Semaine/Mois/Année) sur la date d'échéance, avec
    navigation précédent/suivant quand une période calendaire est active. */
-.finance-period-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-.finance-period-modes { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; box-shadow: var(--shadow); }
-.finance-period-mode { background: none; border: none; color: var(--text-dim); font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-family: 'Inter', sans-serif; }
+/* Volontairement plus discrète que .finance-tabs juste en dessous (pas de
+   fond carte / ombre / bordure) : ce sont deux filtres différents empilés
+   l'un sur l'autre (période, puis statut), et un même style de "pilule"
+   pour les deux les rendait impossibles à distinguer au premier coup d'œil.
+   Celle-ci reste un simple groupe de boutons texte avec un petit libellé. */
+.finance-period-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.finance-period-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); }
+.finance-period-modes { display: flex; align-items: center; gap: 2px; background: var(--surface2); border-radius: 8px; padding: 2px; }
+.finance-period-mode { background: none; border: none; color: var(--text-dim); font-size: 11.5px; font-weight: 700; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-family: 'Inter', sans-serif; }
 .finance-period-mode:hover { background: var(--surface2); color: var(--text); }
-.finance-period-mode.active { background: var(--accent-dim); color: var(--accent); }
+.finance-period-mode.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .finance-period-nav { display: flex; align-items: center; gap: 6px; }
 .finance-period-label { font-size: 12px; font-weight: 700; color: var(--text); min-width: 140px; text-align: center; }
 </style>
@@ -1117,12 +1128,12 @@ function renderFinancePeriodBar(){
   const modeBtns=modes.map(([key,label])=>`<button type="button" class="finance-period-mode ${financePeriodMode===key?'active':''}" onclick="setFinancePeriodMode('${key}')">${label}</button>`).join('');
   const nav=financePeriodMode==='all'?'':`
     <div class="finance-period-nav">
-      <button type="button" class="btn-icon" onclick="financePeriodShift(-1)" title="Période précédente">‹</button>
+      <button type="button" class="btn-icon" style="width:26px;height:26px" onclick="financePeriodShift(-1)" title="Période précédente">‹</button>
       <span class="finance-period-label">${financePeriodLabel()}</span>
-      <button type="button" class="btn-icon" onclick="financePeriodShift(1)" title="Période suivante">›</button>
+      <button type="button" class="btn-icon" style="width:26px;height:26px" onclick="financePeriodShift(1)" title="Période suivante">›</button>
     </div>
   `;
-  wrap.innerHTML=`<div class="finance-period-modes">${modeBtns}</div>${nav}`;
+  wrap.innerHTML=`<span class="finance-period-tag">Période</span><div class="finance-period-modes">${modeBtns}</div>${nav}`;
 }
 
 function financeHeaders(json){
