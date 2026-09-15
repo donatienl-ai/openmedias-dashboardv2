@@ -56,11 +56,22 @@ async function pennylaneFetch(pathAndQuery, attempt = 1) {
 // Pennylane "Use Cursor-Based Pagination"). Le paramètre de taille de page
 // documenté (v2) est `limit` (1-100) — PAS `per_page` (nom v1) : avec le
 // mauvais nom, Pennylane l'ignore silencieusement et retombe sur son défaut
-// de 20/page, ce qui marchait quand même (le curseur `meta.next_cursor` fait
-// toujours foi) mais multipliait les allers-retours pour rien.
+// de 20/page.
 // `filter`, si fourni, est un objet/tableau passé tel quel en JSON dans le
 // paramètre `filter` documenté par Pennylane (ex. filtrer les factures par
 // date : cf. syncFinance ci-dessous).
+//
+// BUG CORRIGÉ : le curseur de page suivante est renvoyé par Pennylane au
+// niveau RACINE de la réponse (`next_cursor`, à côté de `items`/`has_more`),
+// PAS sous un objet `meta` (confirmé sur la doc officielle des deux
+// endpoints utilisés ici, getcustomerinvoices et getcustomers — aucun des
+// deux ne renvoie de `meta`). Le code précédent lisait `json.meta.next_cursor`,
+// qui n'existe jamais : la pagination s'arrêtait donc TOUJOURS après la
+// première page (100 éléments), quel que soit le volume réel côté Pennylane —
+// d'où des factures manquantes en masse ET des clients manquants (donc des
+// noms d'entreprise vides dès qu'un client n'était pas dans ce premier lot
+// de 100). On garde un repli sur `meta.next_cursor` par prudence si jamais
+// un endpoint futur l'utilise, mais `next_cursor` racine est prioritaire.
 async function getAllPaginated(endpoint, filter) {
   const items = [];
   let cursor = null;
@@ -71,7 +82,7 @@ async function getAllPaginated(endpoint, filter) {
     const json = await pennylaneFetch(`/${endpoint}?${params.toString()}`);
     const batch = Array.isArray(json) ? json : (json.items || []);
     items.push(...batch);
-    cursor = (json.meta && json.meta.next_cursor) || null;
+    cursor = json.next_cursor ?? (json.meta && json.meta.next_cursor) ?? null;
     if (!cursor || !batch.length) break;
   }
   return items;
