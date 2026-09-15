@@ -1424,7 +1424,7 @@ function joursDeRetard(deadline) {
 app.post('/api/finance/sync', requireFinance, async (req, res) => {
   try {
     const result = await pennylane.syncFinance(db);
-    console.log(`[FINANCE] sync Pennylane OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s), ${result.invoicesPurged} facture(s) hors-fenêtre purgée(s)`);
+    console.log(`[FINANCE] sync Pennylane OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s)`);
     res.json({ ok: true, ...result });
   } catch (e) {
     console.error('[FINANCE] sync Pennylane KO :', e.message);
@@ -1473,6 +1473,7 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     contactPhone: r.contact_phone || '',
     dateEmission: r.date_emission,
     deadline: r.deadline,
+    deadlineManual: !!r.deadline_manual,
     amountHt: r.amount_ht,
     amountTtc: r.amount,
     remainingAmountHt: r.remaining_amount_ht,
@@ -1596,6 +1597,8 @@ app.post('/api/finance/invoices/:id/relances', requireFinance, (req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM finance_relances WHERE id=?').get(r.lastInsertRowid));
 });
 
+const DEADLINE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 app.patch('/api/finance/invoices/:id', requireFinance, (req, res) => {
   const existing = db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Facture introuvable' });
@@ -1603,9 +1606,22 @@ app.patch('/api/finance/invoices/:id', requireFinance, (req, res) => {
   if (!FINANCE_INTERNAL_STATUSES.includes(internalStatus)) {
     return res.status(400).json({ error: `Statut invalide (attendu: ${FINANCE_INTERNAL_STATUSES.join(', ')})` });
   }
+  // Correction manuelle de l'échéance (ex. délai négocié avec le client) :
+  // ne touche QUE la date qui sert au calcul du retard/classement/KPI, jamais
+  // le montant dû (celui-ci reste celui de Pennylane). Marquée deadline_manual=1
+  // pour que la prochaine synchro Pennylane ne l'écrase pas (cf. pennylane.js).
+  let deadline = existing.deadline;
+  let deadlineManual = existing.deadline_manual;
+  if (req.body.deadline !== undefined) {
+    const d = String(req.body.deadline).trim();
+    if (!DEADLINE_RE.test(d)) return res.status(400).json({ error: 'Date d\'échéance invalide (attendu AAAA-MM-JJ)' });
+    deadline = d;
+    deadlineManual = 1;
+  }
   // L'attribution par collaborateur a été retirée (une seule personne gère le
-  // recouvrement) — seul le statut interne reste modifiable ici.
-  db.prepare('UPDATE pennylane_invoices SET internal_status=? WHERE id=?').run(internalStatus, req.params.id);
+  // recouvrement) — seuls le statut interne et l'échéance restent modifiables ici.
+  db.prepare('UPDATE pennylane_invoices SET internal_status=?, deadline=?, deadline_manual=? WHERE id=?')
+    .run(internalStatus, deadline, deadlineManual, req.params.id);
   res.json(db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id));
 });
 

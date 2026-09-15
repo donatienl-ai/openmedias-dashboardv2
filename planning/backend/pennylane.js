@@ -216,7 +216,13 @@ async function syncFinance(db) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       invoice_number=excluded.invoice_number, customer_id=excluded.customer_id,
-      date_emission=excluded.date_emission, deadline=excluded.deadline,
+      date_emission=excluded.date_emission,
+      -- Une échéance corrigée à la main dans l'appli (deadline_manual=1, ex.
+      -- délai négocié avec le client) n'est PLUS écrasée par la valeur
+      -- Pennylane au sync suivant — elle ne redevient alignée sur Pennylane
+      -- que si quelqu'un la modifie à nouveau depuis l'appli (ou remet
+      -- deadline_manual à 0 en base). Voir PATCH /api/finance/invoices/:id.
+      deadline = CASE WHEN pennylane_invoices.deadline_manual=1 THEN pennylane_invoices.deadline ELSE excluded.deadline END,
       amount=excluded.amount, amount_ht=excluded.amount_ht,
       remaining_amount=excluded.remaining_amount, remaining_amount_ht=excluded.remaining_amount_ht,
       status=excluded.status,

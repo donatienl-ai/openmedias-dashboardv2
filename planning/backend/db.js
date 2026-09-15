@@ -285,6 +285,12 @@ try { db.exec('ALTER TABLE pennylane_customers ADD COLUMN contact_phone TEXT'); 
 // restent le TTC, cf. pennylane.js) — demandé pour affichage HT et TTC.
 try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN amount_ht REAL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN remaining_amount_ht REAL DEFAULT 0'); } catch(e) {}
+// Migration : correction manuelle de l'échéance depuis l'appli (ex. délai
+// négocié avec le client) — deadline_manual=1 protège `deadline` d'un écrasement
+// par la prochaine synchro Pennylane (cf. upsertInvoice dans pennylane.js).
+// Le montant dû, lui, n'est jamais touché par cette correction : seule la
+// date qui sert au calcul du retard change (voir PATCH /api/finance/invoices/:id).
+try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN deadline_manual INTEGER DEFAULT 0'); } catch(e) {}
 
 // Seed setting: horizon de visibilité commercial (en mois), 3 par défaut
 try {

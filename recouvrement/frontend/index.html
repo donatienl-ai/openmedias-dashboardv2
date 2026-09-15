@@ -747,6 +747,14 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-aging-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
 .finance-aging-legend span.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .finance-invoice-link { font-weight: 700; color: var(--accent); text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font-size: inherit; font-family: inherit; }
+/* Échéance éditable en ligne (liste + fiche détail) — permet de corriger la
+   date à la main (ex. délai négocié) sans passer par Pennylane ; ne touche
+   jamais le montant dû, seulement le calcul du retard/tri/KPI (cf.
+   patchFinanceInvoice). Le ✎ signale une échéance déjà corrigée (protégée
+   d'un écrasement par la prochaine synchro Pennylane, cf. deadline_manual). */
+.finance-deadline-cell { display: flex; align-items: center; gap: 5px; }
+.finance-deadline-input { font-size: 12px !important; padding: 5px 6px !important; width: 122px; }
+.finance-deadline-manual-dot { font-size: 11px; color: var(--gold); flex-shrink: 0; }
 .finance-retard-wrap { min-width: 92px; }
 .finance-retard-bar { height: 6px; border-radius: 4px; background: var(--surface2); overflow: hidden; }
 .finance-retard-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
@@ -797,14 +805,12 @@ td { padding: 10px 14px; font-size: 13px; }
    l'un sur l'autre (période, puis statut), et un même style de "pilule"
    pour les deux les rendait impossibles à distinguer au premier coup d'œil.
    Celle-ci reste un simple groupe de boutons texte avec un petit libellé. */
-.finance-period-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.finance-period-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
 .finance-period-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); }
-.finance-period-modes { display: flex; align-items: center; gap: 2px; background: var(--surface2); border-radius: 8px; padding: 2px; }
-.finance-period-mode { background: none; border: none; color: var(--text-dim); font-size: 11.5px; font-weight: 700; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-family: 'Inter', sans-serif; }
-.finance-period-mode:hover { background: var(--surface2); color: var(--text); }
-.finance-period-mode.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
-.finance-period-nav { display: flex; align-items: center; gap: 6px; }
-.finance-period-label { font-size: 12px; font-weight: 700; color: var(--text); min-width: 140px; text-align: center; }
+.finance-period-field { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.finance-period-field input[type=date] { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-family: 'Inter', sans-serif; padding: 5px 8px; }
+.finance-period-field input[type=date]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+.finance-period-reset { background: none; border: none; color: var(--accent); font-size: 11.5px; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; font-family: 'Inter', sans-serif; }
 </style>
 </head>
 <body>
@@ -903,10 +909,15 @@ td { padding: 10px 14px; font-size: 13px; }
          permanence faisait doublon (relevé dans l'audit UX). -->
     <div id="finance-sync-overview" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
     <div class="report-grid" id="finance-kpis"></div>
-    <!-- Filtre de période sur la date d'ÉCHÉANCE (Semaine/Mois/Année,
-         périodes calendaires avec navigation précédent/suivant) — restreint
-         à la fois les onglets et le tableau ci-dessous. Cf. renderFinancePeriodBar(). -->
-    <div class="finance-period-bar" id="finance-period-bar"></div>
+    <!-- Filtre de période : calendrier personnalisable (Du/Au) sur la date
+         d'ÉCHÉANCE — restreint à la fois les onglets, le tableau et les KPI
+         ci-dessous. Cf. financeMatchesPeriod() / computeFinanceKpisFromCache(). -->
+    <div class="finance-period-bar">
+      <span class="finance-period-tag">Période</span>
+      <label class="finance-period-field">Du <input type="date" id="finance-period-from" onchange="setFinancePeriodFrom(this.value)"></label>
+      <label class="finance-period-field">Au <input type="date" id="finance-period-to" onchange="setFinancePeriodTo(this.value)"></label>
+      <button type="button" class="finance-period-reset" id="finance-period-reset" onclick="resetFinancePeriod()" style="display:none">Réinitialiser</button>
+    </div>
     <!-- Barre de classement façon Pennylane (Toutes/À traiter/À venir/En
          retard/Plus, chacun avec son compteur) — cf. renderFinanceTabs(). La
          recherche est fusionnée dans la même ligne (au lieu d'une carte à
@@ -1099,86 +1110,38 @@ function financeSortArrow(key){
   return `<span class="sort-arrow">${financeSortDir===1?'▲':'▼'}</span>`;
 }
 
-// Filtre de période (Tout/Semaine/Mois/Année), sur la date d'ÉCHÉANCE de la
-// facture, en périodes CALENDAIRES (semaine lundi-dimanche, mois civil,
-// année civile) — navigables via financePeriodShift(-1/+1). "Tout" (mode
-// par défaut) ne restreint rien : ce filtre est purement un affichage par-
-// dessus les données déjà synchronisées, il ne touche jamais à la synchro
-// elle-même (on a explicitement retiré tout filtre de date de syncFinance()
-// pour éviter que des factures sortent du champ suivi et se figent).
-let financePeriodMode='all'; // 'all' | 'week' | 'month' | 'year'
-let financePeriodAnchor=new Date(); // date de référence, déplacée par la navigation
+// Filtre de période : calendrier personnalisable (Du/Au), sur la date
+// d'ÉCHÉANCE de la facture — remplace l'ancien système à granularités fixes
+// (Semaine/Mois/Année) par une plage de dates libre. Aucune borne posée (par
+// défaut) ne restreint rien : ce filtre est purement un affichage par-dessus
+// les données déjà synchronisées, il ne touche jamais à la synchro elle-même
+// (on a explicitement retiré tout filtre de date de syncFinance() pour éviter
+// que des factures sortent du champ suivi et se figent). Les KPI (cf.
+// computeFinanceKpisFromCache) et la barre d'onglets suivent la même plage.
+let financePeriodFrom=null; // 'YYYY-MM-DD' ou null
+let financePeriodTo=null;   // 'YYYY-MM-DD' ou null
 
-function financePeriodBounds(){
-  if(financePeriodMode==='all')return null;
-  const d=financePeriodAnchor;
-  if(financePeriodMode==='week'){
-    const dow=(d.getDay()+6)%7; // 0=lundi … 6=dimanche
-    const start=new Date(d.getFullYear(),d.getMonth(),d.getDate()-dow);
-    const end=new Date(start.getFullYear(),start.getMonth(),start.getDate()+6,23,59,59,999);
-    return {start,end};
-  }
-  if(financePeriodMode==='month'){
-    const start=new Date(d.getFullYear(),d.getMonth(),1);
-    const end=new Date(d.getFullYear(),d.getMonth()+1,0,23,59,59,999);
-    return {start,end};
-  }
-  if(financePeriodMode==='year'){
-    const start=new Date(d.getFullYear(),0,1);
-    const end=new Date(d.getFullYear(),11,31,23,59,59,999);
-    return {start,end};
-  }
-  return null;
-}
 function financeMatchesPeriod(inv){
-  const bounds=financePeriodBounds();
-  if(!bounds)return true;
-  if(!inv.deadline)return false; // pas d'échéance (ex. brouillon) : hors période dès qu'une période est active
-  const dl=new Date(`${inv.deadline}T00:00:00`);
-  return dl>=bounds.start&&dl<=bounds.end;
+  if(!financePeriodFrom&&!financePeriodTo)return true;
+  if(!inv.deadline)return false; // pas d'échéance (ex. brouillon) : hors période dès qu'une borne est posée
+  if(financePeriodFrom&&inv.deadline<financePeriodFrom)return false;
+  if(financePeriodTo&&inv.deadline>financePeriodTo)return false;
+  return true;
 }
-function financePeriodLabel(){
-  const bounds=financePeriodBounds();
-  if(!bounds)return '';
-  if(financePeriodMode==='week'){
-    return `${bounds.start.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})} – ${bounds.end.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})}`;
-  }
-  if(financePeriodMode==='month'){
-    const s=bounds.start.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
-    return s.charAt(0).toUpperCase()+s.slice(1);
-  }
-  return String(bounds.start.getFullYear());
+function setFinancePeriodFrom(v){ financePeriodFrom=v||null; onFinancePeriodChange(); }
+function setFinancePeriodTo(v){ financePeriodTo=v||null; onFinancePeriodChange(); }
+function resetFinancePeriod(){
+  financePeriodFrom=null; financePeriodTo=null;
+  const f=document.getElementById('finance-period-from'), t=document.getElementById('finance-period-to');
+  if(f)f.value=''; if(t)t.value='';
+  onFinancePeriodChange();
 }
-function setFinancePeriodMode(mode){
-  financePeriodMode=mode;
-  financePeriodAnchor=new Date(); // on repart de "maintenant" à chaque changement de granularité
-  renderFinancePeriodBar();
+function onFinancePeriodChange(){
+  const resetBtn=document.getElementById('finance-period-reset');
+  if(resetBtn)resetBtn.style.display=(financePeriodFrom||financePeriodTo)?'':'none';
   renderFinanceTabs();
   renderFinanceInvoices();
-}
-function financePeriodShift(delta){
-  const d=new Date(financePeriodAnchor);
-  if(financePeriodMode==='week')d.setDate(d.getDate()+delta*7);
-  else if(financePeriodMode==='month')d.setMonth(d.getMonth()+delta);
-  else if(financePeriodMode==='year')d.setFullYear(d.getFullYear()+delta);
-  financePeriodAnchor=d;
-  renderFinancePeriodBar();
-  renderFinanceTabs();
-  renderFinanceInvoices();
-}
-function renderFinancePeriodBar(){
-  const wrap=document.getElementById('finance-period-bar');
-  if(!wrap)return;
-  const modes=[['all','Tout'],['week','Semaine'],['month','Mois'],['year','Année']];
-  const modeBtns=modes.map(([key,label])=>`<button type="button" class="finance-period-mode ${financePeriodMode===key?'active':''}" onclick="setFinancePeriodMode('${key}')">${label}</button>`).join('');
-  const nav=financePeriodMode==='all'?'':`
-    <div class="finance-period-nav">
-      <button type="button" class="btn-icon" style="width:26px;height:26px" onclick="financePeriodShift(-1)" title="Période précédente">‹</button>
-      <span class="finance-period-label">${financePeriodLabel()}</span>
-      <button type="button" class="btn-icon" style="width:26px;height:26px" onclick="financePeriodShift(1)" title="Période suivante">›</button>
-    </div>
-  `;
-  wrap.innerHTML=`<span class="finance-period-tag">Période</span><div class="finance-period-modes">${modeBtns}</div>${nav}`;
+  renderFinanceKpis(computeFinanceKpisFromCache());
 }
 
 function financeHeaders(json){
@@ -1195,11 +1158,85 @@ async function refreshFinanceInvoices(){
     fetch(`${API}/finance/invoices`,{headers:financeHeaders()}).then(r=>r.json()),
   ]);
   financeInvoicesCache=Array.isArray(invoices)?invoices:[];
+  // La syncOverview (répartition brute Pennylane, tous statuts confondus) est
+  // la seule chose qu'on garde du backend telle quelle : c'est un repère de
+  // cohérence de synchro globale, jamais borné à une période. Les KPI
+  // affichés, eux, sont recalculés côté front à partir du cache, filtrés par
+  // la période sélectionnée (cf. computeFinanceKpisFromCache).
   renderFinanceSyncOverview(kpis);
-  renderFinanceKpis(kpis);
-  renderFinancePeriodBar();
+  renderFinanceKpis(computeFinanceKpisFromCache());
   renderFinanceTabs();
   renderFinanceInvoices();
+}
+// Statuts Pennylane exclus de l'encours de recouvrement (mêmes exclusions que
+// /api/finance/kpis côté back : un brouillon, un avoir, une annulation... ne
+// représentent pas une dette à recouvrer).
+const FINANCE_HORS_RECOUVREMENT=['draft','credit_note','cancelled','partially_cancelled','archived','incomplete'];
+// Statuts internes déjà "pris en charge" autrement qu'en relance active (même
+// exclusion que côté back et que le digest mail quotidien) — un litige en
+// cours ou une promesse de paiement obtenue n'attend pas une relance du jour.
+const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde'];
+// Recalcule les KPI de recouvrement (encours, montant actionable, taux de
+// retard, aging, répartition par statut, DSO) côté front, à partir du cache
+// local déjà filtré par la période sélectionnée — reproduit exactement le
+// calcul de /api/finance/kpis (même exclusions, même définition d'actionable)
+// mais borné à la plage Du/Au en cours, ce que l'endpoint back ne fait pas.
+// Permet aussi aux cartes KPI de réagir immédiatement à un changement de
+// statut interne ou de période, sans réappeler le serveur.
+function computeFinanceKpisFromCache(){
+  const list=financeInvoicesCache.filter(financeMatchesPeriod);
+  const unpaid=list.filter(inv=>{
+    const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+    return remaining>0 && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
+  });
+  let totalEncours=0,montantEnRetard=0,nbEnRetard=0,montantActionable=0,nbActionable=0;
+  const aging={j0_30:0,j31_60:0,j61_90:0,j90_plus:0};
+  const parStatut={};
+  for(const inv of unpaid){
+    const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+    totalEncours+=remaining;
+    const statut=inv.internalStatus||'a_relancer';
+    if(!parStatut[statut])parStatut[statut]={count:0,montant:0};
+    parStatut[statut].count+=1; parStatut[statut].montant+=remaining;
+    const daysLate=inv.daysLate;
+    if(daysLate!=null&&daysLate>0){
+      nbEnRetard+=1; montantEnRetard+=remaining;
+      if(!FINANCE_STATUTS_NON_ACTIONABLES.includes(statut)){ nbActionable+=1; montantActionable+=remaining; }
+      if(daysLate<=30)aging.j0_30+=remaining;
+      else if(daysLate<=60)aging.j31_60+=remaining;
+      else if(daysLate<=90)aging.j61_90+=remaining;
+      else aging.j90_plus+=remaining;
+    }
+  }
+  // DSO : CA facturé sur la période sélectionnée (ou 90j glissants par défaut
+  // quand aucune borne Du/Au n'est posée), rapporté à l'encours de cette même
+  // période — une approximation cohérente avec la formule back, mais bornée
+  // à la période choisie plutôt que toujours glissante sur 90j.
+  let periodStartStr,periodDays=90;
+  if(financePeriodFrom||financePeriodTo){
+    periodStartStr=financePeriodFrom||null;
+    if(financePeriodFrom){
+      const from=new Date(`${financePeriodFrom}T00:00:00`);
+      const to=financePeriodTo?new Date(`${financePeriodTo}T00:00:00`):new Date();
+      periodDays=Math.max(1,Math.round((to-from)/86400000)+1);
+    }
+  }else{
+    const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-90);
+    periodStartStr=d.toISOString().slice(0,10);
+  }
+  const caPeriode=financeInvoicesCache.reduce((sum,inv)=>{
+    if(!inv.dateEmission)return sum;
+    if(periodStartStr&&inv.dateEmission<periodStartStr)return sum;
+    if(financePeriodTo&&inv.dateEmission>financePeriodTo)return sum;
+    return sum+(inv.amountTtc!=null?inv.amountTtc:(inv.amount||0));
+  },0);
+  const dso=caPeriode>0?Math.round((totalEncours/caPeriode)*periodDays):null;
+  const tauxDeRetard=totalEncours>0?Math.round((montantEnRetard/totalEncours)*1000)/10:0;
+  return {
+    totalEncours, montantEnRetard, nbFacturesEnRetard:nbEnRetard, nbFacturesTotal:unpaid.length,
+    montantActionable, nbFacturesActionable:nbActionable, tauxDeRetard, dso, aging, parStatut,
+    periodJours:periodDays,
+  };
 }
 // Statuts bruts Pennylane (champ status de l'API) -> libellé FR, pour le
 // repère de cohérence de synchro. Couvre tout ce qu'on a vu dans la doc
@@ -1248,7 +1285,7 @@ function renderFinanceKpis(k){
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s)</div></div>
     <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''}</div></div>
     <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
-    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${k.periodJours}j glissants)</div></div>
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
     <div class="kpi-card" style="grid-column:1/-1">
       <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
       <div class="finance-aging-bar">${statutSegs.map(s=>{const montant=(parStatut[s.key]||{}).montant||0;const pct=statutTotal?montant/statutTotal*100:0;return pct?`<div class="finance-aging-seg" style="width:${pct}%;background:${s.color}" title="${s.label} : ${fmtCA(montant)}"></div>`:'';}).join('')}</div>
@@ -1406,7 +1443,7 @@ function renderFinanceInvoices(){
       <td>${inv.contactName||'—'}</td>
       <td>${inv.contactEmail||inv.customerEmail||'—'}</td>
       <td>${inv.contactPhone||inv.customerPhone||'—'}</td>
-      <td>${formatDateFR(inv.deadline)}</td>
+      <td><div class="finance-deadline-cell"><input type="date" class="form-input finance-deadline-input" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${inv.id}',{deadline:this.value})" title="${inv.deadlineManual?'Échéance corrigée manuellement — ne sera plus écrasée par la synchro Pennylane':'Échéance Pennylane'}">${inv.deadlineManual?'<span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}</div></td>
       <td>${financeRetardBarHtml(inv)}</td>
       <td>${fmtCA(inv.remainingAmountHt!=null?inv.remainingAmountHt:inv.amountHt)}</td>
       <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}</td>
@@ -1414,14 +1451,44 @@ function renderFinanceInvoices(){
     </tr>`).join('')}</tbody>
   </table>`;
 }
+// Jours de retard recalculés en LOCAL après une correction d'échéance, pour
+// rafraîchir tri/KPI/barre de retard sans attendre un refetch complet —
+// même formule que joursDeRetard() côté back (router.js).
+function financeJoursDeRetard(deadline){
+  if(!deadline)return null;
+  const d=new Date(`${deadline}T00:00:00`);
+  if(Number.isNaN(d.getTime()))return null;
+  const today=new Date(); today.setHours(0,0,0,0);
+  return Math.round((today-d)/86400000);
+}
 async function patchFinanceInvoice(id,patch){
   try{
-    await fetch(`${API}/finance/invoices/${id}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
+    const res=await fetch(`${API}/finance/invoices/${id}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
+    if(!res.ok){ const err=await res.json().catch(()=>({})); throw new Error(err.error||'Échec de la mise à jour'); }
+    const updated=await res.json(); // ligne pennylane_invoices brute (snake_case)
     const idx=financeInvoicesCache.findIndex(i=>i.id===id);
-    if(idx!==-1)Object.assign(financeInvoicesCache[idx],patch);
+    if(idx!==-1){
+      const inv=financeInvoicesCache[idx];
+      if(patch.internalStatus!==undefined)inv.internalStatus=updated.internal_status;
+      if(patch.deadline!==undefined){
+        // Ne recalcule QUE ce qui dépend de la date (retard, tri, KPI) — le
+        // montant dû n'est jamais touché par une correction d'échéance. La
+        // barre d'onglets Pennylane (statut brut `status`), elle, reste
+        // volontairement figée sur ce que Pennylane a calculé au dernier
+        // sync : ce n'est pas à nous de la recalculer localement (cf. la
+        // règle "onglets = miroir exact de Pennylane, jamais de logique
+        // maison" posée pour cette barre).
+        inv.deadline=updated.deadline;
+        inv.deadlineManual=!!updated.deadline_manual;
+        inv.daysLate=financeJoursDeRetard(inv.deadline);
+      }
+    }
     renderFinanceTabs();
+    renderFinanceInvoices();
+    renderFinanceKpis(computeFinanceKpisFromCache());
+    if(financeSelectedInvoiceId===id)openFinanceInvoiceDetail(id);
     showToast('Facture mise à jour');
-  }catch(e){ showToast("Échec de la mise à jour",'error'); }
+  }catch(e){ showToast(e.message||"Échec de la mise à jour",'error'); }
 }
 async function syncFinance(){
   const btn=document.getElementById('finance-sync-btn');
@@ -1469,7 +1536,7 @@ async function openFinanceInvoiceDetail(id){
       </div>
       <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin-bottom:10px">
         <div><div class="form-label">Émission</div>${formatDateFR(inv.dateEmission)}</div>
-        <div><div class="form-label">Échéance</div>${formatDateFR(inv.deadline)}</div>
+        <div><div class="form-label">Échéance${inv.deadlineManual?' <span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}</div><input type="date" class="form-input finance-deadline-input" style="margin-top:2px" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${id}',{deadline:this.value})"></div>
         <div><div class="form-label">Montant HT</div>${fmtCA(inv.amountHt)}</div>
         <div><div class="form-label">Montant TTC</div>${fmtCA(inv.amountTtc)}</div>
         <div><div class="form-label">Restant dû HT</div>${fmtCA(inv.remainingAmountHt)}</div>
