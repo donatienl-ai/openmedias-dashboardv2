@@ -1125,13 +1125,31 @@ function financeRetardBarHtml(inv){
   return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:#dc2626"></div></div><div class="finance-retard-label" style="color:#dc2626;font-weight:700">${daysLate}j de retard</div></div>`;
 }
 
+// Statuts déjà "pris en charge" autrement qu'en relance active — même liste
+// que FINANCE_STATUTS_NON_ACTIONABLES côté serveur (router.js /api/finance/kpis
+// et le mail quotidien, reports.js) : un litige en cours ou une promesse de
+// paiement obtenue n'attend pas une relance du jour, une facture soldée non
+// plus. Dupliquée ici faute de pouvoir importer une constante serveur dans
+// ce front statique — à garder synchronisée si la liste change côté serveur.
+const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde'];
+
 // Est-ce qu'une facture correspond au filtre actif de la barre d'onglets —
 // mêmes catégories que le classement Pennylane (Toutes/À traiter/À venir/En
 // retard), plus les statuts internes moins courants regroupés sous "Plus".
+//
+// BUG CORRIGÉ : "À traiter" testait `internalStatus === 'a_relancer'`, qui
+// est la valeur par défaut de TOUTE facture jamais triée manuellement — sur
+// une synchro fraîche (rien encore mis en cours/litige/promesse/soldé), ça
+// correspondait donc à 100% des factures, rendant l'onglet identique à
+// "Toutes" (constaté : 936 des deux côtés). "À traiter" doit vouloir dire
+// "en retard et pas déjà pris en charge autrement" — exactement la même
+// définition que la carte KPI "à relancer aujourd'hui" et le mail quotidien,
+// pour que les trois s'accordent.
 function financeMatchesFilter(inv,filter){
   if(filter==='all')return true;
   if(filter==='a_venir')return inv.daysLate!=null&&inv.daysLate<=0;
   if(filter==='en_retard')return inv.daysLate>0;
+  if(filter==='a_relancer')return inv.daysLate>0&&!FINANCE_STATUTS_NON_ACTIONABLES.includes(inv.internalStatus);
   return inv.internalStatus===filter;
 }
 function setFinanceFilter(key){
@@ -1150,7 +1168,7 @@ function renderFinanceTabs(){
   const list=financeInvoicesCache;
   const counts={
     all:list.length,
-    a_relancer:list.filter(i=>i.internalStatus==='a_relancer').length,
+    a_relancer:list.filter(i=>financeMatchesFilter(i,'a_relancer')).length,
     a_venir:list.filter(i=>i.daysLate!=null&&i.daysLate<=0).length,
     en_retard:list.filter(i=>i.daysLate>0).length,
     en_cours:list.filter(i=>i.internalStatus==='en_cours').length,
@@ -1218,8 +1236,7 @@ async function syncFinance(){
     const r=await fetch(`${API}/finance/sync`,{method:'POST',headers:financeHeaders()});
     const d=await r.json();
     if(!r.ok)throw new Error(d.error||'Échec de la synchro');
-    const purgeInfo=d.invoicesPurged?` · ${d.invoicesPurged} facture(s) hors-fenêtre purgée(s)`:'';
-    document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date(d.syncedAt).toLocaleString('fr-FR')} (${d.invoicesSynced} facture(s), ${d.customersSynced} client(s)${purgeInfo})`;
+    document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date(d.syncedAt).toLocaleString('fr-FR')} (${d.invoicesSynced} facture(s), ${d.customersSynced} client(s))`;
     showToast('Synchro Pennylane effectuée');
     await refreshFinanceInvoices();
   }catch(e){

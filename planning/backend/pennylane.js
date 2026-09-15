@@ -147,26 +147,20 @@ async function fetchPrimaryContact(contactsUrl) {
   }
 }
 
-// Synchro COMPLÈTE (pas incrémentale) à chaque appel, mais bornée à
-// SYNC_SINCE (V1) : au volume annoncé (quelques centaines à ~1-2 milliers de
-// factures/an pour 4-5M€ de CA) et sur la seule fenêtre pertinente pour le
-// recouvrement, rester simple l'emporte sur une synchro incrémentale via
-// /customer_invoices/changes — qui de toute façon ne conserve que 4 semaines
-// d'historique et ne suffirait pas seule à un tout premier chargement. À
-// revisiter si le volume grossit au point de rendre ça trop lent/coûteux.
-// NB : un appel /contacts par client s'ajoute désormais à chaque synchro
-// (voir fetchPrimaryContact) — plus lent qu'avant, mais c'est le seul moyen
-// d'obtenir un nom/mail/tel de contact réel plutôt que la seule société.
-// Point de départ de l'historique importé : les factures antérieures à cette
-// date ne sont plus pertinentes pour le recouvrement (avant la mise en place
-// de l'outil) et les exclure réduit d'autant le nombre de pages/appels API à
-// chaque synchro. Ajustable sans redéploiement via PENNYLANE_SYNC_SINCE (ex.
-// "2025-01-01") si le besoin change.
-const SYNC_SINCE = process.env.PENNYLANE_SYNC_SINCE || '2025-09-01';
-
+// Synchro COMPLÈTE (pas incrémentale) à chaque appel, SANS filtre de date :
+// on importe tout, à plat, tel que renvoyé par Pennylane — c'est la seule
+// source de vérité. Un filtre personnalisé (ex. "depuis telle date") a été
+// essayé puis abandonné : une facture qui sort du champ du filtre n'est
+// plus jamais rafraîchie, donc sa copie locale se fige et part en décalage
+// avec Pennylane (ex. facture marquée payée là-bas, encore "en retard" ici)
+// — un import plat évite structurellement ce genre d'incohérence. Pas
+// d'incrémental via /customer_invoices/changes non plus (ne garde que 4
+// semaines d'historique, insuffisant pour un premier chargement complet).
+// NB : un appel /contacts par client s'ajoute à chaque synchro (voir
+// fetchPrimaryContact) — plus lent, mais c'est le seul moyen d'obtenir un
+// nom/mail/tel de contact réel plutôt que la seule société.
 async function syncFinance(db) {
-  const invoiceFilter = [{ field: 'date', operator: 'gteq', value: SYNC_SINCE }];
-  const invoices = await getAllPaginated('customer_invoices', invoiceFilter);
+  const invoices = await getAllPaginated('customer_invoices');
   const customers = await getAllPaginated('customers');
 
   if (process.env.PENNYLANE_DEBUG_RAW === '1') {
@@ -213,20 +207,7 @@ async function syncFinance(db) {
       status=excluded.status, synced_at=excluded.synced_at
   `);
 
-  // BUG CORRIGÉ : une facture déjà en base (importée avant l'ajout de
-  // SYNC_SINCE, ou lors d'un test avec une valeur différente) mais dont la
-  // date tombe désormais AVANT SYNC_SINCE n'est plus jamais re-demandée à
-  // Pennylane (le filtre `date gteq SYNC_SINCE` l'exclut du fetch) — sa copie
-  // locale restait donc figée pour toujours, avec un statut/reste-dû périmé.
-  // C'est ce qui provoquait des incohérences du type "payée sur Pennylane
-  // mais encore affichée en retard chez nous" (ex. Betao AB). On purge donc
-  // à chaque synchro tout ce qui est hors de la fenêtre suivie — cohérent
-  // avec la demande initiale ("importer depuis septembre 2025") : une facture
-  // plus ancienne n'a de toute façon plus sa place dans l'outil.
-  const purgeOldInvoices = db.prepare('DELETE FROM pennylane_invoices WHERE date_emission < ?');
-
   const runAll = db.transaction(() => {
-    const purged = purgeOldInvoices.run(SYNC_SINCE).changes;
     for (const c of customers) {
       const contact = contactsById.get(String(c.id));
       upsertCustomer.run(
@@ -261,14 +242,12 @@ async function syncFinance(db) {
         computedStatus(inv)
       );
     }
-    return purged;
   });
-  const invoicesPurged = runAll();
+  runAll();
 
   return {
     invoicesSynced: invoices.length,
     customersSynced: customers.length,
-    invoicesPurged,
     syncedAt: new Date().toISOString(),
   };
 }
