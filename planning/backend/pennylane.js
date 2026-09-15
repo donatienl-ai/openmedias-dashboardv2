@@ -196,15 +196,33 @@ async function syncFinance(db) {
       contact_name=excluded.contact_name, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
       synced_at=excluded.synced_at
   `);
+  // Alignement du statut interne (notre suivi de relance : a_relancer /
+  // en_cours / litige / promesse_paiement / solde) sur le statut BRUT
+  // Pennylane, à chaque synchro : dès qu'une facture est encaissée, annulée
+  // (totalement ou partiellement) ou devient un avoir côté Pennylane, elle
+  // n'a plus rien à "relancer" — on la bascule donc automatiquement sur
+  // `solde` plutôt que de laisser une facture payée traîner indéfiniment sur
+  // la valeur par défaut `a_relancer` tant que personne ne l'a triée à la
+  // main. On ne touche PAS aux autres statuts (upcoming/late/partially_paid/
+  // draft/incomplete/archived) : une facture encore due garde le statut
+  // interne déjà choisi manuellement (litige/promesse_paiement/en_cours...),
+  // ce recalcul ne l'écrase jamais tant qu'elle n'est pas définitivement
+  // soldée/annulée.
+  const PENNYLANE_STATUSES_SOLDEES = ['paid', 'cancelled', 'partially_cancelled', 'credit_note'];
+  const soldeesSqlList = PENNYLANE_STATUSES_SOLDEES.map((s) => `'${s}'`).join(',');
+
   const upsertInvoice = db.prepare(`
-    INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, amount_ht, remaining_amount, remaining_amount_ht, status, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, amount_ht, remaining_amount, remaining_amount_ht, status, internal_status, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       invoice_number=excluded.invoice_number, customer_id=excluded.customer_id,
       date_emission=excluded.date_emission, deadline=excluded.deadline,
       amount=excluded.amount, amount_ht=excluded.amount_ht,
       remaining_amount=excluded.remaining_amount, remaining_amount_ht=excluded.remaining_amount_ht,
-      status=excluded.status, synced_at=excluded.synced_at
+      status=excluded.status,
+      internal_status = CASE WHEN excluded.status IN (${soldeesSqlList})
+        THEN 'solde' ELSE pennylane_invoices.internal_status END,
+      synced_at=excluded.synced_at
   `);
 
   const runAll = db.transaction(() => {
@@ -221,14 +239,13 @@ async function syncFinance(db) {
       );
     }
     for (const inv of invoices) {
-      // Brouillons/avoirs/annulées sont désormais bien enregistrés (avec leur
-      // statut Pennylane d'origine) plutôt que sautés : ils n'ont rien à voir
-      // avec le recouvrement (exclus de /api/finance/invoices et /kpis via le
-      // filtre sur `status`, voir router.js), mais les compter permet de
-      // vérifier d'un coup d'œil que la synchro a bien ramené tout ce que
-      // Pennylane annonce dans son propre tableau de bord (Toutes/Brouillon/
-      // Encaissée/Annulée/Avoir…), pas seulement les factures encore dues.
+      // Brouillons/avoirs/annulées sont enregistrés avec leur statut Pennylane
+      // d'origine (jamais sautés) : /api/finance/invoices renvoie tout (le
+      // front filtre lui-même par onglet, calqué sur ces statuts bruts), et
+      // /api/finance/kpis reste lui borné aux factures encore dues pour le
+      // calcul d'encours (voir router.js).
       const a = amountsOf(inv);
+      const status = computedStatus(inv);
       upsertInvoice.run(
         String(inv.id),
         inv.invoice_number || null,
@@ -239,7 +256,8 @@ async function syncFinance(db) {
         a.ht,
         a.remainingTtc,
         a.remainingHt,
-        computedStatus(inv)
+        status,
+        PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer'
       );
     }
   });
