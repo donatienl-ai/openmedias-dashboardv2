@@ -1439,7 +1439,12 @@ app.post('/api/finance/sync', requireFinance, async (req, res) => {
 // On les synchronise quand même (voir pennylane.js) pour pouvoir en afficher
 // le compte — cf. /api/finance/kpis, syncOverview — mais ils ne doivent
 // jamais apparaître dans la liste de travail ni fausser les KPI d'encours.
-const PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete'];
+// `paid` en fait partie aussi : certaines factures encaissées gardent un
+// remaining_amount non nul côté Pennylane (le champ ne retombe pas toujours
+// à 0 à l'encaissement) — sans cette exclusion, elles pouvaient être comptées
+// comme de l'encours en retard alors qu'elles sont soldées (bug remonté :
+// onglet "Encaissée" affichant des factures "Xj de retard").
+const PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete', 'paid'];
 const HORS_RECOUVREMENT_PLACEHOLDERS = PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',');
 
 // Liste de TOUTES les factures synchronisées, sans filtre par défaut — la

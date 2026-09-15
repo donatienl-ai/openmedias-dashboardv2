@@ -1170,8 +1170,16 @@ async function refreshFinanceInvoices(){
 }
 // Statuts Pennylane exclus de l'encours de recouvrement (mêmes exclusions que
 // /api/finance/kpis côté back : un brouillon, un avoir, une annulation... ne
-// représentent pas une dette à recouvrer).
-const FINANCE_HORS_RECOUVREMENT=['draft','credit_note','cancelled','partially_cancelled','archived','incomplete'];
+// représentent pas une dette à recouvrer). `paid` en fait partie : certaines
+// factures encaissées gardent un remaining_amount non nul côté Pennylane (le
+// champ ne retombe pas toujours à 0 à l'encaissement — cf. l'onglet Encaissée
+// où on voyait un "Xj de retard" rouge sur des factures pourtant soldées),
+// donc on exclut par STATUT plutôt que de se fier uniquement à remaining>0.
+const FINANCE_HORS_RECOUVREMENT=['draft','credit_note','cancelled','partially_cancelled','archived','incomplete','paid'];
+// Sous-ensemble "définitivement soldé" (utilisé pour l'affichage retard, pas
+// seulement l'exclusion d'encours) — mêmes valeurs que PENNYLANE_STATUSES_SOLDEES
+// côté pennylane.js, qui pilote déjà l'alignement de internalStatus='solde'.
+const FINANCE_STATUSES_SOLDEES=['paid','cancelled','partially_cancelled','credit_note'];
 // Statuts internes déjà "pris en charge" autrement qu'en relance active (même
 // exclusion que côté back et que le digest mail quotidien) — un litige en
 // cours ou une promesse de paiement obtenue n'attend pas une relance du jour.
@@ -1305,7 +1313,12 @@ function renderFinanceKpis(k){
 function financeRetardBarHtml(inv){
   const daysLate=inv.daysLate;
   const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount;
-  if((remaining||0)<=0)return '<span style="font-size:11px;color:var(--text-muted)">Soldée</span>';
+  // Priorité au statut (interne 'solde', ou Pennylane paid/annulée/avoir) sur
+  // le montant restant : une facture encaissée peut garder un remaining_amount
+  // non nul côté Pennylane, et afficher "Xj de retard" en rouge sur une
+  // facture déjà marquée Soldée à côté serait contradictoire.
+  const resolved=inv.internalStatus==='solde'||FINANCE_STATUSES_SOLDEES.includes(inv.status);
+  if(resolved||(remaining||0)<=0)return '<span style="font-size:11px;color:var(--text-muted)">Soldée</span>';
   if(daysLate==null)return '<span style="font-size:11px;color:var(--text-muted)">—</span>';
   if(daysLate<=0){
     const emission=inv.dateEmission?new Date(`${inv.dateEmission}T00:00:00`):null;
