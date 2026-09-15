@@ -557,6 +557,16 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-aging-seg { height: 100%; }
 .finance-aging-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
 .finance-aging-legend span.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+.finance-invoice-link { font-weight: 700; color: var(--accent); text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font-size: inherit; font-family: inherit; }
+.finance-retard-wrap { min-width: 92px; }
+.finance-retard-bar { height: 6px; border-radius: 4px; background: var(--surface2); overflow: hidden; }
+.finance-retard-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+.finance-retard-label { font-size: 10px; color: var(--text-muted); margin-top: 3px; white-space: nowrap; }
+.finance-detail-section { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.finance-detail-section:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+.finance-installment-row { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 7px 0; font-size: 12px; }
+.finance-installment-row:last-child { border-bottom: none; }
+.finance-installment-row.paid { opacity: 0.55; text-decoration: line-through; }
 
 /* ── MODAL ───────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(2,6,15,0.5); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; backdrop-filter: blur(6px); }
@@ -1131,15 +1141,12 @@ td { padding: 10px 14px; font-size: 13px; }
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <input class="form-input" style="max-width:220px;flex:1" type="text" id="finance-search" placeholder="N° facture ou client…" oninput="renderFinanceInvoices()">
         <select class="form-select" style="max-width:170px" id="finance-filter-statut" onchange="renderFinanceInvoices()"></select>
-        <select class="form-select" style="max-width:170px" id="finance-filter-assigned" onchange="renderFinanceInvoices()">
-          <option value="">Tous les assignés</option>
-        </select>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text-dim);cursor:pointer;white-space:nowrap">
           <input type="checkbox" id="finance-filter-retard" onchange="renderFinanceInvoices()"> En retard uniquement
         </label>
       </div>
     </div>
-    <div class="media-table-card" id="finance-invoices-table"></div>
+    <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
   </div>
 
   <div class="view" id="view-social">
@@ -2902,8 +2909,7 @@ const FINANCE_STATUS_LABEL={a_relancer:'À relancer',en_cours:'En cours',litige:
 const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',litige:'#dc2626',promesse_paiement:'#0d9488',solde:'var(--green)'};
 const FINANCE_CANAL_LABEL={email:'📧 Email',telephone:'📞 Téléphone',courrier:'✉️ Courrier',sms:'💬 SMS',autre:'Autre'};
 let financeInvoicesCache=[];
-let financeTeamCache=[];
-let financeSelectedInvoiceId=null; // facture ouverte dans le modal de relance
+let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
 
 function financeHeaders(json){
   const h={'x-commercial-id':commercialId};
@@ -2912,18 +2918,12 @@ function financeHeaders(json){
 }
 async function loadFinance(){
   populateFinanceStatutFilter();
-  await Promise.all([loadFinanceTeam(), refreshFinanceInvoices()]);
+  await refreshFinanceInvoices();
 }
 function populateFinanceStatutFilter(){
   const sel=document.getElementById('finance-filter-statut');
   if(!sel||sel.options.length)return; // déjà peuplé, pas besoin de meta à chaque retour sur l'onglet
   sel.innerHTML='<option value="">Tous statuts</option>'+(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}">${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
-}
-async function loadFinanceTeam(){
-  try{ financeTeamCache=await fetch(`${API}/finance/team`,{headers:financeHeaders()}).then(r=>r.json()); }
-  catch(e){ financeTeamCache=[]; }
-  const sel=document.getElementById('finance-filter-assigned');
-  if(sel)sel.innerHTML='<option value="">Tous les assignés</option>'+financeTeamCache.map(t=>`<option value="${t.nom}">${t.nom}</option>`).join('');
 }
 async function refreshFinanceInvoices(){
   const [kpis,invoices]=await Promise.all([
@@ -2956,16 +2956,33 @@ function renderFinanceKpis(k){
     </div>
   `;
 }
+// Barre de progression du retard : avant échéance, progression entre la date
+// d'émission et l'échéance (repère visuel de "combien de temps il reste") ;
+// après échéance, barre rouge dont la longueur croît avec le nombre de jours
+// de retard (plafonnée à 90j de retard pour rester lisible au-delà).
+function financeRetardBarHtml(inv){
+  const daysLate=inv.daysLate;
+  if(daysLate==null)return '<span style="font-size:11px;color:var(--text-muted)">—</span>';
+  if(daysLate<=0){
+    const emission=inv.dateEmission?new Date(`${inv.dateEmission}T00:00:00`):null;
+    const deadline=inv.deadline?new Date(`${inv.deadline}T00:00:00`):null;
+    let pct=0;
+    if(emission&&deadline&&deadline>emission){
+      pct=Math.max(0,Math.min(100,((Date.now()-emission)/(deadline-emission))*100));
+    }
+    return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="finance-retard-label">${-daysLate}j avant échéance</div></div>`;
+  }
+  const pct=Math.max(6,Math.min(100,(daysLate/90)*100));
+  return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:#dc2626"></div></div><div class="finance-retard-label" style="color:#dc2626;font-weight:700">${daysLate}j de retard</div></div>`;
+}
 function renderFinanceInvoices(){
   const wrap=document.getElementById('finance-invoices-table');
   if(!wrap)return;
   const q=(document.getElementById('finance-search')?.value||'').trim().toLowerCase();
   const statutFilter=document.getElementById('finance-filter-statut')?.value||'';
-  const assignedFilter=document.getElementById('finance-filter-assigned')?.value||'';
   const retardOnly=document.getElementById('finance-filter-retard')?.checked;
   let list=financeInvoicesCache.filter(inv=>{
     if(statutFilter&&inv.internalStatus!==statutFilter)return false;
-    if(assignedFilter&&inv.assignedTo!==assignedFilter)return false;
     if(retardOnly&&!(inv.daysLate>0))return false;
     if(q&&!(String(inv.invoiceNumber||'').toLowerCase().includes(q)||inv.customerName.toLowerCase().includes(q)))return false;
     return true;
@@ -2975,18 +2992,19 @@ function renderFinanceInvoices(){
     return;
   }
   const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
-  const assignedOptionsHtml=(inv)=>'<option value="">— Non assigné —</option>'+financeTeamCache.map(t=>`<option value="${t.nom}" ${t.nom===inv.assignedTo?'selected':''}>${t.nom}</option>`).join('');
   wrap.innerHTML=`<table>
-    <thead><tr><th>Facture</th><th>Client</th><th>Échéance</th><th>Retard</th><th>Montant dû</th><th>Statut</th><th>Assigné à</th><th></th></tr></thead>
+    <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th>Échéance</th><th>Retard</th><th>Montant HT</th><th>Montant TTC</th><th>Statut</th></tr></thead>
     <tbody>${list.map(inv=>`<tr>
-      <td><strong>${inv.invoiceNumber||'—'}</strong></td>
+      <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button></td>
       <td>${inv.customerName||'—'}</td>
+      <td>${inv.contactName||'—'}</td>
+      <td>${inv.contactEmail||inv.customerEmail||'—'}</td>
+      <td>${inv.contactPhone||inv.customerPhone||'—'}</td>
       <td>${formatDateFR(inv.deadline)}</td>
-      <td><span class="finance-days-late ${inv.daysLate>0?'late':'ok'}">${inv.daysLate>0?`${inv.daysLate}j`:(inv.daysLate!=null?'—':'?')}</span></td>
-      <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmount)}</td>
+      <td>${financeRetardBarHtml(inv)}</td>
+      <td>${fmtCA(inv.remainingAmountHt!=null?inv.remainingAmountHt:inv.amountHt)}</td>
+      <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}</td>
       <td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select></td>
-      <td><select class="form-select finance-inline-select" onchange="patchFinanceInvoice('${inv.id}',{assignedTo:this.value})">${assignedOptionsHtml(inv)}</select></td>
-      <td><button class="btn-secondary" style="font-size:11px;padding:5px 9px" onclick="openFinanceRelanceModal('${inv.id}')">💬 Relances</button></td>
     </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -3014,32 +3032,78 @@ async function syncFinance(){
     if(btn){ btn.disabled=false; btn.textContent='↻ Synchroniser Pennylane'; }
   }
 }
-// ── Modal de suivi des relances (historique + ajout) ─────────────────────────
-async function openFinanceRelanceModal(id){
+// ── Modal de détail facture : infos + PDF + statut + commentaires + échéances + relances ──
+// "Relances" = l'historique des actions de recouvrement déjà menées auprès du
+// client (un appel, un email, un courrier...) pour cette facture — ça sert à
+// garder une trace de qui a fait quoi et quand, pour ne pas relancer deux fois
+// la même semaine ou perdre le fil si quelqu'un d'autre reprend le dossier.
+// C'est un JOURNAL D'ACTIONS envers le client, à distinguer des "commentaires"
+// juste en dessous qui sont des notes internes (jamais envoyées au client).
+async function openFinanceInvoiceDetail(id){
   financeSelectedInvoiceId=id;
   const inv=financeInvoicesCache.find(i=>i.id===id);
   if(!inv)return;
-  document.getElementById('modal-title').textContent=`Relances — ${inv.invoiceNumber||inv.customerName}`;
+  document.getElementById('modal-title').textContent=`Facture ${inv.invoiceNumber||inv.id}`;
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-body').innerHTML='<div style="font-size:12px;color:var(--text-muted)">Chargement…</div>';
   document.getElementById('modal-footer').innerHTML=`<button class="btn-secondary" onclick="closeModal()">Fermer</button>`;
-  const relances=await fetch(`${API}/finance/invoices/${id}/relances`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
+  const [relances,comments,installments]=await Promise.all([
+    fetch(`${API}/finance/invoices/${id}/relances`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/finance/invoices/${id}/comments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]),
+    fetch(`${API}/finance/invoices/${id}/installments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]),
+  ]);
+  const statutOptionsHtml=(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
   document.getElementById('modal-body').innerHTML=`
-    <div class="form-group">
-      <div class="form-label">Client</div>
-      <div style="font-size:13px">${inv.customerName||'—'} ${inv.customerEmail?`· ${inv.customerEmail}`:''} ${inv.customerPhone?`· ${inv.customerPhone}`:''}</div>
+    <div class="finance-detail-section">
+      <div class="form-group" style="margin-bottom:8px">
+        <div class="form-label">Client</div>
+        <div style="font-size:13px">${inv.customerName||'—'}</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${inv.contactName?`${inv.contactName} · `:''}${inv.contactEmail||inv.customerEmail||''}${(inv.contactPhone||inv.customerPhone)?` · ${inv.contactPhone||inv.customerPhone}`:''}</div>
+      </div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin-bottom:10px">
+        <div><div class="form-label">Émission</div>${formatDateFR(inv.dateEmission)}</div>
+        <div><div class="form-label">Échéance</div>${formatDateFR(inv.deadline)}</div>
+        <div><div class="form-label">Montant HT</div>${fmtCA(inv.amountHt)}</div>
+        <div><div class="form-label">Montant TTC</div>${fmtCA(inv.amountTtc)}</div>
+        <div><div class="form-label">Restant dû HT</div>${fmtCA(inv.remainingAmountHt)}</div>
+        <div><div class="form-label">Restant dû TTC</div><strong style="color:var(--accent)">${fmtCA(inv.remainingAmountTtc)}</strong></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn-secondary" onclick="viewFinanceInvoicePdf('${id}')">📄 Voir le PDF</button>
+        <select class="form-select" style="max-width:200px;color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${id}',{internalStatus:this.value})">${statutOptionsHtml}</select>
+      </div>
     </div>
-    <div class="form-group">
+
+    <div class="finance-detail-section">
+      <div class="form-label">Commentaires (notes internes, jamais envoyées au client)</div>
+      <div style="display:flex;gap:8px;margin:6px 0 8px">
+        <input class="form-input" id="finance-comment-input" placeholder="Ajouter un commentaire…">
+        <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceComment('${id}')">+ Ajouter</button>
+      </div>
+      <div id="finance-comments-list">${financeCommentsListHtml(comments)}</div>
+    </div>
+
+    <div class="finance-detail-section">
+      <div class="form-label">Échéances de paiement</div>
+      <div style="display:flex;gap:8px;margin:6px 0 8px;flex-wrap:wrap">
+        <input class="form-input" id="finance-installment-label" placeholder="Libellé (optionnel)…" style="max-width:150px">
+        <input class="form-input" id="finance-installment-date" type="date">
+        <input class="form-input" id="finance-installment-amount" type="number" step="0.01" placeholder="Montant €" style="max-width:110px">
+        <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceInstallment('${id}')">+ Ajouter</button>
+      </div>
+      <div id="finance-installments-list">${financeInstallmentsListHtml(id,installments)}</div>
+    </div>
+
+    <div class="finance-detail-section">
+      <div class="info-banner neutral">💡 Les relances retracent les actions de recouvrement déjà menées auprès du client (appel, email, courrier…) — un journal partagé pour ne pas relancer deux fois ou perdre le fil si quelqu'un reprend le dossier. Elles ne modifient pas la facturation Pennylane.</div>
       <div class="form-label">Nouvelle relance</div>
-      <div style="display:flex;gap:8px;margin-bottom:8px">
+      <div style="display:flex;gap:8px;margin:6px 0 8px">
         <select class="form-select" id="finance-relance-canal" style="max-width:160px">
           ${Object.entries(FINANCE_CANAL_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}
         </select>
         <input class="form-input" id="finance-relance-note" placeholder="Note (optionnel)…">
         <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceRelance('${id}')">+ Ajouter</button>
       </div>
-    </div>
-    <div class="form-group">
       <div class="form-label">Historique</div>
       <div id="finance-relances-list">${relances.length?relances.map(r=>`
         <div class="finance-relance-entry">
@@ -3049,6 +3113,67 @@ async function openFinanceRelanceModal(id){
     </div>
   `;
 }
+function financeCommentsListHtml(comments){
+  if(!comments.length)return '<div class="idea-box-empty">Aucun commentaire pour l’instant</div>';
+  return comments.map(c=>`
+    <div class="finance-relance-entry">
+      <div>${(c.comment||'').replace(/</g,'&lt;')}</div>
+      <div class="finance-relance-meta">${c.auteur||'—'} · ${new Date(c.created_at).toLocaleString('fr-FR')}</div>
+    </div>`).join('');
+}
+function financeInstallmentsListHtml(invoiceId,installments){
+  if(!installments.length)return '<div class="idea-box-empty">Aucune échéance personnalisée — la facture garde son échéance Pennylane unique.</div>';
+  return installments.map(inst=>`
+    <div class="finance-installment-row ${inst.paid?'paid':''}">
+      <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer">
+        <input type="checkbox" ${inst.paid?'checked':''} onchange="toggleFinanceInstallmentPaid('${invoiceId}',${inst.id},this.checked)">
+        <span>${inst.label?`${inst.label} — `:''}${formatDateFR(inst.due_date)} · ${fmtCA(inst.amount)}</span>
+      </label>
+      <button class="btn-secondary" style="font-size:11px;padding:3px 8px" onclick="deleteFinanceInstallment('${invoiceId}',${inst.id})">✕</button>
+    </div>`).join('');
+}
+async function viewFinanceInvoicePdf(id){
+  try{
+    const r=await fetch(`${API}/finance/invoices/${id}/pdf`,{headers:financeHeaders()});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'PDF indisponible');
+    window.open(d.url,'_blank');
+  }catch(e){
+    showToast(e.message||'Impossible de récupérer le PDF','error');
+  }
+}
+async function submitFinanceComment(id){
+  const input=document.getElementById('finance-comment-input');
+  const comment=input.value.trim();
+  if(!comment)return;
+  await fetch(`${API}/finance/invoices/${id}/comments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({comment})});
+  input.value='';
+  const comments=await fetch(`${API}/finance/invoices/${id}/comments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
+  document.getElementById('finance-comments-list').innerHTML=financeCommentsListHtml(comments);
+}
+async function submitFinanceInstallment(id){
+  const label=document.getElementById('finance-installment-label').value.trim();
+  const dueDate=document.getElementById('finance-installment-date').value;
+  const amount=Number(document.getElementById('finance-installment-amount').value);
+  if(!dueDate){ showToast('Date d’échéance requise','error'); return; }
+  if(!amount||amount<=0){ showToast('Montant invalide','error'); return; }
+  const r=await fetch(`${API}/finance/invoices/${id}/installments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({label,dueDate,amount})});
+  const d=await r.json();
+  if(!r.ok){ showToast(d.error||'Échec de l’ajout','error'); return; }
+  document.getElementById('finance-installment-label').value='';
+  document.getElementById('finance-installment-date').value='';
+  document.getElementById('finance-installment-amount').value='';
+  const installments=await fetch(`${API}/finance/invoices/${id}/installments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
+  document.getElementById('finance-installments-list').innerHTML=financeInstallmentsListHtml(id,installments);
+}
+async function toggleFinanceInstallmentPaid(invoiceId,installmentId,paid){
+  await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify({paid})});
+}
+async function deleteFinanceInstallment(invoiceId,installmentId){
+  await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'DELETE',headers:financeHeaders()});
+  const installments=await fetch(`${API}/finance/invoices/${invoiceId}/installments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
+  document.getElementById('finance-installments-list').innerHTML=financeInstallmentsListHtml(invoiceId,installments);
+}
 async function submitFinanceRelance(id){
   const canal=document.getElementById('finance-relance-canal').value;
   const note=document.getElementById('finance-relance-note').value.trim();
@@ -3057,7 +3182,7 @@ async function submitFinanceRelance(id){
   // "en cours" côté serveur (cf. router.js) : on rafraîchit la liste derrière
   // le modal pour que le select de statut reflète ce changement au retour.
   await refreshFinanceInvoices();
-  openFinanceRelanceModal(id);
+  openFinanceInvoiceDetail(id);
 }
 
 // ── CALENDRIER ──────────────────────────────────────────────────────────────

@@ -227,8 +227,8 @@ db.exec(`
     -- qui ne dit rien du suivi de relance) : a_relancer -> en_cours -> soit
     -- solde (payée), soit litige/promesse_paiement en cas de blocage.
     internal_status TEXT DEFAULT 'a_relancer',
-    -- Nom (commercial_users.nom) du collaborateur en charge de cette facture,
-    -- même principe que "Assigné à" sur un post réseaux sociaux.
+    -- Attribution par collaborateur abandonnée (une seule personne gère le
+    -- recouvrement) — colonne conservée pour compat mais plus lue/écrite.
     assigned_to TEXT,
     synced_at TEXT DEFAULT (datetime('now'))
   );
@@ -246,7 +246,45 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_finance_relances_invoice ON finance_relances(invoice_id);
+
+  -- Commentaires libres sur une facture (distinct des relances ci-dessus :
+  -- une relance = une action de contact datée par canal ; un commentaire =
+  -- une simple note libre, ex. "client dit payer vendredi", "erreur sur BDC").
+  CREATE TABLE IF NOT EXISTS finance_invoice_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id TEXT NOT NULL,
+    auteur TEXT,
+    comment TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_comments_invoice ON finance_invoice_comments(invoice_id);
+
+  -- Échéances de paiement propres à l'outil (Pennylane ne renvoie qu'une
+  -- seule deadline par facture — le champ "installments" de son API est en
+  -- alpha et renvoie null pour l'instant) : permet de saisir à la main un
+  -- paiement fractionné (ex: 30% à la signature, 70% à 30 jours) et de suivre
+  -- chaque échéance séparément.
+  CREATE TABLE IF NOT EXISTS finance_invoice_installments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id TEXT NOT NULL,
+    label TEXT,
+    due_date TEXT NOT NULL,
+    amount REAL NOT NULL,
+    paid INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_installments_invoice ON finance_invoice_installments(invoice_id);
 `);
+// Migration : contact réel (nom/mail/tel d'une personne, cf. sous-endpoint
+// Pennylane /customers/{id}/contacts) — distinct de email/phone ci-dessus,
+// qui restent les coordonnées de la SOCIÉTÉ (fallback si pas de contact).
+try { db.exec('ALTER TABLE pennylane_customers ADD COLUMN contact_name TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE pennylane_customers ADD COLUMN contact_email TEXT'); } catch(e) {}
+try { db.exec('ALTER TABLE pennylane_customers ADD COLUMN contact_phone TEXT'); } catch(e) {}
+// Migration : montants HT en plus du TTC déjà stocké (amount/remaining_amount
+// restent le TTC, cf. pennylane.js) — demandé pour affichage HT et TTC.
+try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN amount_ht REAL DEFAULT 0'); } catch(e) {}
+try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN remaining_amount_ht REAL DEFAULT 0'); } catch(e) {}
 
 // Seed setting: horizon de visibilité commercial (en mois), 3 par défaut
 try {

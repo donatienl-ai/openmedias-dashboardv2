@@ -1437,12 +1437,13 @@ app.post('/api/finance/sync', requireFinance, async (req, res) => {
 // calculés à la volée (jamais stockés : sinon désynchronisé dès le lendemain).
 app.get('/api/finance/invoices', requireFinance, (req, res) => {
   const rows = db.prepare(`
-    SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone
+    SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
+           c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone
     FROM pennylane_invoices i
     LEFT JOIN pennylane_customers c ON c.id = i.customer_id
     WHERE i.remaining_amount > 0
   `).all();
-  const { statut, assigned_to, q, retard_only } = req.query;
+  const { statut, q, retard_only } = req.query;
   const qLower = q ? String(q).trim().toLowerCase() : '';
   let list = rows.map((r) => ({
     id: r.id,
@@ -1451,17 +1452,23 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     customerName: r.customer_name || '',
     customerEmail: r.customer_email || '',
     customerPhone: r.customer_phone || '',
+    contactName: r.contact_name || '',
+    contactEmail: r.contact_email || '',
+    contactPhone: r.contact_phone || '',
     dateEmission: r.date_emission,
     deadline: r.deadline,
+    amountHt: r.amount_ht,
+    amountTtc: r.amount,
+    remainingAmountHt: r.remaining_amount_ht,
+    remainingAmountTtc: r.remaining_amount,
+    // Alias conservés pour compat avec un ancien code éventuel côté front.
     amount: r.amount,
     remainingAmount: r.remaining_amount,
     status: r.status,
     internalStatus: r.internal_status,
-    assignedTo: r.assigned_to,
     daysLate: joursDeRetard(r.deadline),
   }));
   if (statut) list = list.filter((r) => r.internalStatus === statut);
-  if (assigned_to) list = list.filter((r) => r.assignedTo === assigned_to);
   if (retard_only === '1') list = list.filter((r) => (r.daysLate || 0) > 0);
   if (qLower) {
     list = list.filter(
@@ -1543,17 +1550,76 @@ app.patch('/api/finance/invoices/:id', requireFinance, (req, res) => {
   if (!FINANCE_INTERNAL_STATUSES.includes(internalStatus)) {
     return res.status(400).json({ error: `Statut invalide (attendu: ${FINANCE_INTERNAL_STATUSES.join(', ')})` });
   }
-  const assignedTo = req.body.assignedTo !== undefined ? (String(req.body.assignedTo).trim() || null) : existing.assigned_to;
-  db.prepare('UPDATE pennylane_invoices SET internal_status=?, assigned_to=? WHERE id=?').run(internalStatus, assignedTo, req.params.id);
+  // L'attribution par collaborateur a été retirée (une seule personne gère le
+  // recouvrement) — seul le statut interne reste modifiable ici.
+  db.prepare('UPDATE pennylane_invoices SET internal_status=? WHERE id=?').run(internalStatus, req.params.id);
   res.json(db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id));
 });
 
-// Comptes pouvant se voir attribuer une facture (rôle finance + admin, comme
-// partout ailleurs dans l'app un admin peut aussi être choisi comme responsable).
-app.get('/api/finance/team', requireFinance, (req, res) => {
-  res.json(db.prepare(
-    "SELECT id, nom FROM commercial_users WHERE role IN ('finance','admin') AND actif=1 ORDER BY nom ASC"
-  ).all());
+// Lien PDF (public_file_url) : jamais mis en cache côté nous (expire au bout
+// de 30 min chez Pennylane), redemandé à chaque clic sur "Voir le PDF".
+app.get('/api/finance/invoices/:id/pdf', requireFinance, async (req, res) => {
+  try {
+    const invoice = db.prepare('SELECT id FROM pennylane_invoices WHERE id=?').get(req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
+    const pdf = await pennylane.getInvoicePdfUrl(req.params.id);
+    res.json(pdf);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Commentaires libres sur une facture (distincts de l'historique de relances :
+// une note interne, pas une action de relance envoyée au client).
+app.get('/api/finance/invoices/:id/comments', requireFinance, (req, res) => {
+  res.json(db.prepare('SELECT * FROM finance_invoice_comments WHERE invoice_id=? ORDER BY created_at DESC').all(req.params.id));
+});
+
+app.post('/api/finance/invoices/:id/comments', requireFinance, (req, res) => {
+  const invoice = db.prepare('SELECT id FROM pennylane_invoices WHERE id=?').get(req.params.id);
+  if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
+  const comment = String(req.body.comment || '').trim();
+  if (!comment) return res.status(400).json({ error: 'Commentaire vide' });
+  const r = db.prepare('INSERT INTO finance_invoice_comments (invoice_id, auteur, comment) VALUES (?,?,?)')
+    .run(req.params.id, req.commercial.nom, comment);
+  res.status(201).json(db.prepare('SELECT * FROM finance_invoice_comments WHERE id=?').get(r.lastInsertRowid));
+});
+
+// Échéances de paiement personnalisées (Pennylane n'expose qu'une seule
+// deadline — `installments` y est encore en alpha et toujours null — donc ces
+// dates d'échelonnement sont gérées entièrement de notre côté).
+app.get('/api/finance/invoices/:id/installments', requireFinance, (req, res) => {
+  res.json(db.prepare('SELECT * FROM finance_invoice_installments WHERE invoice_id=? ORDER BY due_date ASC').all(req.params.id));
+});
+
+app.post('/api/finance/invoices/:id/installments', requireFinance, (req, res) => {
+  const invoice = db.prepare('SELECT id FROM pennylane_invoices WHERE id=?').get(req.params.id);
+  if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
+  const dueDate = String(req.body.dueDate || '').trim();
+  const amount = Number(req.body.amount);
+  if (!dueDate) return res.status(400).json({ error: 'Date d\'échéance requise' });
+  if (!amount || amount <= 0) return res.status(400).json({ error: 'Montant invalide' });
+  const label = req.body.label ? String(req.body.label).trim() : null;
+  const r = db.prepare('INSERT INTO finance_invoice_installments (invoice_id, label, due_date, amount) VALUES (?,?,?,?)')
+    .run(req.params.id, label, dueDate, amount);
+  res.status(201).json(db.prepare('SELECT * FROM finance_invoice_installments WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.patch('/api/finance/invoices/:id/installments/:installmentId', requireFinance, (req, res) => {
+  const existing = db.prepare('SELECT * FROM finance_invoice_installments WHERE id=? AND invoice_id=?')
+    .get(req.params.installmentId, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Échéance introuvable' });
+  const paid = req.body.paid !== undefined ? (req.body.paid ? 1 : 0) : existing.paid;
+  db.prepare('UPDATE finance_invoice_installments SET paid=? WHERE id=?').run(paid, existing.id);
+  res.json(db.prepare('SELECT * FROM finance_invoice_installments WHERE id=?').get(existing.id));
+});
+
+app.delete('/api/finance/invoices/:id/installments/:installmentId', requireFinance, (req, res) => {
+  const existing = db.prepare('SELECT id FROM finance_invoice_installments WHERE id=? AND invoice_id=?')
+    .get(req.params.installmentId, req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Échéance introuvable' });
+  db.prepare('DELETE FROM finance_invoice_installments WHERE id=?').run(existing.id);
+  res.status(204).end();
 });
 
 // ── SEED ──────────────────────────────────────────────────────────────────────
@@ -1787,7 +1853,7 @@ app.delete('/api/admin/commerciaux/:id', requireEdit, (req, res) => {
 const reports = setupReports(db);
 
 // Déclenchement manuel pour test (protégé par le secret SF OU par le rôle édito depuis l'app)
-// POST /api/admin/test-report  body: { "type": "mensuel" | "hebdo" | "apercu" | "kickoff" | "aprogrammer" | "clevel" }
+// POST /api/admin/test-report  body: { "type": "mensuel" | "hebdo" | "apercu" | "kickoff" | "aprogrammer" | "clevel" | "relances" }
 app.post('/api/admin/test-report', (req, res) => {
   const secret = req.headers['x-sf-secret'];
   const isEditRole = req.headers.role === 'edit';
@@ -1801,9 +1867,10 @@ app.post('/api/admin/test-report', (req, res) => {
     apercu: () => reports.reportApercuMoisSuivant({ force: true }),
     kickoff: () => reports.reportKickoffLundi({ force: true }),
     aprogrammer: () => reports.reportAProgrammerLundi({ force: true }),
-    clevel: () => reports.reportAProgrammerClevel({ force: true })
+    clevel: () => reports.reportAProgrammerClevel({ force: true }),
+    relances: () => reports.reportRelancesQuotidien({ force: true })
   };
-  if (!map[type]) return res.status(400).json({ error: 'type invalide (mensuel|hebdo|apercu|kickoff|aprogrammer|clevel)' });
+  if (!map[type]) return res.status(400).json({ error: 'type invalide (mensuel|hebdo|apercu|kickoff|aprogrammer|clevel|relances)' });
   map[type]();
   res.json({ success: true, message: `Rapport "${type}" déclenché, vérifie ta boîte mail` });
 });

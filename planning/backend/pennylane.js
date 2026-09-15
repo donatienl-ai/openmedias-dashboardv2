@@ -74,14 +74,47 @@ function customerIdOf(invoice) {
   return id != null ? String(id) : null;
 }
 
-function remainingAmountOf(invoice) {
-  const v = invoice.remaining_amount_with_tax ?? invoice.remaining_amount ?? 0;
-  return Number(v) || 0;
+// Champs confirmés sur le schéma réel d'une facture Pennylane (v2) :
+// `amount` = total TTC converti en EUR, `tax` = TVA en EUR (donc
+// HT = amount - tax), `remaining_amount_with_tax` / `remaining_amount_without_tax`
+// = restant dû TTC/HT. Pas de champ `amount_with_tax` ni `remaining_amount`
+// tout court (contrairement à une hypothèse de départ) — les .0 de secours
+// ci-dessous ne servent qu'à encaisser une valeur manquante/nulle, pas un nom
+// de champ différent.
+function amountsOf(invoice) {
+  const ttc = Number(invoice.amount) || 0;
+  const tax = Number(invoice.tax) || 0;
+  return {
+    ht: Number((ttc - tax).toFixed(2)),
+    ttc,
+    remainingHt: Number(invoice.remaining_amount_without_tax) || 0,
+    remainingTtc: Number(invoice.remaining_amount_with_tax) || 0,
+  };
 }
 
-function amountOf(invoice) {
-  const v = invoice.amount_with_tax ?? invoice.total_with_tax ?? invoice.amount ?? 0;
-  return Number(v) || 0;
+// Le contact (nom/mail/tel d'une VRAIE personne, pas juste la société) n'est
+// pas embarqué dans la fiche client Pennylane : celle-ci ne fournit qu'une
+// URL vers un sous-endpoint `/customers/{id}/contacts` (cf. doc Pennylane,
+// champ `contacts.url`). On prend le premier contact renvoyé — Pennylane ne
+// distingue pas de contact "principal" dans son modèle, donc c'est la
+// meilleure approximation disponible sans configuration supplémentaire.
+async function fetchPrimaryContact(contactsUrl) {
+  if (!contactsUrl) return null;
+  try {
+    const path = contactsUrl.replace(API_BASE, '');
+    const json = await pennylaneFetch(path);
+    const list = Array.isArray(json) ? json : (json.items || []);
+    const c = list[0];
+    if (!c) return null;
+    return {
+      name: c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
+      email: c.email || (Array.isArray(c.emails) ? c.emails[0] : '') || '',
+      phone: c.phone || c.phone_number || '',
+    };
+  } catch (e) {
+    console.warn(`[PENNYLANE] contact introuvable sur ${contactsUrl} :`, e.message);
+    return null;
+  }
 }
 
 // Synchro COMPLÈTE à chaque appel (V1) : au volume annoncé (quelques
@@ -90,6 +123,9 @@ function amountOf(invoice) {
 // qui de toute façon ne conserve que 4 semaines d'historique et ne suffirait
 // pas seule à un tout premier chargement. À revisiter si le volume grossit
 // au point de rendre une synchro complète trop lente/coûteuse en requêtes.
+// NB : un appel /contacts par client s'ajoute désormais à chaque synchro
+// (voir fetchPrimaryContact) — plus lent qu'avant, mais c'est le seul moyen
+// d'obtenir un nom/mail/tel de contact réel plutôt que la seule société.
 async function syncFinance(db) {
   const invoices = await getAllPaginated('customer_invoices');
   const customers = await getAllPaginated('customers');
@@ -99,43 +135,73 @@ async function syncFinance(db) {
     if (customers[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de client brut :', JSON.stringify(customers[0], null, 2));
   }
 
+  // Ne va chercher les contacts QUE pour les clients qui ont au moins une
+  // facture encore due dans ce sync (inutile de multiplier les appels API
+  // pour des clients soldés depuis longtemps qui n'apparaîtront nulle part
+  // dans l'outil de recouvrement).
+  const dueCustomerIds = new Set(
+    invoices
+      .filter((inv) => !inv.draft && !inv.credit_note && (Number(inv.remaining_amount_with_tax) || 0) > 0)
+      .map((inv) => customerIdOf(inv))
+      .filter(Boolean)
+  );
+  const contactsById = new Map();
+  for (const c of customers) {
+    if (!dueCustomerIds.has(String(c.id))) continue;
+    const contact = await fetchPrimaryContact(c.contacts && c.contacts.url);
+    if (contact) contactsById.set(String(c.id), contact);
+    if (process.env.PENNYLANE_DEBUG_RAW === '1' && contact) {
+      console.log(`[PENNYLANE_DEBUG_RAW] contact client ${c.id} :`, JSON.stringify(contact));
+    }
+  }
+
   const upsertCustomer = db.prepare(`
-    INSERT INTO pennylane_customers (id, name, email, phone, synced_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    INSERT INTO pennylane_customers (id, name, email, phone, contact_name, contact_email, contact_phone, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
-      name=excluded.name, email=excluded.email, phone=excluded.phone, synced_at=excluded.synced_at
+      name=excluded.name, email=excluded.email, phone=excluded.phone,
+      contact_name=excluded.contact_name, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
+      synced_at=excluded.synced_at
   `);
   const upsertInvoice = db.prepare(`
-    INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, remaining_amount, status, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, amount_ht, remaining_amount, remaining_amount_ht, status, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(id) DO UPDATE SET
       invoice_number=excluded.invoice_number, customer_id=excluded.customer_id,
       date_emission=excluded.date_emission, deadline=excluded.deadline,
-      amount=excluded.amount, remaining_amount=excluded.remaining_amount,
+      amount=excluded.amount, amount_ht=excluded.amount_ht,
+      remaining_amount=excluded.remaining_amount, remaining_amount_ht=excluded.remaining_amount_ht,
       status=excluded.status, synced_at=excluded.synced_at
   `);
 
   const runAll = db.transaction(() => {
     for (const c of customers) {
+      const contact = contactsById.get(String(c.id));
       upsertCustomer.run(
         String(c.id),
         c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
-        c.email || c.billing_email || '',
-        c.phone_number || c.phone || ''
+        (Array.isArray(c.emails) ? c.emails[0] : c.email) || '',
+        c.phone || c.phone_number || '',
+        contact ? contact.name : null,
+        contact ? contact.email : null,
+        contact ? contact.phone : null
       );
     }
     for (const inv of invoices) {
       // Brouillons/avoirs exclus : rien à recouvrer dessus (pas de deadline
       // de paiement exploitable) — inutile de polluer le cache avec.
       if (inv.draft || inv.credit_note) continue;
+      const a = amountsOf(inv);
       upsertInvoice.run(
         String(inv.id),
         inv.invoice_number || null,
         customerIdOf(inv),
         inv.date || null,
         inv.deadline || null,
-        amountOf(inv),
-        remainingAmountOf(inv),
+        a.ttc,
+        a.ht,
+        a.remainingTtc,
+        a.remainingHt,
         inv.status || null
       );
     }
@@ -145,4 +211,13 @@ async function syncFinance(db) {
   return { invoicesSynced: invoices.length, customersSynced: customers.length, syncedAt: new Date().toISOString() };
 }
 
-module.exports = { syncFinance, getAllPaginated, pennylaneFetch };
+// Un lien PDF public (`public_file_url`) est bien renvoyé par Pennylane, mais
+// n'est valable que 30 minutes — on ne le met donc JAMAIS en cache, on le
+// redemande à la demande (clic sur "Voir le PDF" côté app) via cet appel.
+async function getInvoicePdfUrl(id) {
+  const json = await pennylaneFetch(`/customer_invoices/${encodeURIComponent(id)}`);
+  if (!json.public_file_url) throw new Error("Pennylane n'a renvoyé aucun PDF pour cette facture");
+  return { url: json.public_file_url, filename: json.filename || null };
+}
+
+module.exports = { syncFinance, getInvoicePdfUrl, getAllPaginated, pennylaneFetch };

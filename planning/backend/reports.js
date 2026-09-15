@@ -329,6 +329,76 @@ function setupReports(db) {
     sendMailOnly(`📌 À programmer — vue C-level (${total} au total)`, html, [EMAIL_CLEVEL]);
   }
 
+  // ── RELANCES QUOTIDIENNES — recouvrement Pennylane, tous les matins ouvrés ──
+  // Digest des factures encore dues, en retard, et pas déjà classées dans un
+  // statut "réglé/en discussion" (litige, promesse de paiement, soldée) —
+  // celles-là n'ont plus besoin d'une relance du jour. Envoyé aux comptes
+  // rôle 'finance' + 'admin' actifs (mêmes destinataires que l'accès à
+  // l'onglet Recouvrement). Choix d'horaire : lundi-vendredi 8h Paris — à
+  // ajuster si "tous les matins" doit en fait couvrir aussi le week-end.
+  function joursDeRetardRelance(deadline) {
+    if (!deadline) return null;
+    const d = new Date(`${deadline}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return null;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return Math.round((today - d) / 86400000);
+  }
+
+  function reportRelancesQuotidien({ force = false } = {}) {
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    const today = fmt(new Date());
+    if (!force && !claimReportOnce(`relances_${today}`)) {
+      console.log(`[RELANCES] ${today} déjà envoyé — doublon ignoré`);
+      return;
+    }
+    const rows = db.prepare(`
+      SELECT i.*, c.name AS customer_name, c.contact_name AS contact_name,
+             c.contact_email AS contact_email, c.contact_phone AS contact_phone
+      FROM pennylane_invoices i
+      LEFT JOIN pennylane_customers c ON c.id = i.customer_id
+      WHERE i.remaining_amount > 0
+        AND i.internal_status NOT IN ('litige', 'promesse_paiement', 'solde')
+    `).all();
+    const enRetard = rows
+      .map((r) => ({ ...r, daysLate: joursDeRetardRelance(r.deadline) }))
+      .filter((r) => (r.daysLate || 0) > 0)
+      .sort((a, b) => b.daysLate - a.daysLate);
+
+    const dest = db.prepare(
+      "SELECT email FROM commercial_users WHERE role IN ('finance','admin') AND actif=1"
+    ).all().map((r) => r.email).filter(Boolean);
+
+    if (!enRetard.length) {
+      console.log('[RELANCES] aucune facture en retard à relancer aujourd\'hui — pas d\'envoi');
+      return;
+    }
+
+    const totalDu = enRetard.reduce((s, r) => s + (r.remaining_amount || 0), 0);
+    let html = `<h2>💶 Relances du jour — ${enRetard.length} facture(s) en retard</h2>
+      <p>${enRetard.length} facture(s) encore dues et en retard, pour un total de ${fmtMoney(totalDu)}. Statuts déjà classés "litige", "promesse de paiement" ou "soldée" sont exclus de cette liste.</p>
+      <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px">
+        <tr style="background:#1a1a2e;color:#fff">
+          <th style="padding:8px;text-align:left">Facture</th>
+          <th style="padding:8px;text-align:left">Client</th>
+          <th style="padding:8px;text-align:left">Contact</th>
+          <th style="padding:8px;text-align:right">Retard</th>
+          <th style="padding:8px;text-align:right">Montant dû</th>
+        </tr>`;
+    for (const r of enRetard) {
+      const contact = r.contact_name || r.customer_name || '';
+      const contactDetail = [r.contact_email, r.contact_phone].filter(Boolean).join(' · ');
+      html += `<tr style="border-bottom:1px solid #eee">
+        <td style="padding:6px 8px">${r.invoice_number || r.id}</td>
+        <td style="padding:6px 8px">${r.customer_name || ''}</td>
+        <td style="padding:6px 8px">${contact}${contactDetail ? `<br><span style="color:#888;font-size:11px">${contactDetail}</span>` : ''}</td>
+        <td style="padding:6px 8px;text-align:right">${r.daysLate} j</td>
+        <td style="padding:6px 8px;text-align:right">${fmtMoney(r.remaining_amount)}</td>
+      </tr>`;
+    }
+    html += `</table>${empreinteHtml(enRetard.length + ' facture(s)')}`;
+    sendMailOnly(`💶 Relances du jour — ${enRetard.length} facture(s) en retard (${fmtMoney(totalDu)})`, html, dest);
+  }
+
   // ── Helpers dates ──
   function isLastWeekdayOfMonth(date, weekday) {
     if (date.getDay() !== weekday) return false;
@@ -353,9 +423,12 @@ function setupReports(db) {
   // Tous les lundis à 14h : notif individuelle "à programmer" (Eva, Flavie) + vue C-level
   cron.schedule('0 14 * * 1', () => { reportAProgrammerLundi(); reportAProgrammerClevel(); }, { timezone: 'Europe/Paris' });
 
-  console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h)');
+  // Du lundi au vendredi à 8h : digest des relances de recouvrement du jour
+  cron.schedule('0 8 * * 1-5', () => reportRelancesQuotidien(), { timezone: 'Europe/Paris' });
 
-  return { reportMensuel, reportHebdo, reportApercuMoisSuivant, reportKickoffLundi, reportAProgrammerLundi, reportAProgrammerClevel, sendMail, sendMailOnly };
+  console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h, relances lun-ven 8h)');
+
+  return { reportMensuel, reportHebdo, reportApercuMoisSuivant, reportKickoffLundi, reportAProgrammerLundi, reportAProgrammerClevel, reportRelancesQuotidien, sendMail, sendMailOnly };
 }
 
 module.exports = { setupReports };
