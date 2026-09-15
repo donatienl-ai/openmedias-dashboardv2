@@ -10,9 +10,10 @@ const path = require('path');
 const crypto = require('crypto');
 const cronBdc = require('node-cron');
 const zlib = require('zlib');
-const { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES } = require('./db');
+const { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES, FINANCE_INTERNAL_STATUSES } = require('./db');
 const { setupReports } = require('./reports');
 const salesforce = require('./salesforce');
+const pennylane = require('./pennylane');
 
 const app = express.Router();
 
@@ -96,6 +97,17 @@ function requireCommercial(req, res, next) {
   if (!user) return res.status(401).json({ error: 'Compte introuvable ou désactivé' });
   req.commercial = user;
   next();
+}
+
+// Recouvrement (Pennylane) : accès réservé au rôle 'finance' et aux comptes
+// admin (qui, comme partout ailleurs dans l'app, voient tout) — on vérifie le
+// rôle RÉEL du compte (req.commercial.role), pas le header 'role' historique
+// edit/com du système PIN, sans rapport avec ce nouvel outil.
+function requireFinance(req, res, next) {
+  requireCommercial(req, res, () => {
+    if (req.commercial.role === 'finance' || req.commercial.role === 'admin') return next();
+    return res.status(403).json({ error: 'Accès refusé' });
+  });
 }
 
 // ── LIMITEUR DE FRÉQUENCE (mémoire, sans dépendance externe) ──────────────────
@@ -1273,7 +1285,7 @@ app.get('/api/reporting/semaine', (req, res) => {
 });
 
 // ── META ──────────────────────────────────────────────────────────────────────
-app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMois(), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST, channels: CHANNELS, socialPostStatuses: SOCIAL_POST_STATUSES }));
+app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMois(), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST, channels: CHANNELS, socialPostStatuses: SOCIAL_POST_STATUSES, financeInternalStatuses: FINANCE_INTERNAL_STATUSES }));
 
 // ── RÉTROPLANNING COMMUNICATION (nouveau projet, v1) ─────────────────────────
 // Calendrier de posts à publier (Instagram/LinkedIn/YouTube/Newsletter),
@@ -1394,6 +1406,156 @@ app.get('/api/social-team', requireContentTeam, (req, res) => {
   ).all());
 });
 
+// ── RECOUVREMENT / PENNYLANE (nouveau projet) ────────────────────────────────
+// Outil interne de suivi des impayés : Pennylane reste la source de vérité
+// facturation (voir ./pennylane.js), ce module ajoute juste par-dessus ce
+// que Pennylane ne fait pas nativement — statut de recouvrement, attribution
+// par collaborateur, historique de relances multi-canal, KPI (DSO, taux de
+// retard, aging) — jusqu'ici suivis à la main (Excel + Trello).
+function joursDeRetard(deadline) {
+  if (!deadline) return null;
+  const d = new Date(`${deadline}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((today - d) / 86400000);
+}
+
+app.post('/api/finance/sync', requireFinance, async (req, res) => {
+  try {
+    const result = await pennylane.syncFinance(db);
+    console.log(`[FINANCE] sync Pennylane OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s)`);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    console.error('[FINANCE] sync Pennylane KO :', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Liste des factures encore dues (remaining_amount > 0 — une facture soldée
+// n'a plus rien à faire dans un outil de RELANCE), avec jours de retard
+// calculés à la volée (jamais stockés : sinon désynchronisé dès le lendemain).
+app.get('/api/finance/invoices', requireFinance, (req, res) => {
+  const rows = db.prepare(`
+    SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone
+    FROM pennylane_invoices i
+    LEFT JOIN pennylane_customers c ON c.id = i.customer_id
+    WHERE i.remaining_amount > 0
+  `).all();
+  const { statut, assigned_to, q, retard_only } = req.query;
+  const qLower = q ? String(q).trim().toLowerCase() : '';
+  let list = rows.map((r) => ({
+    id: r.id,
+    invoiceNumber: r.invoice_number,
+    customerId: r.customer_id,
+    customerName: r.customer_name || '',
+    customerEmail: r.customer_email || '',
+    customerPhone: r.customer_phone || '',
+    dateEmission: r.date_emission,
+    deadline: r.deadline,
+    amount: r.amount,
+    remainingAmount: r.remaining_amount,
+    status: r.status,
+    internalStatus: r.internal_status,
+    assignedTo: r.assigned_to,
+    daysLate: joursDeRetard(r.deadline),
+  }));
+  if (statut) list = list.filter((r) => r.internalStatus === statut);
+  if (assigned_to) list = list.filter((r) => r.assignedTo === assigned_to);
+  if (retard_only === '1') list = list.filter((r) => (r.daysLate || 0) > 0);
+  if (qLower) {
+    list = list.filter(
+      (r) => (r.invoiceNumber || '').toLowerCase().includes(qLower) || r.customerName.toLowerCase().includes(qLower)
+    );
+  }
+  list.sort((a, b) => (b.daysLate ?? -9999) - (a.daysLate ?? -9999));
+  res.json(list);
+});
+
+// KPI de recouvrement : encours total, montant/nombre en retard, taux de
+// retard, aging (répartition de l'encours par tranche de retard) et DSO
+// (Days Sales Outstanding — formule classique : encours clients TTC / CA TTC
+// facturé sur la période × nb de jours de la période ; période glissante de
+// 90 jours, assez large pour lisser un mois calme, assez courte pour rester réactive).
+app.get('/api/finance/kpis', requireFinance, (req, res) => {
+  const unpaid = db.prepare('SELECT remaining_amount, deadline FROM pennylane_invoices WHERE remaining_amount > 0').all();
+  let totalEncours = 0;
+  let montantEnRetard = 0;
+  let nbEnRetard = 0;
+  const aging = { j0_30: 0, j31_60: 0, j61_90: 0, j90_plus: 0 };
+  for (const inv of unpaid) {
+    totalEncours += inv.remaining_amount;
+    const daysLate = joursDeRetard(inv.deadline);
+    if (daysLate !== null && daysLate > 0) {
+      nbEnRetard += 1;
+      montantEnRetard += inv.remaining_amount;
+      if (daysLate <= 30) aging.j0_30 += inv.remaining_amount;
+      else if (daysLate <= 60) aging.j31_60 += inv.remaining_amount;
+      else if (daysLate <= 90) aging.j61_90 += inv.remaining_amount;
+      else aging.j90_plus += inv.remaining_amount;
+    }
+  }
+  const PERIOD_DAYS = 90;
+  const periodStart = new Date();
+  periodStart.setHours(0, 0, 0, 0);
+  periodStart.setDate(periodStart.getDate() - PERIOD_DAYS);
+  const caPeriode = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM pennylane_invoices WHERE date_emission >= ?')
+    .get(periodStart.toISOString().slice(0, 10)).total || 0;
+  const dso = caPeriode > 0 ? Math.round((totalEncours / caPeriode) * PERIOD_DAYS) : null;
+  const tauxDeRetard = totalEncours > 0 ? Math.round((montantEnRetard / totalEncours) * 1000) / 10 : 0;
+  res.json({
+    totalEncours,
+    montantEnRetard,
+    nbFacturesEnRetard: nbEnRetard,
+    nbFacturesTotal: unpaid.length,
+    tauxDeRetard,
+    dso,
+    aging,
+    periodJours: PERIOD_DAYS,
+  });
+});
+
+app.get('/api/finance/invoices/:id/relances', requireFinance, (req, res) => {
+  res.json(db.prepare('SELECT * FROM finance_relances WHERE invoice_id=? ORDER BY created_at DESC').all(req.params.id));
+});
+
+app.post('/api/finance/invoices/:id/relances', requireFinance, (req, res) => {
+  const invoice = db.prepare('SELECT id, internal_status FROM pennylane_invoices WHERE id=?').get(req.params.id);
+  if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
+  const canal = String(req.body.canal || '').trim();
+  if (!canal) return res.status(400).json({ error: 'Canal requis' });
+  const note = req.body.note ? String(req.body.note).trim() : null;
+  const r = db.prepare('INSERT INTO finance_relances (invoice_id, canal, note, auteur) VALUES (?,?,?,?)')
+    .run(req.params.id, canal, note, req.commercial.nom);
+  // Une relance faite = on passe implicitement de "à relancer" à "en cours",
+  // sauf si un statut plus avancé (litige/promesse/solde) a déjà été posé à
+  // la main — on ne veut pas écraser un statut plus informatif que "en cours".
+  if (invoice.internal_status === 'a_relancer') {
+    db.prepare("UPDATE pennylane_invoices SET internal_status='en_cours' WHERE id=?").run(req.params.id);
+  }
+  res.status(201).json(db.prepare('SELECT * FROM finance_relances WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.patch('/api/finance/invoices/:id', requireFinance, (req, res) => {
+  const existing = db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Facture introuvable' });
+  const internalStatus = req.body.internalStatus !== undefined ? String(req.body.internalStatus).trim() : existing.internal_status;
+  if (!FINANCE_INTERNAL_STATUSES.includes(internalStatus)) {
+    return res.status(400).json({ error: `Statut invalide (attendu: ${FINANCE_INTERNAL_STATUSES.join(', ')})` });
+  }
+  const assignedTo = req.body.assignedTo !== undefined ? (String(req.body.assignedTo).trim() || null) : existing.assigned_to;
+  db.prepare('UPDATE pennylane_invoices SET internal_status=?, assigned_to=? WHERE id=?').run(internalStatus, assignedTo, req.params.id);
+  res.json(db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id));
+});
+
+// Comptes pouvant se voir attribuer une facture (rôle finance + admin, comme
+// partout ailleurs dans l'app un admin peut aussi être choisi comme responsable).
+app.get('/api/finance/team', requireFinance, (req, res) => {
+  res.json(db.prepare(
+    "SELECT id, nom FROM commercial_users WHERE role IN ('finance','admin') AND actif=1 ORDER BY nom ASC"
+  ).all());
+});
+
 // ── SEED ──────────────────────────────────────────────────────────────────────
 const seedFile = path.join(__dirname, 'seed_excel.sql');
 const seedDone = db.prepare("SELECT COUNT(*) as n FROM emissions").get();
@@ -1462,7 +1624,7 @@ app.get('/api/admin/salesforce-commerciaux', requireEdit, async (req, res) => {
 });
 
 // ── ADMIN - COMPTES COMMERCIAUX ───────────────────────────────────────────────
-const VALID_ROLES = ['commercial', 'manager', 'edito', 'communication', 'admin'];
+const VALID_ROLES = ['commercial', 'manager', 'edito', 'communication', 'finance', 'admin'];
 
 app.get('/api/admin/commerciaux', requireEdit, (req, res) => {
   res.json(db.prepare(`

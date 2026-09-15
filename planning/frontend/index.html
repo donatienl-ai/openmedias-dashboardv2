@@ -190,6 +190,7 @@ header {
 .role-badge.sales { background: var(--accent-dim); color: var(--accent); }
 .role-badge.com { background: var(--green-dim); color: var(--green); }
 .role-badge.admin { background: rgba(139,92,246,0.16); color: #8b5cf6; }
+.role-badge.finance { background: rgba(13,148,136,0.16); color: #0d9488; }
 .header-nav { display: inline-flex; align-items: center; gap: 2px; background: var(--surface2); border: 1px solid var(--border); border-radius: 13px; padding: 4px; }
 .nav-btn { background: none; border: none; color: var(--text-dim); font-size: 13px; font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
 .nav-btn:hover { color: var(--text); }
@@ -544,6 +545,19 @@ td { padding: 10px 14px; font-size: 13px; }
 .ca-bar-wrap { margin-top: 5px; background: var(--surface2); border-radius: 4px; height: 4px; overflow: hidden; }
 .ca-bar { height: 100%; background: linear-gradient(90deg, var(--accent), #818cf8); border-radius: 4px; transition: width 0.6s ease; }
 
+/* ── RECOUVREMENT (Pennylane) ────────────────────── */
+.finance-days-late { font-weight: 700; }
+.finance-days-late.late { color: #dc2626; }
+.finance-days-late.ok { color: var(--text-muted); font-weight: 500; }
+.finance-inline-select { font-size: 12px; padding: 4px 22px 4px 8px; }
+.finance-relance-entry { border-bottom: 1px solid var(--border); padding: 8px 0; font-size: 12px; }
+.finance-relance-entry:last-child { border-bottom: none; }
+.finance-relance-meta { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+.finance-aging-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; margin-top: 8px; background: var(--surface2); }
+.finance-aging-seg { height: 100%; }
+.finance-aging-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+.finance-aging-legend span.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+
 /* ── MODAL ───────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(2,6,15,0.5); display: flex; align-items: center; justify-content: center; z-index: 200; padding: 20px; backdrop-filter: blur(6px); }
 .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; width: 100%; max-width: 540px; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
@@ -841,6 +855,10 @@ td { padding: 10px 14px; font-size: 13px; }
            d'où .content-only plutôt que .edit-only (qui exclurait la communication)
            ou .admin-only (qui exclurait aussi l'édito). -->
       <button class="nav-btn content-only" onclick="switchView('social')" id="nav-social" style="display:none">📱 Réseaux sociaux</button>
+      <!-- Recouvrement : visible aux comptes role='finance', et aux admin
+           (comme partout ailleurs dans l'app) — d'où finance-only ET
+           admin-only, l'un ou l'autre suffit à révéler le bouton. -->
+      <button class="nav-btn finance-only admin-only" onclick="switchView('finance')" id="nav-finance" style="display:none">💶 Recouvrement</button>
     </nav>
     <!-- Menu burger : sur mobile, tout ce qui suit (navigation mois, actualiser,
          thème, déconnexion, +Ajouter, BDC...) est caché par défaut derrière ce
@@ -1100,6 +1118,30 @@ td { padding: 10px 14px; font-size: 13px; }
     </div>
   </div>
 
+  <div class="view" id="view-finance">
+    <div class="report-header">
+      <h2 style="font-size:16px;font-weight:700">💶 Recouvrement</h2>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span id="finance-last-sync" style="font-size:11px;color:var(--text-muted)"></span>
+        <button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()">↻ Synchroniser Pennylane</button>
+      </div>
+    </div>
+    <div class="report-grid" id="finance-kpis"></div>
+    <div class="media-table-card" style="margin-bottom:10px;padding:14px 16px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input class="form-input" style="max-width:220px;flex:1" type="text" id="finance-search" placeholder="N° facture ou client…" oninput="renderFinanceInvoices()">
+        <select class="form-select" style="max-width:170px" id="finance-filter-statut" onchange="renderFinanceInvoices()"></select>
+        <select class="form-select" style="max-width:170px" id="finance-filter-assigned" onchange="renderFinanceInvoices()">
+          <option value="">Tous les assignés</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--text-dim);cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="finance-filter-retard" onchange="renderFinanceInvoices()"> En retard uniquement
+        </label>
+      </div>
+    </div>
+    <div class="media-table-card" id="finance-invoices-table"></div>
+  </div>
+
   <div class="view" id="view-social">
     <div class="report-header">
       <h2 style="font-size:16px;font-weight:700">📱 Réseaux sociaux — rétroplanning</h2>
@@ -1293,6 +1335,7 @@ let commercialNom = localStorage.getItem('commercialNom') || '';
 function planningRoleFor(accountRole){
   if(accountRole==='admin'||accountRole==='edito')return 'edit';
   if(accountRole==='communication')return 'com';
+  if(accountRole==='finance')return 'finance';
   return 'sales'; // manager, commercial, ou valeur inconnue -> par défaut le plus restreint
 }
 // Active la session applicative (affiche l'app, cache l'écran de connexion) de
@@ -1311,7 +1354,7 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
   // renverrait aussitôt ici. Un compte admin partage le même rôle interne
   // "edit" qu'un édito (mêmes droits planning) mais A bien accès au dashboard,
   // lui — donc on ne masque l'onglet que si ce n'est pas un admin.
-  const hideDashboardTab=(role==='edit'&&!isAccountAdmin)||role==='com';
+  const hideDashboardTab=(role==='edit'&&!isAccountAdmin)||role==='com'||role==='finance';
   document.getElementById('app-tab-dashboard').style.display = hideDashboardTab ? 'none' : '';
   // La barre entière était masquée pour ces rôles : avec le seul Dashboard
   // caché, il ne restait qu'un pavé actif et beaucoup de vide à droite, ce qui
@@ -1335,7 +1378,7 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
     // Admin et édito partagent le rôle interne "edit" (mêmes droits côté
     // planning) mais un compte admin garde son propre badge — sinon impossible
     // de voir en un coup d'oeil qu'on est bien connecté avec les droits admin.
-    const badgeLabel=isAccountAdmin?'Admin':(role==='edit'?'Édito':(role==='com'?'Communication':'Commercial'));
+    const badgeLabel=isAccountAdmin?'Admin':(role==='edit'?'Édito':(role==='com'?'Communication':(role==='finance'?'Finance':'Commercial')));
     const badgeClass=isAccountAdmin?'admin':role;
     document.getElementById('role-badge').textContent=badgeLabel;
     document.getElementById('role-badge').className=`role-badge ${badgeClass}`;
@@ -1345,6 +1388,9 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
     if(isAccountAdmin)document.querySelectorAll('.admin-only').forEach(el=>el.style.display='');
     // Rétroplanning communication : édito ET communication (pas sales/commercial).
     if(role==='edit'||role==='com')document.querySelectorAll('.content-only').forEach(el=>el.style.display='');
+    // Recouvrement (Pennylane) : réservé au rôle finance (les admin le voient
+    // déjà via .admin-only ci-dessus).
+    if(role==='finance')document.querySelectorAll('.finance-only').forEach(el=>el.style.display='');
   }
   // Générateur de BDC : tout compte de commercial_users (sales, manager, ET
   // admin — l'admin pilote l'outil et doit pouvoir générer/envoyer des BDC
@@ -1634,6 +1680,7 @@ function switchView(v){
   if(v==='parametres')loadParametres();
   if(v==='bdc')bdcOnShow();
   if(v==='social'){loadSocial();loadIdeaBox();}
+  if(v==='finance')loadFinance();
   // Le sélecteur de mois est partagé : en changeant de vue on change le
   // calendrier qu'il pilote, donc le mois qu'il doit afficher.
   updateMonthLabel();
@@ -2846,6 +2893,172 @@ function toggleIdeaBoxMenu(event){
 document.addEventListener('click',e=>{
   if(!e.target.closest('#idea-box-wrap'))document.getElementById('idea-box-panel').style.display='none';
 });
+
+// ── RECOUVREMENT (Pennylane) — nouveau projet ────────────────────────────────
+// Pennylane reste la source de vérité facturation (l'app n'y écrit jamais) ;
+// cette vue ajoute juste le suivi de recouvrement par-dessus (statut,
+// attribution, historique de relances, KPI) — remplace l'Excel + Trello.
+const FINANCE_STATUS_LABEL={a_relancer:'À relancer',en_cours:'En cours',litige:'Litige',promesse_paiement:'Promesse de paiement',solde:'Soldée'};
+const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',litige:'#dc2626',promesse_paiement:'#0d9488',solde:'var(--green)'};
+const FINANCE_CANAL_LABEL={email:'📧 Email',telephone:'📞 Téléphone',courrier:'✉️ Courrier',sms:'💬 SMS',autre:'Autre'};
+let financeInvoicesCache=[];
+let financeTeamCache=[];
+let financeSelectedInvoiceId=null; // facture ouverte dans le modal de relance
+
+function financeHeaders(json){
+  const h={'x-commercial-id':commercialId};
+  if(json)h['Content-Type']='application/json';
+  return h;
+}
+async function loadFinance(){
+  populateFinanceStatutFilter();
+  await Promise.all([loadFinanceTeam(), refreshFinanceInvoices()]);
+}
+function populateFinanceStatutFilter(){
+  const sel=document.getElementById('finance-filter-statut');
+  if(!sel||sel.options.length)return; // déjà peuplé, pas besoin de meta à chaque retour sur l'onglet
+  sel.innerHTML='<option value="">Tous statuts</option>'+(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}">${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
+}
+async function loadFinanceTeam(){
+  try{ financeTeamCache=await fetch(`${API}/finance/team`,{headers:financeHeaders()}).then(r=>r.json()); }
+  catch(e){ financeTeamCache=[]; }
+  const sel=document.getElementById('finance-filter-assigned');
+  if(sel)sel.innerHTML='<option value="">Tous les assignés</option>'+financeTeamCache.map(t=>`<option value="${t.nom}">${t.nom}</option>`).join('');
+}
+async function refreshFinanceInvoices(){
+  const [kpis,invoices]=await Promise.all([
+    fetch(`${API}/finance/kpis`,{headers:financeHeaders()}).then(r=>r.json()),
+    fetch(`${API}/finance/invoices`,{headers:financeHeaders()}).then(r=>r.json()),
+  ]);
+  financeInvoicesCache=Array.isArray(invoices)?invoices:[];
+  renderFinanceKpis(kpis);
+  renderFinanceInvoices();
+}
+function renderFinanceKpis(k){
+  const wrap=document.getElementById('finance-kpis');
+  if(!wrap||!k)return;
+  const agingTotal=Object.values(k.aging||{}).reduce((s,v)=>s+v,0);
+  const agingSegs=[
+    {key:'j0_30',label:'0-30j',color:'var(--gold)'},
+    {key:'j31_60',label:'31-60j',color:'var(--accent)'},
+    {key:'j61_90',label:'61-90j',color:'#f97316'},
+    {key:'j90_plus',label:'90j+',color:'#dc2626'},
+  ];
+  wrap.innerHTML=`
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val">${fmtCA(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s)</div></div>
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>Montant en retard</div><div class="kpi-val" style="color:#dc2626">${fmtCA(k.montantEnRetard)}</div><div class="kpi-lbl">${k.nbFacturesEnRetard} facture(s) en retard</div></div>
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard</div></div>
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${k.periodJours}j glissants)</div></div>
+    <div class="kpi-card" style="grid-column:1/-1">
+      <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Aging de l'encours (par tranche de retard)</div>
+      <div class="finance-aging-bar">${agingSegs.map(s=>{const pct=agingTotal?(k.aging[s.key]||0)/agingTotal*100:0;return pct?`<div class="finance-aging-seg" style="width:${pct}%;background:${s.color}" title="${s.label} : ${fmtCA(k.aging[s.key]||0)}"></div>`:'';}).join('')}</div>
+      <div class="finance-aging-legend">${agingSegs.map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${fmtCA(k.aging[s.key]||0)}</span>`).join('')}</div>
+    </div>
+  `;
+}
+function renderFinanceInvoices(){
+  const wrap=document.getElementById('finance-invoices-table');
+  if(!wrap)return;
+  const q=(document.getElementById('finance-search')?.value||'').trim().toLowerCase();
+  const statutFilter=document.getElementById('finance-filter-statut')?.value||'';
+  const assignedFilter=document.getElementById('finance-filter-assigned')?.value||'';
+  const retardOnly=document.getElementById('finance-filter-retard')?.checked;
+  let list=financeInvoicesCache.filter(inv=>{
+    if(statutFilter&&inv.internalStatus!==statutFilter)return false;
+    if(assignedFilter&&inv.assignedTo!==assignedFilter)return false;
+    if(retardOnly&&!(inv.daysLate>0))return false;
+    if(q&&!(String(inv.invoiceNumber||'').toLowerCase().includes(q)||inv.customerName.toLowerCase().includes(q)))return false;
+    return true;
+  });
+  if(!list.length){
+    wrap.innerHTML='<div class="idea-box-empty" style="padding:24px 0">Aucune facture à afficher — synchronisez Pennylane, ou ajustez les filtres.</div>';
+    return;
+  }
+  const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
+  const assignedOptionsHtml=(inv)=>'<option value="">— Non assigné —</option>'+financeTeamCache.map(t=>`<option value="${t.nom}" ${t.nom===inv.assignedTo?'selected':''}>${t.nom}</option>`).join('');
+  wrap.innerHTML=`<table>
+    <thead><tr><th>Facture</th><th>Client</th><th>Échéance</th><th>Retard</th><th>Montant dû</th><th>Statut</th><th>Assigné à</th><th></th></tr></thead>
+    <tbody>${list.map(inv=>`<tr>
+      <td><strong>${inv.invoiceNumber||'—'}</strong></td>
+      <td>${inv.customerName||'—'}</td>
+      <td>${formatDateFR(inv.deadline)}</td>
+      <td><span class="finance-days-late ${inv.daysLate>0?'late':'ok'}">${inv.daysLate>0?`${inv.daysLate}j`:(inv.daysLate!=null?'—':'?')}</span></td>
+      <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmount)}</td>
+      <td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select></td>
+      <td><select class="form-select finance-inline-select" onchange="patchFinanceInvoice('${inv.id}',{assignedTo:this.value})">${assignedOptionsHtml(inv)}</select></td>
+      <td><button class="btn-secondary" style="font-size:11px;padding:5px 9px" onclick="openFinanceRelanceModal('${inv.id}')">💬 Relances</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+async function patchFinanceInvoice(id,patch){
+  try{
+    await fetch(`${API}/finance/invoices/${id}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
+    const idx=financeInvoicesCache.findIndex(i=>i.id===id);
+    if(idx!==-1)Object.assign(financeInvoicesCache[idx],patch);
+    showToast('Facture mise à jour');
+  }catch(e){ showToast("Échec de la mise à jour",'error'); }
+}
+async function syncFinance(){
+  const btn=document.getElementById('finance-sync-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Synchronisation…'; }
+  try{
+    const r=await fetch(`${API}/finance/sync`,{method:'POST',headers:financeHeaders()});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||'Échec de la synchro');
+    document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date(d.syncedAt).toLocaleString('fr-FR')} (${d.invoicesSynced} facture(s), ${d.customersSynced} client(s))`;
+    showToast('Synchro Pennylane effectuée');
+    await refreshFinanceInvoices();
+  }catch(e){
+    showToast(e.message||'Échec de la synchro Pennylane','error');
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='↻ Synchroniser Pennylane'; }
+  }
+}
+// ── Modal de suivi des relances (historique + ajout) ─────────────────────────
+async function openFinanceRelanceModal(id){
+  financeSelectedInvoiceId=id;
+  const inv=financeInvoicesCache.find(i=>i.id===id);
+  if(!inv)return;
+  document.getElementById('modal-title').textContent=`Relances — ${inv.invoiceNumber||inv.customerName}`;
+  document.getElementById('modal-overlay').style.display='flex';
+  document.getElementById('modal-body').innerHTML='<div style="font-size:12px;color:var(--text-muted)">Chargement…</div>';
+  document.getElementById('modal-footer').innerHTML=`<button class="btn-secondary" onclick="closeModal()">Fermer</button>`;
+  const relances=await fetch(`${API}/finance/invoices/${id}/relances`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
+  document.getElementById('modal-body').innerHTML=`
+    <div class="form-group">
+      <div class="form-label">Client</div>
+      <div style="font-size:13px">${inv.customerName||'—'} ${inv.customerEmail?`· ${inv.customerEmail}`:''} ${inv.customerPhone?`· ${inv.customerPhone}`:''}</div>
+    </div>
+    <div class="form-group">
+      <div class="form-label">Nouvelle relance</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px">
+        <select class="form-select" id="finance-relance-canal" style="max-width:160px">
+          ${Object.entries(FINANCE_CANAL_LABEL).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}
+        </select>
+        <input class="form-input" id="finance-relance-note" placeholder="Note (optionnel)…">
+        <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceRelance('${id}')">+ Ajouter</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="form-label">Historique</div>
+      <div id="finance-relances-list">${relances.length?relances.map(r=>`
+        <div class="finance-relance-entry">
+          <div>${FINANCE_CANAL_LABEL[r.canal]||r.canal}${r.note?` — ${r.note}`:''}</div>
+          <div class="finance-relance-meta">${r.auteur||'—'} · ${new Date(r.created_at).toLocaleString('fr-FR')}</div>
+        </div>`).join(''):'<div class="idea-box-empty">Aucune relance pour l’instant</div>'}</div>
+    </div>
+  `;
+}
+async function submitFinanceRelance(id){
+  const canal=document.getElementById('finance-relance-canal').value;
+  const note=document.getElementById('finance-relance-note').value.trim();
+  await fetch(`${API}/finance/invoices/${id}/relances`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({canal,note})});
+  // Une relance peut avoir fait passer le statut interne de "à relancer" à
+  // "en cours" côté serveur (cf. router.js) : on rafraîchit la liste derrière
+  // le modal pour que le select de statut reflète ce changement au retour.
+  await refreshFinanceInvoices();
+  openFinanceRelanceModal(id);
+}
 
 // ── CALENDRIER ──────────────────────────────────────────────────────────────
 // Option d'affichage des mardis/jeudis (jours NON diffusés) : colonnes grisées
@@ -4066,6 +4279,7 @@ const ROLES_COMPTE=[
   {value:'manager',label:'Manager',hint:'Manager — chiffres de son équipe'},
   {value:'edito',label:'Édito',hint:'Édito — planning, pas de dashboard'},
   {value:'communication',label:'Communication',hint:'Communication — planning, pas de dashboard'},
+  {value:'finance',label:'Finance',hint:'Finance — recouvrement Pennylane, pas de dashboard'},
   {value:'admin',label:'Admin',hint:'Admin — tout voir'},
 ];
 

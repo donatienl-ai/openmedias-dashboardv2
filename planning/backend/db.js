@@ -196,6 +196,58 @@ try {
   }
 } catch(e) {}
 
+// ── RECOUVREMENT / PENNYLANE (nouveau projet) ────────────────────────────────
+// Outil interne de suivi des impayés, connecté en lecture à l'API Pennylane
+// (source de vérité facturation — voir ./pennylane.js pour la synchro).
+// Les factures/clients ci-dessous sont un CACHE local (on ne réécrit jamais
+// rien côté Pennylane) : ça évite de retaper l'API à chaque affichage du
+// dashboard, et ça permet de stocker des infos qui n'existent QUE côté nous
+// (statut interne de recouvrement, attribution, historique de relances).
+// id en TEXT : on reste agnostique du format d'id renvoyé par l'API Pennylane
+// (numérique aujourd'hui, mais rien ne garantit que ça reste un integer).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pennylane_customers (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    email TEXT,
+    phone TEXT,
+    synced_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS pennylane_invoices (
+    id TEXT PRIMARY KEY,
+    invoice_number TEXT,
+    customer_id TEXT,
+    date_emission TEXT,
+    deadline TEXT,
+    amount REAL DEFAULT 0,
+    remaining_amount REAL DEFAULT 0,
+    status TEXT,
+    -- Statut de recouvrement interne (distinct du statut Pennylane ci-dessus,
+    -- qui ne dit rien du suivi de relance) : a_relancer -> en_cours -> soit
+    -- solde (payée), soit litige/promesse_paiement en cas de blocage.
+    internal_status TEXT DEFAULT 'a_relancer',
+    -- Nom (commercial_users.nom) du collaborateur en charge de cette facture,
+    -- même principe que "Assigné à" sur un post réseaux sociaux.
+    assigned_to TEXT,
+    synced_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pennylane_invoices_customer ON pennylane_invoices(customer_id);
+  CREATE INDEX IF NOT EXISTS idx_pennylane_invoices_deadline ON pennylane_invoices(deadline);
+
+  -- Historique des relances (multi-canal) faites sur une facture — ce que
+  -- l'Excel + Trello actuels ne permettent pas de garder proprement.
+  CREATE TABLE IF NOT EXISTS finance_relances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id TEXT NOT NULL,
+    canal TEXT,
+    note TEXT,
+    auteur TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_finance_relances_invoice ON finance_relances(invoice_id);
+`);
+
 // Seed setting: horizon de visibilité commercial (en mois), 3 par défaut
 try {
   const exists = db.prepare("SELECT 1 FROM config WHERE key='horizon_mois'").get();
@@ -237,6 +289,14 @@ const CHANNELS = ['Instagram', 'LinkedIn', 'YouTube', 'Newsletter'];
 // à faire (pas commencé) -> prêt (rédigé/validé, en attente de publication)
 // -> publié (fait). Pas de workflow plus fin pour l'instant.
 const SOCIAL_POST_STATUSES = ['a_faire', 'pret', 'publie'];
+
+// ── RECOUVREMENT / PENNYLANE (nouveau projet) ────────────────────────────────
+// Statut de recouvrement interne d'une facture (voir pennylane_invoices) :
+// a_relancer (pas encore contactée) -> en_cours (au moins une relance faite,
+// posé automatiquement à la première relance) -> soit solde (payée, posé à
+// la main en attendant qu'un futur sync détecte remaining_amount<=0 côté
+// Pennylane), soit litige/promesse_paiement en cas de blocage.
+const FINANCE_INTERNAL_STATUSES = ['a_relancer', 'en_cours', 'litige', 'promesse_paiement', 'solde'];
 
 // Sous-picklist des titres regroupés sous "Médias spécialisés" (import Excel Donatien).
 // Chaque titre liste les formats qu'il accepte réellement, différents d'un titre à l'autre.
@@ -308,4 +368,4 @@ const SOUS_MEDIAS_SPECIALISES = {
 };
 const SOUS_MEDIAS_LIST = Object.keys(SOUS_MEDIAS_SPECIALISES);
 
-module.exports = { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES };
+module.exports = { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES, FINANCE_INTERNAL_STATUSES };
