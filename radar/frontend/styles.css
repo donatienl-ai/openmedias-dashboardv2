@@ -7,27 +7,13 @@
    du risque.
    ========================================================================== */
 :root {
-  /* --- canoniques, identiques au dashboard ---
-     Accent = #2E5CE0. L'indigo exact du site (#3B3BF9, R=G=59) est
-     mathématiquement "bleu" mais perceptuellement se lit comme violet/
-     périwinkle dès qu'il couvre une vraie surface — vérifié en direct sur le
-     déploiement (retour Donatien). #2E5CE0 garde le même esprit vif/saturé
-     mais avec le vert (G) clairement en retrait du bleu (B), ce qui le lit
-     sans ambiguïté comme "bleu". Utilisé uniquement pour les boutons/
-     contrôles interactifs. Les fonds/bordures suivent #1A1A2E (bleu nuit du
-     site openmedias.fr), en rampe de gris-bleu neutre — mêmes valeurs
-     partagées avec client/src/styles.css et le thème sombre de
-     recouvrement/frontend/index.html et planning/frontend/index.html. */
-  --om-blue:#2E5CE0; --om-blue-light:#5C82F0; --om-blue-lighter:#8AA8F5;
-  --bg:#1A1A2E; --panel:#21213A; --panel-2:#292948;
-  --border:#35355A; --border-soft:#26263E;
+  /* --- canoniques, identiques au dashboard --- */
+  --om-blue:#2563EB; --om-blue-light:#3B82F6; --om-blue-lighter:#60A5FA;
+  --bg:#050A14; --panel:#0B1322; --panel-2:#101B30;
+  --border:#1B2A45; --border-soft:#16223A;
   --green:#22C55E; --orange:#F97316; --amber:#FBBF24;
   --text:#FFFFFF; --text-soft:#8295B5; --text-muted:#54678A;
-  /* "Baloo 2" (Google Fonts) en approximation libre de "Garet", la police
-     maison du site — Garet est une police payante auto-hébergée dont la
-     licence webfont n'a pas été confirmée pour un usage hors du site
-     principal (cf. même remarque côté recouvrement/frontend/index.html). */
-  --font-display:'Baloo 2','Sora',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-display:'Sora',-apple-system,BlinkMacSystemFont,sans-serif;
   --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
   --radius:16px; --radius-sm:10px;
   --shadow:0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
@@ -61,7 +47,7 @@
 html,body{min-height:100vh}
 body{
   font-family:var(--font-body);
-  background:radial-gradient(1200px 600px at 50% -10%,rgba(46,92,224,.22),transparent),var(--bg);
+  background:radial-gradient(1200px 600px at 50% -10%,rgba(37,99,235,.22),transparent),var(--bg);
   color:var(--text);-webkit-font-smoothing:antialiased;line-height:1.5;
 }
 .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
@@ -124,7 +110,7 @@ header{
   color:var(--text);font:inherit;font-size:16px;padding:18px 18px 18px 50px;
   outline:none;transition:border-color .15s,box-shadow .15s;
 }
-.searchbox textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(46,92,224,.18)}
+.searchbox textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.18)}
 .searchbox textarea::placeholder{color:var(--text-muted)}
 .searchbox .ico{position:absolute;left:17px;top:19px;color:var(--text-muted);pointer-events:none}
 
@@ -152,7 +138,7 @@ header{
   transition:border-color .12s,color .12s,background .12s;
 }
 .chip:hover{border-color:var(--blue-light);color:var(--text);background:var(--panel2)}
-.chip.on{background:rgba(46,92,224,.16);border-color:var(--blue);color:var(--blue-lighter)}
+.chip.on{background:rgba(37,99,235,.16);border-color:var(--blue);color:var(--blue-lighter)}
 
 /* chips média */
 .media-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
@@ -163,7 +149,7 @@ header{
   transition:border-color .12s,color .12s,background .12s;
 }
 .mchip:hover{border-color:var(--blue-light);color:var(--text)}
-.mchip.on{background:rgba(46,92,224,.14);border-color:var(--blue);color:var(--blue-lighter)}
+.mchip.on{background:rgba(37,99,235,.14);border-color:var(--blue);color:var(--blue-lighter)}
 
 /* ── PÉRIODE ── */
 .period-chips{display:flex;gap:6px;align-items:center}
@@ -173,7 +159,7 @@ header{
   transition:border-color .12s,color .12s,background .12s;
 }
 .pchip:hover{color:var(--text);border-color:var(--blue-light)}
-.pchip.on{background:rgba(46,92,224,.14);border-color:var(--blue);color:var(--blue-lighter)}
+.pchip.on{background:rgba(37,99,235,.14);border-color:var(--blue);color:var(--blue-lighter)}
 [data-theme="light"] .pchip.on{color:var(--blue)}
 /* ── URL SCAN ── */
 .url-scan-bar{
@@ -192,7 +178,7 @@ header{
 .url-scan-bar .scan-btn:hover{opacity:.85}
 .url-scan-bar .scan-btn:disabled{opacity:.5;cursor:wait}
 .scan-kw-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.scan-kw{font-size:11px;background:rgba(46,92,224,.12);border:1px solid rgba(46,92,224,.3);
+.scan-kw{font-size:11px;background:rgba(37,99,235,.12);border:1px solid rgba(37,99,235,.3);
   color:var(--blue-lighter);border-radius:6px;padding:3px 9px;font-weight:600;}
 [data-theme="light"] .scan-kw{color:var(--blue)}
 
@@ -302,8 +288,8 @@ header{
 
 /* ── ANGLE ÉDITORIAL ── */
 .angle-box{
-  background:linear-gradient(135deg,rgba(46,92,224,.08),rgba(46,92,224,.03));
-  border:1px solid rgba(46,92,224,.25);border-radius:var(--radius);
+  background:linear-gradient(135deg,rgba(37,99,235,.08),rgba(37,99,235,.03));
+  border:1px solid rgba(37,99,235,.25);border-radius:var(--radius);
   padding:20px 24px;grid-column:1/-1;
 }
 .angle-box .angle-title{font-size:13px;font-weight:700;color:var(--blue-light);margin-bottom:10px;display:flex;align-items:center;gap:8px}

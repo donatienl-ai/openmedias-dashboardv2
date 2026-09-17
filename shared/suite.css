@@ -1,9 +1,9 @@
 /* Composants et repères visuels communs aux quatre outils OpenMedias. */
 :root {
-  --font-display: 'Baloo 2', 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --suite-blue: #2E5CE0;
-  --suite-focus: #5C82F0;
+  --suite-blue: #2563EB;
+  --suite-focus: #3B82F6;
 }
 .app-switch {
   display: inline-flex; align-items: center; gap: 2px;

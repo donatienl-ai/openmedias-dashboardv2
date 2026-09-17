@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@600;700;800&family=Baloo+2:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@600;700;800&display=swap');
 
 :root {
   --bg: #F1F4F9;
@@ -6,36 +6,17 @@
   --surface2: #F3F6FB;
   --border: #DEE6F0;
   --border-soft: #E8EEF6;
-  /* Accent = #2E5CE0. L'indigo exact du site (#3B3BF9, R=G=59) est
-     mathématiquement "bleu" mais perceptuellement se lit comme violet/
-     périwinkle dès qu'il couvre une vraie surface (bouton plein, logo en
-     gras) — vérifié en direct sur le déploiement (retour Donatien).
-     #2E5CE0 garde le même esprit vif/saturé mais avec le vert (G) clairement
-     en retrait du bleu (B), ce qui le lit sans ambiguïté comme "bleu" —
-     même écart de teinte que l'ancien bleu générique (#2563EB) qui n'avait
-     jamais posé ce problème. Utilisé uniquement pour les boutons/contrôles
-     interactifs, jamais en fond de grande surface. Les fonds/bordures, eux,
-     suivent #1A1A2E (bleu nuit du site) côté thème sombre — voir plus bas. */
-  --accent: #2E5CE0;
-  --accent-light: #5C82F0;
-  --accent-dim: rgba(46,92,224,0.08);
+  --accent: #2563EB;
+  --accent-light: #3B82F6;
+  --accent-dim: rgba(37,99,235,0.08);
   --gold: #D97706; --gold-dim: rgba(217,119,6,0.10);
   --red: #DC2626; --red-dim: rgba(220,38,38,0.08);
   --green: #16A34A; --green-dim: rgba(22,163,74,0.08);
   --text: #101A2E; --text-dim: #50628A; --text-muted: #8C9CB8;
-  /* Rayon + ombre relevés (18px/12px, ombre à vraie profondeur plutôt que
-     quasi invisible) pour un rendu plus "élevé"/aéré façon macOS — même
-     jeu de valeurs porté côté dashboard (client/src/styles.css, mêmes noms
-     de variable) pour que les deux apps partagent littéralement les mêmes
-     nombres au lieu de repartir de zéro sur chaque fichier. */
   --radius: 18px; --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(16,26,46,0.04), 0 10px 28px rgba(16,26,46,0.06);
   --shadow-lg: 0 24px 64px rgba(16,26,46,0.18);
-  /* "Baloo 2" (Google Fonts) en approximation libre de "Garet", la police
-     maison du site — Garet est une police payante auto-hébergée dont la
-     licence webfont n'a pas été confirmée pour un usage hors du site
-     principal (cf. même remarque côté recouvrement/frontend/index.html). */
-  --font-display: 'Baloo 2', 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   /* Format palette */
   --plateau: #2563eb; --plateau-bg: #eff6ff;
@@ -45,12 +26,8 @@
   --bdc: #F5D400; --bdc-bg: #fffce8; --bdc-text: #8A6D00;
 }
 [data-theme="dark"] {
-  /* Fonds/bordures alignés sur #1A1A2E (bleu nuit du site openmedias.fr),
-     en rampe de gris-bleu neutre plutôt que sur une teinte plus bleutée
-     inventée — même valeurs partagées avec client/src/styles.css et
-     radar/frontend/index.html (thème sombre par défaut là-bas). */
-  --bg: #1A1A2E; --surface: #21213A; --surface2: #292948; --border: #35355A; --border-soft: #26263E;
-  --accent: #2E5CE0; --accent-light: #5C82F0; --accent-dim: rgba(46,92,224,0.16);
+  --bg: #050A14; --surface: #0B1322; --surface2: #101B30; --border: #1B2A45; --border-soft: #16223A;
+  --accent: #3B82F6; --accent-light: #60A5FA; --accent-dim: rgba(59,130,246,0.14);
   --text: #FFFFFF; --text-dim: #8295B5; --text-muted: #54678A;
   --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
   --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
@@ -62,25 +39,11 @@
 body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
 
 /* ── PIN ─────────────────────────────────────── */
-/* Fond marine (#1A1A2E, fond du site openmedias.fr) réservé à l'écran de
-   connexion, vu quelques secondes — pas répliqué sur tout l'outil (aurait
-   nui à la lisibilité d'un outil utilisé des heures). Même traitement que
-   recouvrement/frontend/index.html. */
-#pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #1A1A2E; z-index: 100; }
-.pin-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); backdrop-filter: blur(6px); }
-.pin-logo { font-family: var(--font-display); font-weight: 800; font-size: 24px; margin-bottom: 6px; letter-spacing: -0.5px; color: #fff; }
-.pin-logo span { color: var(--accent-light); }
-#pin-screen .form-label { color: rgba(255,255,255,0.7); }
-#pin-screen .form-input { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); color: #fff; }
-#pin-screen .form-input:focus { background: rgba(255,255,255,0.1); }
-#pin-screen .pin-error { color: #FCA5A5; }
-#pin-screen .info-banner.neutral { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); color: rgba(255,255,255,0.8); }
-#pin-screen .login-switch a { color: rgba(255,255,255,0.55); }
-#pin-screen .login-switch a:hover { color: #fff; }
-#pin-screen .btn-secondary { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); color: #fff; }
-#pin-screen .btn-secondary:hover { background: rgba(255,255,255,0.14); }
+#pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 100; }
+.pin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); }
+.pin-logo { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 24px; margin-bottom: 6px; letter-spacing: -0.5px; }
+.pin-logo span { color: var(--accent); }
 .pin-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 40px; }
-#pin-screen .pin-sub { color: rgba(255,255,255,0.55); }
 .pin-dots { display: flex; gap: 14px; justify-content: center; margin-bottom: 32px; }
 .pin-dot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border); background: transparent; transition: all 0.2s; }
 .pin-dot.filled { background: var(--accent); border-color: var(--accent); transform: scale(1.1); }
@@ -206,7 +169,7 @@ header {
 .header-brand { display: flex; align-items: center; gap: 11px; }
 .header-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--accent); flex-shrink: 0; }
 .header-text { display: flex; flex-direction: column; gap: 1px; }
-.header-logo { font-family: var(--font-display); font-weight: 700; font-size: 14px; letter-spacing: 0.4px; white-space: nowrap; color: var(--text); line-height: 1.25; text-transform: uppercase; }
+.header-logo { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 14px; letter-spacing: 0.4px; white-space: nowrap; color: var(--text); line-height: 1.25; text-transform: uppercase; }
 .header-eyebrow { font-size: 12px; letter-spacing: 0.6px; font-weight: 800; color: var(--text); text-transform: uppercase; line-height: 1.25; }
 .header-sep { width: 1px; height: 30px; background: var(--border); }
 .role-badge { font-size: 10px; font-weight: 700; padding: 4px 11px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.6px; }
@@ -230,8 +193,7 @@ header {
 .month-nav button { background: none; border: none; color: var(--text-dim); width: 30px; height: 30px; border-radius: 9px; cursor: pointer; font-size: 15px; transition: all 0.12s; display: flex; align-items: center; justify-content: center; }
 .month-nav button:hover { background: var(--surface); color: var(--accent); }
 .month-label { font-size: 13px; font-weight: 700; min-width: 118px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
-/* Pilule complète comme les CTA de openmedias.fr. */
-.btn-primary { background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
+.btn-primary { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
 .btn-primary:hover { background: var(--accent-light); }
 .btn-primary:active { transform: scale(0.97); }
 .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
@@ -240,7 +202,7 @@ header {
 .btn-danger:hover { background: rgba(220,38,38,0.16); }
 .btn-hard-delete { background: none; color: var(--text-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); width: 36px; height: 36px; padding: 0; font-size: 14px; cursor: pointer; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
 .btn-hard-delete:hover { color: var(--red); border-color: rgba(220,38,38,0.3); background: var(--red-dim); }
-.btn-icon { background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.btn-icon { background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
 .btn-icon:hover { border-color: var(--accent-light); background: var(--surface2); }
 .btn-icon:active { transform: scale(0.94); }
 
@@ -309,7 +271,7 @@ header {
 .a-programmer-card .adc-media { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
 .a-programmer-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px 0; }
 .cal-day.drag-over { outline: 2px dashed #ff9900; outline-offset: -2px; background: #ff990011; }
-.a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(46,92,224,0.08); }
+.a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(37,99,235,0.08); }
 
 /* Boîte à idées (rétroplanning réseaux sociaux) — même contenu que le panneau
    "À programmer" (cartes glissables), mais en popover ancré sous un bouton de
@@ -366,7 +328,7 @@ header {
 }
 .idc-channel-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .idea-box-add-row-wrap { margin-top: 10px; }
-.social-cal-day.drag-over-idea { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(46,92,224,0.08); }
+.social-cal-day.drag-over-idea { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(37,99,235,0.08); }
 .media-tab { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; transition: all 0.15s; box-shadow: var(--shadow); }
 .media-tab:hover { color: var(--text); border-color: var(--text-muted); }
 .media-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(79,110,247,0.3); }
