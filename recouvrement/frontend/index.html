@@ -6,7 +6,7 @@
 <title>Recouvrement — OpenMedias</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💶</text></svg>">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@600;700;800&family=Baloo+2:wght@600;700;800&display=swap');
 
 :root {
   --bg: #F1F4F9;
@@ -14,9 +14,17 @@
   --surface2: #F3F6FB;
   --border: #DEE6F0;
   --border-soft: #E8EEF6;
-  --accent: #2563EB;
-  --accent-light: #3B82F6;
-  --accent-dim: rgba(37,99,235,0.08);
+  /* Accent aligné sur la DA du site openmedias.fr (indigo #3B3BF9 mesuré en
+     direct sur le site, à la place du bleu générique précédent) — même
+     logique de variable partout dans le fichier, donc un seul changement ici
+     suffit à repeindre boutons/liens/chips actifs. Le fond du SITE, lui,
+     reste un bleu nuit plein écran (#0D0D2B) : volontairement PAS repris tel
+     quel ici, ce serait fatiguant sur un tableau de chiffres qu'on garde
+     ouvert des heures — seul l'écran de connexion (#pin-screen), qu'on ne
+     regarde que 5 secondes, adopte ce fond marine (cf. plus bas). */
+  --accent: #3B3BF9;
+  --accent-light: #5C5CFB;
+  --accent-dim: rgba(59,59,249,0.08);
   --gold: #D97706; --gold-dim: rgba(217,119,6,0.10);
   --red: #DC2626; --red-dim: rgba(220,38,38,0.08);
   --green: #16A34A; --green-dim: rgba(22,163,74,0.08);
@@ -29,7 +37,15 @@
   --radius: 18px; --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(16,26,46,0.04), 0 10px 28px rgba(16,26,46,0.06);
   --shadow-lg: 0 24px 64px rgba(16,26,46,0.18);
-  --font-display: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Le site utilise "Garet" (police maison payante, servie en .woff auto-
+     hébergé sur openmedias.fr) — on ne copie pas ses fichiers de police ici
+     tant que la licence webfont (souvent limitée au(x) domaine(s) déclarés)
+     n'a pas été confirmée pour cet usage. "Baloo 2" (Google Fonts, libre) est
+     l'alternative la plus proche visuellement : géométrique, arrondie, très
+     grasse en 800 — même impression que Garet sur les titres. À remplacer
+     par Garet si Donatien confirme que la licence couvre cet outil et
+     fournit les .woff. */
+  --font-display: 'Baloo 2', 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   /* Format palette */
   --plateau: #2563eb; --plateau-bg: #eff6ff;
@@ -40,7 +56,7 @@
 }
 [data-theme="dark"] {
   --bg: #050A14; --surface: #0B1322; --surface2: #101B30; --border: #1B2A45; --border-soft: #16223A;
-  --accent: #3B82F6; --accent-light: #60A5FA; --accent-dim: rgba(59,130,246,0.14);
+  --accent: #7273FF; --accent-light: #9494FF; --accent-dim: rgba(114,115,255,0.16);
   --text: #FFFFFF; --text-dim: #8295B5; --text-muted: #54678A;
   --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
   --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
@@ -52,11 +68,25 @@
 body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
 
 /* ── PIN ─────────────────────────────────────── */
-#pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 100; }
-.pin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); }
-.pin-logo { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 24px; margin-bottom: 6px; letter-spacing: -0.5px; }
-.pin-logo span { color: var(--accent); }
-.pin-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 40px; }
+/* Écran de connexion repeint en bleu nuit (#0D0D2B, mesuré sur openmedias.fr)
+   — contrairement au reste de l'outil, cet écran ne reste affiché que
+   quelques secondes, donc reprendre le fond "vitrine" du site ici ne coûte
+   rien en confort de lecture et rapproche tout de suite l'outil du site au
+   tout premier contact. */
+#pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0D0D2B; z-index: 100; }
+.pin-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); backdrop-filter: blur(6px); }
+.pin-logo { font-family: var(--font-display); font-weight: 800; font-size: 26px; margin-bottom: 6px; letter-spacing: -0.5px; color: #fff; }
+.pin-logo span { color: var(--accent-light); }
+.pin-sub { color: rgba(255,255,255,0.55); font-size: 13px; margin-bottom: 40px; }
+#pin-screen .form-label { color: rgba(255,255,255,0.7); }
+#pin-screen .form-input { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); color: #fff; }
+#pin-screen .form-input:focus { background: rgba(255,255,255,0.1); }
+#pin-screen .pin-error { color: #FCA5A5; }
+#pin-screen .info-banner.neutral { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); color: rgba(255,255,255,0.8); }
+#pin-screen .login-switch a { color: rgba(255,255,255,0.55); }
+#pin-screen .login-switch a:hover { color: #fff; }
+#pin-screen .btn-secondary { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); color: #fff; }
+#pin-screen .btn-secondary:hover { background: rgba(255,255,255,0.14); }
 .pin-dots { display: flex; gap: 14px; justify-content: center; margin-bottom: 32px; }
 .pin-dot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border); background: transparent; transition: all 0.2s; }
 .pin-dot.filled { background: var(--accent); border-color: var(--accent); transform: scale(1.1); }
@@ -182,7 +212,7 @@ header {
 .header-brand { display: flex; align-items: center; gap: 11px; }
 .header-mark { width: 4px; height: 27px; border-radius: 3px; background: var(--accent); flex-shrink: 0; }
 .header-text { display: flex; flex-direction: column; gap: 1px; }
-.header-logo { font-family: 'Sora', sans-serif; font-weight: 700; font-size: 14px; letter-spacing: 0.4px; white-space: nowrap; color: var(--text); line-height: 1.25; text-transform: uppercase; }
+.header-logo { font-family: var(--font-display); font-weight: 700; font-size: 14px; letter-spacing: 0.4px; white-space: nowrap; color: var(--text); line-height: 1.25; text-transform: uppercase; }
 .header-eyebrow { font-size: 12px; letter-spacing: 0.6px; font-weight: 800; color: var(--text); text-transform: uppercase; line-height: 1.25; }
 .header-sep { width: 1px; height: 30px; background: var(--border); }
 .role-badge { font-size: 10px; font-weight: 700; padding: 4px 11px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.6px; }
@@ -210,7 +240,10 @@ header {
 .month-nav button { background: none; border: none; color: var(--text-dim); width: 30px; height: 30px; border-radius: 9px; cursor: pointer; font-size: 15px; transition: all 0.12s; display: flex; align-items: center; justify-content: center; }
 .month-nav button:hover { background: var(--surface); color: var(--accent); }
 .month-label { font-size: 13px; font-weight: 700; min-width: 118px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
-.btn-primary { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
+/* Bouton primaire en pilule complète (border-radius 999px), comme sur
+   openmedias.fr — réservé au primaire pour garder une hiérarchie visuelle
+   claire face aux boutons secondaires/danger, qui gardent le rayon standard. */
+.btn-primary { background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 9px 20px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
 .btn-primary:hover { background: var(--accent-light); }
 .btn-primary:active { transform: scale(0.97); }
 .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
@@ -219,7 +252,9 @@ header {
 .btn-danger:hover { background: rgba(220,38,38,0.16); }
 .btn-hard-delete { background: none; color: var(--text-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); width: 36px; height: 36px; padding: 0; font-size: 14px; cursor: pointer; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
 .btn-hard-delete:hover { color: var(--red); border-color: rgba(220,38,38,0.3); background: var(--red-dim); }
-.btn-icon { background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+/* Cercle parfait plutôt que carré arrondi — même traitement que les boutons
+   icône seule (flèches, réseaux) sur openmedias.fr. */
+.btn-icon { background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
 .btn-icon:hover { border-color: var(--accent-light); background: var(--surface2); }
 .btn-icon:active { transform: scale(0.94); }
 
@@ -747,6 +782,10 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-aging-legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
 .finance-aging-legend span.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 .finance-invoice-link { font-weight: 700; color: var(--accent); text-decoration: underline; cursor: pointer; background: none; border: none; padding: 0; font-size: inherit; font-family: inherit; }
+/* Badge "Dernière relance" sous le n° de facture (audit UX v2, B4). */
+.finance-relance-badge { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+.finance-relance-badge.never { color: var(--gold); font-weight: 600; }
+.finance-relance-badge.stale { color: var(--red); font-weight: 700; }
 /* Échéance éditable en ligne (liste + fiche détail) — permet de corriger la
    date à la main (ex. délai négocié) sans passer par Pennylane ; ne touche
    jamais le montant dû, seulement le calcul du retard/tri/KPI (cf.
@@ -786,6 +825,11 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-tabs-row .finance-tabs { margin-bottom: 0; flex: 1 1 auto; }
 .finance-search-inline { flex: 0 1 240px; min-width: 180px; }
 .finance-search-inline .form-input { width: 100%; }
+/* Tri "priorité" (montant × retard) — pilule à part des onglets de statut,
+   pour signaler que c'est un mode de tri et non un filtre de plus. */
+.finance-priority-btn { display: inline-flex; align-items: center; gap: 2px; background: var(--surface2); border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px; font-size: 12.5px; font-weight: 700; color: var(--text-dim); cursor: pointer; white-space: nowrap; font-family: 'Inter', sans-serif; transition: all 0.15s; }
+.finance-priority-btn:hover { border-color: var(--accent); color: var(--accent); }
+.finance-priority-btn.active { background: var(--accent-dim); border-color: transparent; color: var(--accent); }
 /* Lien discret pour déplier le détail complet de la synchro (tous statuts
    Pennylane), replié par défaut car redondant avec les compteurs des onglets. */
 .finance-sync-detail-toggle { background: none; border: none; color: var(--text-muted); font-size: 11px; font-weight: 600; text-decoration: underline; cursor: pointer; padding: 0; font-family: 'Inter', sans-serif; }
@@ -979,6 +1023,11 @@ td { padding: 10px 14px; font-size: 13px; }
            part) pour réduire l'empilement de blocs avant le tableau. -->
       <div class="finance-tabs-row">
         <div class="finance-tabs" id="finance-tabs"></div>
+        <!-- Tri "priorité" (montant × retard) — répond à "qu'est-ce que je
+             traite en premier", que le tri colonne par colonne ne couvre pas.
+             Bouton à part plutôt qu'un 4e en-tête cliquable : ce n'est pas une
+             colonne du tableau, c'est un mode de tri transversal. -->
+        <button type="button" class="finance-priority-btn" id="finance-priority-btn" onclick="setFinanceSort('priority')" title="Trier par urgence réelle : montant restant dû × jours de retard">⚡ Priorité<span id="finance-priority-arrow"></span></button>
         <div class="finance-search-inline">
           <input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
         </div>
@@ -1159,11 +1208,15 @@ let financeActiveFilter='all';
 // pas triables ici alors que d'autres tableaux de l'app le sont déjà
 // (.sortable-th), gênant sur un métier de relance où trier par échéance ou
 // montant restant dû est souvent le premier réflexe (relevé dans l'audit UX).
-let financeSortKey=null; // 'deadline' | 'retard' | 'montant' | null
+let financeSortKey=null; // 'deadline' | 'retard' | 'montant' | 'priority' | null
 let financeSortDir=1; // 1 = croissant, -1 = décroissant
+// Direction par défaut au premier clic sur une colonne — pour "priorité", ça
+// n'aurait aucun sens de démarrer croissant (le pire cas tout en bas) : on
+// veut le plus urgent en premier, donc décroissant par défaut sur ce tri-là.
+const FINANCE_SORT_DEFAULT_DIR={priority:-1};
 function setFinanceSort(key){
   if(financeSortKey===key)financeSortDir=-financeSortDir;
-  else{financeSortKey=key;financeSortDir=1;}
+  else{financeSortKey=key;financeSortDir=FINANCE_SORT_DEFAULT_DIR[key]||1;}
   renderFinanceInvoices();
 }
 function financeSortArrow(key){
@@ -1463,6 +1516,18 @@ function renderFinanceKpis(k){
 // vieille facture payée dont l'échéance est passée depuis longtemps ne doit
 // plus s'afficher comme "en retard" en rouge — elle est réglée, ça n'a pas de
 // sens. On neutralise la barre dès que le reste dû est nul/négatif.
+// Badge "Dernière relance il y a Xj" sous le n° de facture — répond à
+// "est-ce que quelqu'un a déjà relancé ce client récemment" sans avoir à
+// ouvrir la fiche (audit UX v2, B4). N'apparaît que pour les factures encore
+// en jeu (une facture soldée/annulée n'a plus besoin de ce signal).
+function financeLastRelanceBadge(inv){
+  const resolved=inv.internalStatus==='solde'||FINANCE_STATUSES_SOLDEES.includes(inv.status);
+  if(resolved)return '';
+  if(!inv.lastRelanceAt)return '<div class="finance-relance-badge never">Jamais relancée</div>';
+  const days=Math.floor((Date.now()-new Date(inv.lastRelanceAt).getTime())/86400000);
+  if(days<=0)return '<div class="finance-relance-badge recent">Relancée aujourd\'hui</div>';
+  return `<div class="finance-relance-badge${days>14?' stale':''}">Relancée il y a ${days}j</div>`;
+}
 function financeRetardBarHtml(inv){
   const daysLate=inv.daysLate;
   const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount;
@@ -1574,6 +1639,12 @@ function renderFinanceTabs(){
 function renderFinanceInvoices(){
   const wrap=document.getElementById('finance-invoices-table');
   if(!wrap)return;
+  const priorityBtn=document.getElementById('finance-priority-btn');
+  if(priorityBtn){
+    const active=financeSortKey==='priority';
+    priorityBtn.classList.toggle('active',active);
+    document.getElementById('finance-priority-arrow').textContent=active?(financeSortDir===1?' ▲':' ▼'):'';
+  }
   const q=(document.getElementById('finance-search')?.value||'').trim().toLowerCase();
   let list=financeInvoicesCache.filter(inv=>{
     if(!financeMatchesPeriod(inv))return false;
@@ -1591,6 +1662,19 @@ function renderFinanceInvoices(){
       if(financeSortKey==='deadline')return inv.deadline||'';
       if(financeSortKey==='retard')return inv.daysLate!=null?inv.daysLate:-Infinity;
       if(financeSortKey==='montant')return inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+      if(financeSortKey==='priority'){
+        // Score simple = montant restant dû × jours de retard — répond à
+        // "qu'est-ce que je traite en premier aujourd'hui", ce que le tri
+        // colonne par colonne ne peut pas faire (relevé dans l'audit UX v2) :
+        // une petite facture en retard depuis peu ne doit pas passer avant une
+        // grosse facture en retard depuis presque aussi longtemps. Les
+        // factures non en retard ou déjà soldées/en litige-suivi-à-part
+        // tombent en fin de liste (score -1) plutôt que de fausser le tri.
+        const resolved=inv.internalStatus==='solde'||FINANCE_STATUSES_SOLDEES.includes(inv.status);
+        if(resolved||inv.daysLate==null||inv.daysLate<=0)return -1;
+        const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+        return remaining*inv.daysLate;
+      }
       return 0;
     };
     list=[...list].sort((a,b)=>{
@@ -1604,7 +1688,7 @@ function renderFinanceInvoices(){
   wrap.innerHTML=`<table>
     <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Échéance${financeSortArrow('deadline')}</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th>Montant HT</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
     <tbody>${list.map(inv=>`<tr>
-      <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button></td>
+      <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeLastRelanceBadge(inv)}</td>
       <td>${inv.customerName||'—'}</td>
       <td>${inv.contactName||'—'}</td>
       <td>${inv.contactEmail||inv.customerEmail||'—'}</td>

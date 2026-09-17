@@ -1460,9 +1460,19 @@ const HORS_RECOUVREMENT_PLACEHOLDERS = PENNYLANE_HORS_RECOUVREMENT.map(() => '?'
 app.get('/api/finance/invoices', requireFinance, (req, res) => {
   const rows = db.prepare(`
     SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
-           c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone
+           c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone,
+           lr.last_relance_at AS last_relance_at
     FROM pennylane_invoices i
     LEFT JOIN pennylane_customers c ON c.id = i.customer_id
+    -- Dernière relance par facture (toutes canaux confondus) — sert le badge
+    -- "Dernière relance il y a Xj" côté front (audit UX v2, B4) : sans ça,
+    -- il fallait ouvrir la fiche détail de chaque facture pour savoir si
+    -- quelqu'un avait déjà relancé récemment.
+    LEFT JOIN (
+      SELECT invoice_id, MAX(created_at) AS last_relance_at
+      FROM finance_relances
+      GROUP BY invoice_id
+    ) lr ON lr.invoice_id = i.id
   `).all();
   const { statut, q, retard_only } = req.query;
   const qLower = q ? String(q).trim().toLowerCase() : '';
@@ -1489,6 +1499,7 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     status: r.status,
     internalStatus: r.internal_status,
     daysLate: joursDeRetard(r.deadline),
+    lastRelanceAt: r.last_relance_at || null,
   }));
   if (statut) list = list.filter((r) => r.internalStatus === statut);
   if (retard_only === '1') list = list.filter((r) => (r.daysLate || 0) > 0);
