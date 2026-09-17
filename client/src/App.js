@@ -1711,11 +1711,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           )}
           {isAdmin && <div className="objective-summary">
             <strong>Objectif global : {monthlyObjective ? `${fmt(monthlyObjective)} € / mois` : 'désactivé'}</strong>
-            {monthlyObjective > 0 && !mustRecalc && !d.errors?.monthRevenue && <>
+            {monthlyObjective > 0 && !d.errors?.monthRevenue && <>
               <span className={`objective-badge ${objectiveStatus || 'muted'}`}>{Math.round(monthRev.totalAmount / monthlyObjective * 100)}% de l’objectif atteint</span>
               {objectivePct !== null && <small>{objectivePct}% du rythme prévu à ce jour</small>}
+              {mustRecalc && <small>Calculé sur la vue filtrée actuelle (pas l’équipe entière).</small>}
             </>}
-            {mustRecalc && <small>Vue filtrée : progression globale masquée.</small>}
             {d.errors?.monthRevenue && <small>CA mensuel indisponible.</small>}
             <button type="button" className="objective-edit" onClick={editMonthlyObjective}>{monthlyObjective ? 'Modifier l’objectif' : 'Définir l’objectif'}</button>
             {objectiveSaved && <span className="objective-saved" role="status">Objectif enregistré</span>}
