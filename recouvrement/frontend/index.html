@@ -811,6 +811,47 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-period-field input[type=date] { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-family: 'Inter', sans-serif; padding: 5px 8px; }
 .finance-period-field input[type=date]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 .finance-period-reset { background: none; border: none; color: var(--accent); font-size: 11.5px; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; font-family: 'Inter', sans-serif; }
+
+/* Donut "répartition par statut" (remplace l'ancienne barre segmentée) — SVG
+   pur, pas de lib de charts, cf. financeStatutDonutSvg(). Le total est
+   superposé au centre du donut plutôt que redonné à côté, comme chez
+   Kollekt/LeanPay (repère immédiat sans balayer la légende). */
+.finance-donut-row { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-top: 6px; }
+.finance-donut-wrap { position: relative; width: 108px; height: 108px; flex-shrink: 0; }
+.finance-donut { width: 100%; height: 100%; }
+.finance-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
+.finance-donut-center-val { font-size: 14px; font-weight: 800; color: var(--text); line-height: 1.15; }
+.finance-donut-center-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.finance-donut-row .finance-aging-legend { margin-top: 0; flex: 1 1 200px; }
+
+/* Delta période précédente affiché en petit sous les 2 KPI principaux — vert
+   quand la métrique s'améliore, rouge quand elle se dégrade (une baisse
+   d'encours/actionable est une bonne nouvelle, contrairement à une baisse de
+   CA par ex.), gris quand il n'y a pas de mouvement. */
+.finance-kpi-delta { font-size: 10.5px; font-weight: 700; margin-left: 4px; white-space: nowrap; }
+.finance-kpi-delta.up { color: #dc2626; }
+.finance-kpi-delta.down { color: var(--green); }
+.finance-kpi-delta.flat { color: var(--text-muted); }
+
+/* Sous-navigation Vue d'ensemble / Factures / Litiges — sépare la lecture
+   (KPI + répartition) de l'action (tableau de factures), et isole les litiges
+   dans leur propre vue plutôt que noyés dans le tableau général filtré par
+   statut interne (relevé dans l'audit UX, aligné avec ce que fait Kollekt). */
+.finance-subnav { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; box-shadow: var(--shadow); margin-bottom: 14px; width: fit-content; }
+.finance-subnav-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--text-dim); font-size: 13px; font-weight: 700; padding: 8px 16px; border-radius: 10px; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
+.finance-subnav-btn:hover { background: var(--surface2); color: var(--text); }
+.finance-subnav-btn.active { background: var(--accent-dim); color: var(--accent); }
+.finance-subnav-badge { background: var(--surface2); color: var(--text-dim); font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.finance-subnav-btn.active .finance-subnav-badge { background: #dc2626; color: #fff; }
+.finance-subnav-btn.litiges-empty .finance-subnav-badge { background: var(--surface2); color: var(--text-dim); }
+
+/* Snapshot client dans la fiche détail — décompte EN DIRECT sur nos propres
+   factures suivies (jamais un score externe/IA), affiché seulement quand ce
+   client a plus d'une facture ouverte (sinon ça n'apporte rien face à la
+   fiche déjà affichée). */
+.finance-client-snapshot { background: var(--surface2); border-radius: 10px; padding: 10px 12px; margin-top: 10px; }
+.finance-client-snapshot-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; margin-top: 4px; }
+.finance-client-snapshot-note { font-size: 10.5px; color: var(--text-muted); margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -908,27 +949,47 @@ td { padding: 10px 14px; font-size: 13px; }
          portés par la barre d'onglets juste en dessous, l'afficher en
          permanence faisait doublon (relevé dans l'audit UX). -->
     <div id="finance-sync-overview" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
-    <div class="report-grid" id="finance-kpis"></div>
-    <!-- Filtre de période : calendrier personnalisable (Du/Au) sur la date
-         d'ÉCHÉANCE — restreint à la fois les onglets, le tableau et les KPI
-         ci-dessous. Cf. financeMatchesPeriod() / computeFinanceKpisFromCache(). -->
-    <div class="finance-period-bar">
-      <span class="finance-period-tag">Période</span>
-      <label class="finance-period-field">Du <input type="date" id="finance-period-from" onchange="setFinancePeriodFrom(this.value)"></label>
-      <label class="finance-period-field">Au <input type="date" id="finance-period-to" onchange="setFinancePeriodTo(this.value)"></label>
-      <button type="button" class="finance-period-reset" id="finance-period-reset" onclick="resetFinancePeriod()" style="display:none">Réinitialiser</button>
+
+    <!-- Sous-navigation Vue d'ensemble / Factures / Litiges — cf.
+         setFinanceSubview(). Vue d'ensemble = lecture (KPI + répartition),
+         Factures = action (période/onglets/tableau), Litiges = vue dédiée. -->
+    <div class="finance-subnav" id="finance-subnav">
+      <button type="button" class="finance-subnav-btn active" data-view="overview" onclick="setFinanceSubview('overview')">Vue d'ensemble</button>
+      <button type="button" class="finance-subnav-btn" data-view="factures" onclick="setFinanceSubview('factures')">Factures</button>
+      <button type="button" class="finance-subnav-btn" data-view="litiges" onclick="setFinanceSubview('litiges')">Litiges <span class="finance-subnav-badge" id="finance-subnav-litiges-count">0</span></button>
     </div>
-    <!-- Barre de classement façon Pennylane (Toutes/À traiter/À venir/En
-         retard/Plus, chacun avec son compteur) — cf. renderFinanceTabs(). La
-         recherche est fusionnée dans la même ligne (au lieu d'une carte à
-         part) pour réduire l'empilement de blocs avant le tableau. -->
-    <div class="finance-tabs-row">
-      <div class="finance-tabs" id="finance-tabs"></div>
-      <div class="finance-search-inline">
-        <input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
+
+    <div id="finance-view-overview" class="finance-subview">
+      <div class="report-grid" id="finance-kpis"></div>
+    </div>
+
+    <div id="finance-view-factures" class="finance-subview" style="display:none">
+      <!-- Filtre de période : calendrier personnalisable (Du/Au) sur la date
+           d'ÉCHÉANCE — restreint à la fois les onglets, le tableau et les KPI
+           ci-dessous. Cf. financeMatchesPeriod() / computeFinanceKpisFromCache(). -->
+      <div class="finance-period-bar">
+        <span class="finance-period-tag">Période</span>
+        <label class="finance-period-field">Du <input type="date" id="finance-period-from" onchange="setFinancePeriodFrom(this.value)"></label>
+        <label class="finance-period-field">Au <input type="date" id="finance-period-to" onchange="setFinancePeriodTo(this.value)"></label>
+        <button type="button" class="finance-period-reset" id="finance-period-reset" onclick="resetFinancePeriod()" style="display:none">Réinitialiser</button>
       </div>
+      <!-- Barre de classement façon Pennylane (Toutes/À traiter/À venir/En
+           retard/Plus, chacun avec son compteur) — cf. renderFinanceTabs(). La
+           recherche est fusionnée dans la même ligne (au lieu d'une carte à
+           part) pour réduire l'empilement de blocs avant le tableau. -->
+      <div class="finance-tabs-row">
+        <div class="finance-tabs" id="finance-tabs"></div>
+        <div class="finance-search-inline">
+          <input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
+        </div>
+      </div>
+      <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
     </div>
-    <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
+
+    <div id="finance-view-litiges" class="finance-subview" style="display:none">
+      <div class="info-banner neutral" style="margin-bottom:12px">💡 Photo en direct des factures actuellement marquées « Litige » — pas d'historique de durée (on ne garde pas encore de date de passage en litige), juste l'état courant.</div>
+      <div class="media-table-card" id="finance-litiges-table" style="overflow-x:auto"></div>
+    </div>
   </div>
 </div>
 
@@ -1110,6 +1171,31 @@ function financeSortArrow(key){
   return `<span class="sort-arrow">${financeSortDir===1?'▲':'▼'}</span>`;
 }
 
+// Sous-navigation Vue d'ensemble / Factures / Litiges — sépare la lecture
+// (KPI + répartition par statut) de l'action (période/onglets/tableau), et
+// donne aux litiges leur propre vue plutôt que noyés dans le tableau général
+// filtré par statut interne (relevé dans l'audit UX).
+let financeSubview='overview';
+function setFinanceSubview(key){
+  financeSubview=key;
+  document.querySelectorAll('.finance-subnav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===key));
+  document.getElementById('finance-view-overview').style.display=key==='overview'?'':'none';
+  document.getElementById('finance-view-factures').style.display=key==='factures'?'':'none';
+  document.getElementById('finance-view-litiges').style.display=key==='litiges'?'':'none';
+  if(key==='litiges')renderFinanceLitiges();
+}
+// Badge du nombre de litiges en cours sur l'onglet lui-même — mis à jour à
+// chaque refresh du cache (synchro, ou changement de statut interne d'une
+// facture) sans attendre que l'utilisateur ouvre la vue Litiges.
+function updateFinanceLitigesBadge(){
+  const badge=document.getElementById('finance-subnav-litiges-count');
+  if(!badge)return;
+  const n=financeInvoicesCache.filter(i=>i.internalStatus==='litige').length;
+  badge.textContent=n;
+  badge.parentElement.classList.toggle('litiges-empty',n===0);
+  if(financeSubview==='litiges')renderFinanceLitiges();
+}
+
 // Filtre de période : calendrier personnalisable (Du/Au), sur la date
 // d'ÉCHÉANCE de la facture — remplace l'ancien système à granularités fixes
 // (Semaine/Mois/Année) par une plage de dates libre. Aucune borne posée (par
@@ -1121,12 +1207,38 @@ function financeSortArrow(key){
 let financePeriodFrom=null; // 'YYYY-MM-DD' ou null
 let financePeriodTo=null;   // 'YYYY-MM-DD' ou null
 
-function financeMatchesPeriod(inv){
-  if(!financePeriodFrom&&!financePeriodTo)return true;
+// Factorisé pour être réutilisable avec des bornes EXPLICITES (pas seulement
+// les globales financePeriodFrom/To) — sert au calcul de la période N-1 pour
+// la comparaison affichée sur les KPI (cf. financePreviousPeriodBounds).
+function invoiceInRange(inv,from,to){
+  if(!from&&!to)return true;
   if(!inv.deadline)return false; // pas d'échéance (ex. brouillon) : hors période dès qu'une borne est posée
-  if(financePeriodFrom&&inv.deadline<financePeriodFrom)return false;
-  if(financePeriodTo&&inv.deadline>financePeriodTo)return false;
+  if(from&&inv.deadline<from)return false;
+  if(to&&inv.deadline>to)return false;
   return true;
+}
+function financeMatchesPeriod(inv){
+  return invoiceInRange(inv,financePeriodFrom,financePeriodTo);
+}
+// Bornes de la période "précédente" (même durée, juste avant) — sert à
+// afficher un delta sur les 2 principales cartes KPI, comme le fait
+// Kollekt/LeanPay ("DSO 47j ↑1,8% vs période précédente"). Sans borne Du/Au
+// posée, on compare les 30 derniers jours aux 30 précédents par défaut.
+function financePreviousPeriodBounds(){
+  if(financePeriodFrom||financePeriodTo){
+    if(!financePeriodFrom)return null; // "Au" seul, sans point de départ : durée non définie, pas de comparaison
+    const from=new Date(`${financePeriodFrom}T00:00:00`);
+    const to=financePeriodTo?new Date(`${financePeriodTo}T00:00:00`):new Date();
+    const lengthMs=to-from;
+    if(lengthMs<0)return null;
+    const prevTo=new Date(from.getTime()-86400000);
+    const prevFrom=new Date(prevTo.getTime()-lengthMs);
+    return {from:prevFrom.toISOString().slice(0,10),to:prevTo.toISOString().slice(0,10)};
+  }
+  const today=new Date(); today.setHours(0,0,0,0);
+  const to=new Date(today.getTime()-86400000);
+  const from=new Date(today.getTime()-30*86400000);
+  return {from:from.toISOString().slice(0,10),to:to.toISOString().slice(0,10)};
 }
 function setFinancePeriodFrom(v){ financePeriodFrom=v||null; onFinancePeriodChange(); }
 function setFinancePeriodTo(v){ financePeriodTo=v||null; onFinancePeriodChange(); }
@@ -1167,6 +1279,7 @@ async function refreshFinanceInvoices(){
   renderFinanceKpis(computeFinanceKpisFromCache());
   renderFinanceTabs();
   renderFinanceInvoices();
+  updateFinanceLitigesBadge();
 }
 // Statuts Pennylane exclus de l'encours de recouvrement (mêmes exclusions que
 // /api/finance/kpis côté back : un brouillon, un avoir, une annulation... ne
@@ -1191,8 +1304,10 @@ const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde'];
 // mais borné à la plage Du/Au en cours, ce que l'endpoint back ne fait pas.
 // Permet aussi aux cartes KPI de réagir immédiatement à un changement de
 // statut interne ou de période, sans réappeler le serveur.
-function computeFinanceKpisFromCache(){
-  const list=financeInvoicesCache.filter(financeMatchesPeriod);
+function computeFinanceKpisFromCache(boundsOverride){
+  const from=boundsOverride?boundsOverride.from:financePeriodFrom;
+  const to=boundsOverride?boundsOverride.to:financePeriodTo;
+  const list=financeInvoicesCache.filter(inv=>invoiceInRange(inv,from,to));
   const unpaid=list.filter(inv=>{
     const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
     return remaining>0 && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
@@ -1221,12 +1336,12 @@ function computeFinanceKpisFromCache(){
   // période — une approximation cohérente avec la formule back, mais bornée
   // à la période choisie plutôt que toujours glissante sur 90j.
   let periodStartStr,periodDays=90;
-  if(financePeriodFrom||financePeriodTo){
-    periodStartStr=financePeriodFrom||null;
-    if(financePeriodFrom){
-      const from=new Date(`${financePeriodFrom}T00:00:00`);
-      const to=financePeriodTo?new Date(`${financePeriodTo}T00:00:00`):new Date();
-      periodDays=Math.max(1,Math.round((to-from)/86400000)+1);
+  if(from||to){
+    periodStartStr=from||null;
+    if(from){
+      const fromD=new Date(`${from}T00:00:00`);
+      const toD=to?new Date(`${to}T00:00:00`):new Date();
+      periodDays=Math.max(1,Math.round((toD-fromD)/86400000)+1);
     }
   }else{
     const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-90);
@@ -1235,7 +1350,7 @@ function computeFinanceKpisFromCache(){
   const caPeriode=financeInvoicesCache.reduce((sum,inv)=>{
     if(!inv.dateEmission)return sum;
     if(periodStartStr&&inv.dateEmission<periodStartStr)return sum;
-    if(financePeriodTo&&inv.dateEmission>financePeriodTo)return sum;
+    if(to&&inv.dateEmission>to)return sum;
     return sum+(inv.amountTtc!=null?inv.amountTtc:(inv.amount||0));
   },0);
   const dso=caPeriode>0?Math.round((totalEncours/caPeriode)*periodDays):null;
@@ -1282,6 +1397,36 @@ function renderFinanceSyncOverview(k){
   wrap.style.display='';
   wrap.innerHTML=`Synchro Pennylane — Toutes ${overview.total} · ${parts}`;
 }
+// Donut SVG en pur CSS/SVG (pas de lib de charts) — technique du cercle de
+// rayon 15.9155 dont la circonférence vaut ~100, pour poser des pourcentages
+// directement en stroke-dasharray/dashoffset. Même esprit visuel que les
+// donuts qu'on voit chez Kollekt/LeanPay pour la répartition par statut.
+function financeStatutDonutSvg(segs){
+  const R=15.9155;
+  let acc=0;
+  const arcs=segs.filter(s=>s.pct>0).map(s=>{
+    const dashoffset=-acc;
+    acc+=s.pct;
+    return `<circle cx="18" cy="18" r="${R}" fill="none" stroke="${s.color}" stroke-width="4" stroke-dasharray="${s.pct} ${100-s.pct}" stroke-dashoffset="${dashoffset}" transform="rotate(-90 18 18)"></circle>`;
+  }).join('');
+  return `<svg viewBox="0 0 36 36" class="finance-donut" role="img" aria-label="Répartition de l'encours par statut">
+    <circle cx="18" cy="18" r="${R}" fill="none" stroke="var(--surface2)" stroke-width="4"></circle>
+    ${arcs}
+  </svg>`;
+}
+// Delta vs période précédente (même durée, juste avant) — affiché en petit
+// sous le chiffre principal, comme "DSO 47j ↑1,8% vs période précédente" chez
+// Kollekt. Une hausse d'encours/montant actionable est présentée en rouge
+// (ça se dégrade), une baisse en vert (ça s'améliore) — l'inverse du sens
+// "hausse = bon" qu'on utiliserait pour un CA par exemple.
+function financeKpiDeltaHtml(curVal,prevVal){
+  if(prevVal==null)return '';
+  if(!prevVal)return curVal>0?'<span class="finance-kpi-delta up">▲ nouveau</span>':'';
+  const pct=Math.round(((curVal-prevVal)/prevVal)*100);
+  if(pct===0)return '<span class="finance-kpi-delta flat">= vs période préc.</span>';
+  const up=pct>0;
+  return `<span class="finance-kpi-delta ${up?'up':'down'}">${up?'▲':'▼'} ${Math.abs(pct)}% vs préc.</span>`;
+}
 function renderFinanceKpis(k){
   const wrap=document.getElementById('finance-kpis');
   if(!wrap||!k)return;
@@ -1289,15 +1434,23 @@ function renderFinanceKpis(k){
   const parStatut=k.parStatut||{};
   const statutTotal=Object.values(parStatut).reduce((s,v)=>s+(v.montant||0),0);
   const nonActionable=(k.montantEnRetard||0)-(k.montantActionable||0);
+  const prevBounds=financePreviousPeriodBounds();
+  const prevK=prevBounds?computeFinanceKpisFromCache(prevBounds):null;
+  const donutSegs=statutSegs.map(s=>({pct:statutTotal?((parStatut[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
   wrap.innerHTML=`
-    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s)</div></div>
-    <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''}</div></div>
+    <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div></div>
+    <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
     <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
     <div class="kpi-card" style="grid-column:1/-1">
       <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
-      <div class="finance-aging-bar">${statutSegs.map(s=>{const montant=(parStatut[s.key]||{}).montant||0;const pct=statutTotal?montant/statutTotal*100:0;return pct?`<div class="finance-aging-seg" style="width:${pct}%;background:${s.color}" title="${s.label} : ${fmtCA(montant)}"></div>`:'';}).join('')}</div>
-      <div class="finance-aging-legend">${statutSegs.filter(s=>(parStatut[s.key]||{}).count).map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${(parStatut[s.key]||{}).count} · ${fmtCA((parStatut[s.key]||{}).montant||0)}</span>`).join('')}</div>
+      <div class="finance-donut-row">
+        <div class="finance-donut-wrap">
+          ${financeStatutDonutSvg(donutSegs)}
+          <div class="finance-donut-center"><div class="finance-donut-center-val">${fmtCACompact(statutTotal)}</div><div class="finance-donut-center-lbl">encours</div></div>
+        </div>
+        <div class="finance-aging-legend">${statutSegs.filter(s=>(parStatut[s.key]||{}).count).map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${(parStatut[s.key]||{}).count} · ${fmtCA((parStatut[s.key]||{}).montant||0)}</span>`).join('')}</div>
+      </div>
     </div>
   `;
 }
@@ -1464,6 +1617,31 @@ function renderFinanceInvoices(){
     </tr>`).join('')}</tbody>
   </table>`;
 }
+// Vue dédiée "Litiges" — un snapshot en direct des factures actuellement en
+// statut interne litige, pas une file d'attente triée par ancienneté (on ne
+// garde pas de date de passage en litige, donc pas de tri honnête possible
+// par "depuis quand" — cf. le bandeau d'avertissement au-dessus du tableau).
+function renderFinanceLitiges(){
+  const wrap=document.getElementById('finance-litiges-table');
+  if(!wrap)return;
+  const list=financeInvoicesCache.filter(inv=>inv.internalStatus==='litige');
+  if(!list.length){
+    wrap.innerHTML='<div class="idea-box-empty" style="padding:24px 0">Aucun litige en cours 🎉</div>';
+    return;
+  }
+  wrap.innerHTML=`<table>
+    <thead><tr><th>Facture</th><th>Entreprise</th><th>Contact</th><th>Échéance</th><th>Retard</th><th>Montant TTC</th><th></th></tr></thead>
+    <tbody>${list.map(inv=>`<tr>
+      <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button></td>
+      <td>${inv.customerName||'—'}</td>
+      <td>${inv.contactName||inv.contactEmail||inv.customerEmail||'—'}</td>
+      <td>${formatDateFR(inv.deadline)}</td>
+      <td>${financeRetardBarHtml(inv)}</td>
+      <td style="font-weight:600;color:#dc2626">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}</td>
+      <td><button class="btn-secondary" style="font-size:11px;padding:4px 10px" onclick="openFinanceInvoiceDetail('${inv.id}')">Ouvrir</button></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
 // Jours de retard recalculés en LOCAL après une correction d'échéance, pour
 // rafraîchir tri/KPI/barre de retard sans attendre un refetch complet —
 // même formule que joursDeRetard() côté back (router.js).
@@ -1499,6 +1677,7 @@ async function patchFinanceInvoice(id,patch){
     renderFinanceTabs();
     renderFinanceInvoices();
     renderFinanceKpis(computeFinanceKpisFromCache());
+    updateFinanceLitigesBadge();
     if(financeSelectedInvoiceId===id)openFinanceInvoiceDetail(id);
     showToast('Facture mise à jour');
   }catch(e){ showToast(e.message||"Échec de la mise à jour",'error'); }
@@ -1546,6 +1725,7 @@ async function openFinanceInvoiceDetail(id){
         <div class="form-label">Client</div>
         <div style="font-size:13px">${inv.customerName||'—'}</div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${inv.contactName?`${inv.contactName} · `:''}${inv.contactEmail||inv.customerEmail||''}${(inv.contactPhone||inv.customerPhone)?` · ${inv.contactPhone||inv.customerPhone}`:''}</div>
+        ${financeClientSnapshotHtml(inv)}
       </div>
       <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin-bottom:10px">
         <div><div class="form-label">Émission</div>${formatDateFR(inv.dateEmission)}</div>
@@ -1599,6 +1779,28 @@ async function openFinanceInvoiceDetail(id){
         </div>`).join(''):'<div class="idea-box-empty">Aucune relance pour l’instant</div>'}</div>
     </div>
   `;
+}
+// Snapshot risque client dans la fiche détail : un décompte EN DIRECT sur nos
+// propres factures suivies (jamais un score externe ou une évaluation IA) —
+// n'affiche rien si ce client n'a pas d'autre facture ouverte en ce moment,
+// pour ne pas polluer la fiche d'un encadré vide/inutile.
+function financeClientSnapshotHtml(inv){
+  if(!inv.customerId)return '';
+  const others=financeInvoicesCache.filter(i=>i.customerId===inv.customerId&&i.id!==inv.id&&(!i.status||!FINANCE_HORS_RECOUVREMENT.includes(i.status)));
+  if(!others.length)return '';
+  const nbEnRetard=others.filter(i=>(i.daysLate||0)>0).length;
+  const nbLitige=others.filter(i=>i.internalStatus==='litige').length;
+  const montantTotal=others.reduce((s,i)=>s+(i.remainingAmountTtc!=null?i.remainingAmountTtc:(i.remainingAmount||0)),0);
+  return `<div class="finance-client-snapshot">
+    <div class="form-label">Ce client, en direct (hors cette facture)</div>
+    <div class="finance-client-snapshot-row">
+      <span><strong>${others.length}</strong> autre(s) facture(s) ouverte(s)</span>
+      <span style="${nbEnRetard?'color:#dc2626':''}"><strong>${nbEnRetard}</strong> en retard</span>
+      ${nbLitige?`<span style="color:#dc2626"><strong>${nbLitige}</strong> en litige</span>`:''}
+      <span><strong>${fmtCA(montantTotal)}</strong> d'encours</span>
+    </div>
+    <div class="finance-client-snapshot-note">Décompte sur les factures suivies ici, pas un score externe.</div>
+  </div>`;
 }
 function financeCommentsListHtml(comments){
   if(!comments.length)return '<div class="idea-box-empty">Aucun commentaire pour l’instant</div>';

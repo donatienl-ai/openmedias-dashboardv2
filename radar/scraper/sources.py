@@ -64,7 +64,12 @@ SOURCES = [
          url="https://www.timefrance.fr/business-a-succes/",
          path_filter="/business-a-succes/"),
 
-    dict(source="Nous", media="BFM Business", emission="Focus Entreprises",
+    # Renommée à l'antenne "Vision d'Entreprises" (le slug d'URL, lui, n'a pas
+    # bougé : toujours /focus-entreprises/ — cf. demande Donatien 2026-09-17).
+    # Le catalogue existant (648 épisodes déjà scrapés sous l'ancien nom) a été
+    # migré en une fois pour rester sur une seule émission continue plutôt que
+    # de se retrouver splitté en deux entrées dans le radar.
+    dict(source="Nous", media="BFM Business", emission="Vision d'Entreprises",
          kind="html",
          url="https://www.bfmtv.com/economie/professionnels/focus-entreprises/",
          path_filter="/focus-entreprises/",
