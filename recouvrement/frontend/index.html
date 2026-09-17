@@ -14,17 +14,19 @@
   --surface2: #F3F6FB;
   --border: #DEE6F0;
   --border-soft: #E8EEF6;
-  /* Accent aligné sur la DA du site openmedias.fr (indigo #3B3BF9 mesuré en
-     direct sur le site, à la place du bleu générique précédent) — même
-     logique de variable partout dans le fichier, donc un seul changement ici
-     suffit à repeindre boutons/liens/chips actifs. Le fond du SITE, lui,
-     reste un bleu nuit plein écran (#0D0D2B) : volontairement PAS repris tel
-     quel ici, ce serait fatiguant sur un tableau de chiffres qu'on garde
-     ouvert des heures — seul l'écran de connexion (#pin-screen), qu'on ne
-     regarde que 5 secondes, adopte ce fond marine (cf. plus bas). */
-  --accent: #3B3BF9;
-  --accent-light: #5C5CFB;
-  --accent-dim: rgba(59,59,249,0.08);
+  /* Accent recalé en bleu nuit profond (#10204D) — le premier indigo
+     #3B3BF9, pourtant mesuré en direct sur le site, rendait "trop violet"
+     une fois généralisé sur tout l'outil (retour Donatien). #10204D est le
+     ton "bleu nuit" choisi pour rester lisible en texte/fond sur blanc ;
+     le thème sombre ci-dessous utilise une variante plus claire du même
+     bleu (pas ce ton-ci, invisible sur fond déjà sombre). Le fond du SITE,
+     lui, reste un bleu nuit plein écran (#0D0D2B) : volontairement PAS
+     repris tel quel ici, ce serait fatiguant sur un tableau de chiffres
+     qu'on garde ouvert des heures — seul l'écran de connexion (#pin-screen),
+     qu'on ne regarde que 5 secondes, adopte ce fond marine (cf. plus bas). */
+  --accent: #10204D;
+  --accent-light: #1B3068;
+  --accent-dim: rgba(16,32,77,0.08);
   --gold: #D97706; --gold-dim: rgba(217,119,6,0.10);
   --red: #DC2626; --red-dim: rgba(220,38,38,0.08);
   --green: #16A34A; --green-dim: rgba(22,163,74,0.08);
@@ -56,7 +58,7 @@
 }
 [data-theme="dark"] {
   --bg: #050A14; --surface: #0B1322; --surface2: #101B30; --border: #1B2A45; --border-soft: #16223A;
-  --accent: #7273FF; --accent-light: #9494FF; --accent-dim: rgba(114,115,255,0.16);
+  --accent: #3E63B0; --accent-light: #6B8FD1; --accent-dim: rgba(62,99,176,0.16);
   --text: #FFFFFF; --text-dim: #8295B5; --text-muted: #54678A;
   --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
   --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
@@ -76,7 +78,11 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 #pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0D0D2B; z-index: 100; }
 .pin-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); backdrop-filter: blur(6px); }
 .pin-logo { font-family: var(--font-display); font-weight: 800; font-size: 26px; margin-bottom: 6px; letter-spacing: -0.5px; color: #fff; }
-.pin-logo span { color: var(--accent-light); }
+/* Toujours sur le fond marine #0D0D2B, quel que soit le thème clair/sombre
+   de l'appli — d'où une valeur fixe (le bleu nuit clair) plutôt que
+   var(--accent-light), qui serait devenue trop sombre pour rester lisible
+   ici une fois --accent-light recalé pour le thème clair (fond blanc). */
+.pin-logo span { color: #6B8FD1; }
 .pin-sub { color: rgba(255,255,255,0.55); font-size: 13px; margin-bottom: 40px; }
 #pin-screen .form-label { color: rgba(255,255,255,0.7); }
 #pin-screen .form-input { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); color: #fff; }
@@ -87,6 +93,12 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 #pin-screen .login-switch a:hover { color: #fff; }
 #pin-screen .btn-secondary { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); color: #fff; }
 #pin-screen .btn-secondary:hover { background: rgba(255,255,255,0.14); }
+/* Le bouton principal doit rester bien visible sur le fond marine quel que
+   soit le thème clair/sombre choisi dans l'appli — sinon en thème clair il
+   hériterait du bleu nuit très sombre (#10204D), à peine perceptible sur un
+   fond déjà sombre. */
+#pin-screen .btn-primary { background: #3E63B0; }
+#pin-screen .btn-primary:hover { background: #6B8FD1; }
 .pin-dots { display: flex; gap: 14px; justify-content: center; margin-bottom: 32px; }
 .pin-dot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--border); background: transparent; transition: all 0.2s; }
 .pin-dot.filled { background: var(--accent); border-color: var(--accent); transform: scale(1.1); }
