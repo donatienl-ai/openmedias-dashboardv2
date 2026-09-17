@@ -14,14 +14,19 @@
   --surface2: #F3F6FB;
   --border: #DEE6F0;
   --border-soft: #E8EEF6;
-  /* Accent = indigo du site (#3B3BF9), utilisé uniquement pour les boutons /
-     contrôles interactifs (jamais en fond de grande surface — c'est ce qui
-     donnait l'impression "trop violet" avant). Les fonds/bordures, eux,
-     suivent maintenant #1A1A2E (bleu nuit du site) côté thème sombre — voir
-     plus bas. */
-  --accent: #3B3BF9;
-  --accent-light: #5C5CFB;
-  --accent-dim: rgba(59,59,249,0.08);
+  /* Accent = #2E5CE0. L'indigo exact du site (#3B3BF9, R=G=59) est
+     mathématiquement "bleu" mais perceptuellement se lit comme violet/
+     périwinkle dès qu'il couvre une vraie surface (bouton plein, logo en
+     gras) — vérifié en direct sur le déploiement (retour Donatien).
+     #2E5CE0 garde le même esprit vif/saturé mais avec le vert (G) clairement
+     en retrait du bleu (B), ce qui le lit sans ambiguïté comme "bleu" —
+     même écart de teinte que l'ancien bleu générique (#2563EB) qui n'avait
+     jamais posé ce problème. Utilisé uniquement pour les boutons/contrôles
+     interactifs, jamais en fond de grande surface. Les fonds/bordures, eux,
+     suivent #1A1A2E (bleu nuit du site) côté thème sombre — voir plus bas. */
+  --accent: #2E5CE0;
+  --accent-light: #5C82F0;
+  --accent-dim: rgba(46,92,224,0.08);
   --gold: #D97706; --gold-dim: rgba(217,119,6,0.10);
   --red: #DC2626; --red-dim: rgba(220,38,38,0.08);
   --green: #16A34A; --green-dim: rgba(22,163,74,0.08);
@@ -57,7 +62,7 @@
      inventée — même valeurs partagées avec client/src/styles.css et
      radar/frontend/index.html (thème sombre par défaut là-bas). */
   --bg: #1A1A2E; --surface: #21213A; --surface2: #292948; --border: #35355A; --border-soft: #26263E;
-  --accent: #3B3BF9; --accent-light: #5C5CFB; --accent-dim: rgba(59,59,249,0.16);
+  --accent: #2E5CE0; --accent-light: #5C82F0; --accent-dim: rgba(46,92,224,0.16);
   --text: #FFFFFF; --text-dim: #8295B5; --text-muted: #54678A;
   --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
   --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);

@@ -4,18 +4,24 @@
    ========================================== */
 
 :root {
-  /* Accent = indigo du site (#3B3BF9), utilisé uniquement pour les boutons /
-     contrôles interactifs (jamais en fond de grande surface — c'est ce qui
-     donnait l'impression "trop violet" avant). Même valeur que
+  /* Accent = #2E5CE0. L'indigo exact du site (#3B3BF9, R=G=59) est
+     mathématiquement "bleu" mais perceptuellement se lit comme violet/
+     périwinkle dès qu'il couvre une vraie surface (bouton plein, logo en
+     gras) — vérifié en direct sur le déploiement (retour Donatien). #2E5CE0
+     garde le même esprit vif/saturé mais avec le vert (G) clairement en
+     retrait du bleu (B), ce qui le lit sans ambiguïté comme "bleu" — même
+     écart de teinte que l'ancien bleu générique (#2563EB) qui n'avait
+     jamais posé ce problème. Utilisé uniquement pour les boutons/contrôles
+     interactifs, jamais en fond de grande surface. Même valeur que
      recouvrement/frontend/index.html (--accent) : ce fichier-ci garde
      --om-blue par cohérence avec le reste du code existant. Les fonds/
      bordures, eux, suivent #1A1A2E (bleu nuit du site openmedias.fr), en
      rampe de gris-bleu neutre plutôt qu'une teinte plus bleutée inventée —
      mêmes valeurs partagées avec recouvrement/planning (thème sombre) et
      radar/frontend/index.html. */
-  --om-blue: #3B3BF9;
-  --om-blue-light: #5C5CFB;
-  --om-blue-lighter: #8A8AFD;
+  --om-blue: #2E5CE0;
+  --om-blue-light: #5C82F0;
+  --om-blue-lighter: #8AA8F5;
   --bg: #1A1A2E;
   --panel: #21213A;
   --panel-2: #292948;
@@ -63,7 +69,7 @@ body {
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(1200px 600px at 50% -10%, rgba(59, 59, 249, 0.3), transparent),
+    radial-gradient(1200px 600px at 50% -10%, rgba(46, 92, 224, 0.3), transparent),
     var(--bg);
   padding: 24px;
 }
@@ -641,7 +647,7 @@ body {
 .filter-menu::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .period-btn.filter-active {
   border-color: var(--om-blue);
-  background: rgba(59, 59, 249, 0.12);
+  background: rgba(46, 92, 224, 0.12);
 }
 /* ==========================================
    REFONTE DESIGN — Command Center polish
@@ -670,7 +676,7 @@ body {
   display: inline-flex; align-items: center; gap: 8px;
 }
 .controls-group .period-btn.filter-active {
-  border-color: var(--om-blue); background: rgba(59, 59, 249, 0.12);
+  border-color: var(--om-blue); background: rgba(46, 92, 224, 0.12);
 }
 .topbar-divider {
   width: 1px; height: 26px; background: var(--border); margin: 0 12px;
@@ -780,8 +786,8 @@ body {
 [data-theme="light"] .modal { box-shadow: 0 40px 100px rgba(22, 22, 60, 0.25); }
 [data-theme="light"] .period-menu { box-shadow: 0 20px 60px rgba(22, 22, 60, 0.16); }
 [data-theme="light"] .kpi.glow-blue {
-  background: linear-gradient(160deg, rgba(59, 59, 249, 0.08), var(--panel) 60%);
-  border-color: rgba(59, 59, 249, 0.25);
+  background: linear-gradient(160deg, rgba(46, 92, 224, 0.08), var(--panel) 60%);
+  border-color: rgba(46, 92, 224, 0.25);
 }
 [data-theme="light"] .toprank { color: var(--text-soft); }
 [data-theme="light"] .toprow:nth-child(1) .toprank { color: #fff; }
@@ -875,7 +881,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   border-radius: 7px; padding: 4px 9px; font-size: 11px; font-weight: 700;
   cursor: pointer; font-family: var(--font-body); transition: background 0.15s, color 0.15s;
 }
-.set-team-btn:hover:not(:disabled) { background: rgba(59, 59, 249, 0.12); color: var(--om-blue-light); }
+.set-team-btn:hover:not(:disabled) { background: rgba(46, 92, 224, 0.12); color: var(--om-blue-light); }
 .set-team-btn:disabled { opacity: 0.5; cursor: default; }
 .set-team-icon { padding: 4px 8px; }
 .set-team-danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.12); color: #f87171; }
@@ -904,12 +910,12 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 }
 .set-showall {
   width: 100%; margin-bottom: 12px;
-  background: rgba(59, 59, 249, 0.12); border: 1px solid var(--om-blue);
+  background: rgba(46, 92, 224, 0.12); border: 1px solid var(--om-blue);
   color: var(--om-blue-light); border-radius: 10px; padding: 9px;
   font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--font-body);
   transition: background 0.15s;
 }
-.set-showall:hover { background: rgba(59, 59, 249, 0.2); }
+.set-showall:hover { background: rgba(46, 92, 224, 0.2); }
 [data-theme="light"] .set-showall { color: var(--om-blue); }
 .set-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -944,7 +950,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 /* ===== Onglet BDC actif + lien Voir tout ===== */
 .bdc-stat.active {
   border-color: var(--om-blue);
-  background: rgba(59, 59, 249, 0.10);
+  background: rgba(46, 92, 224, 0.10);
 }
 .see-all.linky { cursor: pointer; transition: color 0.15s; }
 .see-all.linky:hover { color: var(--om-blue-light); }
@@ -973,7 +979,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-body);
   transition: border-color 0.15s, background 0.15s;
 }
-.adm-theme.active { border-color: var(--om-blue); background: rgba(59, 59, 249, 0.10); }
+.adm-theme.active { border-color: var(--om-blue); background: rgba(46, 92, 224, 0.10); }
 .adm-input {
   width: 100%; box-sizing: border-box;
   background: var(--panel-2); border: 1px solid var(--border);
@@ -1100,7 +1106,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   cursor: pointer; font-family: var(--font-body);
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.adm-chip:hover { border-color: var(--om-blue); color: var(--text); background: rgba(59, 59, 249, 0.06); }
+.adm-chip:hover { border-color: var(--om-blue); color: var(--text); background: rgba(46, 92, 224, 0.06); }
 .adm-chip:active { transform: scale(0.96); }
 
 /* ==========================================
@@ -1111,7 +1117,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .tv-root {
   position: fixed; inset: 0; z-index: 4000;
   background:
-    radial-gradient(1400px 700px at 50% -15%, rgba(59, 59, 249, 0.10), transparent),
+    radial-gradient(1400px 700px at 50% -15%, rgba(46, 92, 224, 0.10), transparent),
     var(--bg);
   color: var(--text);
   padding: clamp(18px, 3vh, 40px) clamp(24px, 4vw, 64px);
