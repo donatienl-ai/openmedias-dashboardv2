@@ -1,7 +1,6 @@
 import MonthlyObjectiveDialog from './components/MonthlyObjectiveDialog';
 import Login from './components/Login';
 import Kpi from './components/Kpi';
-import DataGuide from './components/DataGuide';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
@@ -1384,7 +1383,6 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   if (loading && !data) {
     return (
       <div className="shell">
-      {showObjectiveEditor && <MonthlyObjectiveDialog value={monthlyObjective} save={saveMonthlyObjective} close={() => setShowObjectiveEditor(false)} />}
         <div className="loading-wrap">
           <div className="spinner" />
           <div>Chargement des données…</div>
@@ -2001,6 +1999,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   return (
     <div className="shell">
+      {showObjectiveEditor && <MonthlyObjectiveDialog value={monthlyObjective} save={saveMonthlyObjective} close={() => setShowObjectiveEditor(false)} />}
       {/* TOPBAR — barre d'identité sticky (app-switch + marque), même
           traitement que le header du planning. Les filtres/actions vivent
           maintenant dans .dash-toolbar juste en dessous (2e bande, non
@@ -2181,7 +2180,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
       )}
 
-      <DataGuide data={d} />
+
 
       <div className="dash-blocks">
         {visibleBlockOrder.map((blockId, idx) => {
