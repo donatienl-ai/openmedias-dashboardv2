@@ -3,7 +3,7 @@
 //  Auth via Personal Access Token (Bearer)
 // ==========================================
 import fetch from 'node-fetch';
-import { matchSale, buildFullList } from './roster.js';
+import { matchSale, matchSaleStrict, buildFullList } from './roster.js';
 import { createWideningCache } from './rawDataCache.js';
 
 function authHeader() {
@@ -105,7 +105,7 @@ export async function getUpcomingRdvForHost({ end, displayName }) {
 function groupByHost(records) {
   const map = new Map();
   for (const r of records) {
-    const name = matchSale(r.hostRaw) || 'Inconnu';
+    const name = matchSaleStrict(r.hostRaw) || 'Inconnu';
     const entry = map.get(name) || { count: 0 };
     entry.count += 1;
     map.set(name, entry);

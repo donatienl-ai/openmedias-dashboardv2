@@ -196,6 +196,25 @@ export function matchSale(rawName) {
 }
 
 /**
+ * Comme matchSale, mais ne renvoie JAMAIS le nom brut : null si aucun
+ * commercial du roster ne correspond réellement. À utiliser partout où le
+ * nom sert de clé d'agrégation par commercial (CA, calls, RDV, BDC...) —
+ * sans ça, une personne sans compte dashboard (ex-collaborateur, agent
+ * Aircall externe, faute de frappe côté Salesforce...) apparaît comme un
+ * commercial à part entière dans les graphes "par commercial" au lieu
+ * d'être regroupée avec les appels/dossiers non attribués (cf. l'écart
+ * remonté sur "Calls par commercial" : un nom hors roster affichait sa
+ * propre barre à côté des vrais commerciaux). Même logique que
+ * resolveDisplayName (scopeByCommercial.js), généralisée ici.
+ */
+export function matchSaleStrict(rawName) {
+  const matched = resolveSaleName(rawName, getRoster());
+  if (!matched) return null;
+  const rosterDisplays = new Set(getRoster().map((s) => s.display));
+  return rosterDisplays.has(matched) ? matched : null;
+}
+
+/**
  * Construit la liste complète : tous les sales du roster avec leur valeur,
  * 0 pour ceux absents de `dataMap`. dataMap = Map(displayName -> {count, amount}).
  * Renvoie un tableau trié par valeur décroissante (puis alphabétique).

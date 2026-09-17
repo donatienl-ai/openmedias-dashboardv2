@@ -5,7 +5,7 @@
 // ==========================================
 import fetch from 'node-fetch';
 import crypto from 'crypto';
-import { matchSale, buildFullList } from './roster.js';
+import { matchSaleStrict, buildFullList } from './roster.js';
 import { createWideningCache } from './rawDataCache.js';
 
 // Hôte OAuth : account.docusign.com (prod) / account-d.docusign.com (demo)
@@ -171,7 +171,7 @@ async function listEnvelopesRaw({ start, end }, fromToStatus) {
 function groupBySender(records) {
   const map = new Map();
   for (const r of records) {
-    const name = matchSale(r.senderRaw) || 'Inconnu';
+    const name = matchSaleStrict(r.senderRaw) || 'Inconnu';
     const entry = map.get(name) || { count: 0 };
     entry.count += 1;
     map.set(name, entry);

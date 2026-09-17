@@ -3,7 +3,7 @@
 //  Auth via OAuth Client Credentials Flow
 // ==========================================
 import fetch from 'node-fetch';
-import { matchSale, buildFullList } from './roster.js';
+import { matchSale, matchSaleStrict, buildFullList } from './roster.js';
 import { toSoqlDate, toSoqlDateTime } from './dateRange.js';
 import { createWideningCache } from './rawDataCache.js';
 
@@ -88,7 +88,7 @@ async function queryAll(soql) {
 function groupByOwner(records, withAmount) {
   const map = new Map();
   for (const r of records) {
-    const owner = matchSale(r.owner) || 'Inconnu';
+    const owner = matchSaleStrict(r.owner) || 'Inconnu';
     const entry = map.get(owner) || { count: 0, amount: 0 };
     entry.count += 1;
     if (withAmount) entry.amount += r.amount || 0;

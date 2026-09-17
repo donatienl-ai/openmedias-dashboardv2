@@ -4,7 +4,7 @@
 //  Pagination robuste : 100/page, retry sur rate limit, plafond 50k
 // ==========================================
 import fetch from 'node-fetch';
-import { matchSale, buildFullList } from './roster.js';
+import { matchSale, matchSaleStrict, buildFullList } from './roster.js';
 import { toUnix } from './dateRange.js';
 
 function authHeader() {
@@ -266,7 +266,7 @@ export async function getCalls({ start, end }) {
   let totalOutbound = 0;
   for (const c of calls) {
     if (c.inbound) totalInbound += 1; else totalOutbound += 1;
-    const name = matchSale(c.user) || 'Inconnu';
+    const name = matchSaleStrict(c.user) || 'Inconnu';
     const e = map.get(name) || { count: 0, inbound: 0, outbound: 0 };
     e.count += 1;
     if (c.inbound) e.inbound += 1; else e.outbound += 1;
