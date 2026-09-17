@@ -14,7 +14,8 @@
     "deploy": "node scripts/deploy.mjs",
     "test:radar": "node radar/scraper/tests/test_front.mjs",
     "test:radar:scraper": "python radar/scraper/tests/test_scraper.py",
-    "test:planning": "node planning/frontend/tests/test_month_nav.mjs"
+    "test:planning": "node planning/frontend/tests/test_month_nav.mjs",
+    "test:data": "node --test scripts/test-data-quality.mjs"
   },
   "engines": {
     "node": "20.x"

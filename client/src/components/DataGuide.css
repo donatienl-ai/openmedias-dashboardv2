@@ -1,0 +1,16 @@
+.data-guide { margin: 0 0 22px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); }
+.data-guide summary { padding: 14px 18px; cursor: pointer; font-weight: 600; line-height: 1.6; }
+.data-guide-state { float: right; color: var(--text-soft); font-size: 12px; font-weight: 400; }
+.data-guide-state.is-warning, .data-guide-warning { color: var(--amber); }
+.data-guide-body { padding: 0 18px 18px; font-size: 13px; line-height: 1.6; }
+.data-guide-body > p { margin: 10px 0; }
+.data-source-list { list-style: none; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; margin: 14px 0; }
+.data-source-list li { background: var(--panel-2); padding: 12px; border-radius: 8px; }
+.data-source-list strong, .data-source-list span { display: block; }
+.data-source-list span, .data-guide-note { color: var(--text-soft); }
+.data-guide dl > div { border-top: 1px solid var(--border); padding: 12px 0; }
+.data-guide dt { font-weight: 700; }
+.data-guide dt span { margin-left: 8px; font-size: 11px; color: var(--text-soft); font-weight: 400; }
+.data-guide dd { margin-top: 4px; color: var(--text-soft); }
+.data-guide summary:focus-visible { outline: 3px solid var(--om-blue-light); outline-offset: 3px; }
+@media (max-width:640px) { .data-guide-state { float: none; display: block; } .data-source-list { grid-template-columns: 1fr; } }

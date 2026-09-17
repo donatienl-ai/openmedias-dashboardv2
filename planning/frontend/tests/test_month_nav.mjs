@@ -1,3 +1,4 @@
+import { loadStandalone } from '../../../scripts/loadStandalone.mjs';
 /* ============================================================================
    TESTS — sélecteur de mois unique du planning
    ============================================================================
@@ -16,7 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const HTML = readFileSync(join(HERE, "..", "index.html"), "utf8");
+const HTML = loadStandalone(join(HERE, "..", "index.html"));
 
 const PASS = [];
 const FAIL = [];

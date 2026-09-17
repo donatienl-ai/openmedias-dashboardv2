@@ -1,3 +1,4 @@
+import { loadStandalone } from '../../../scripts/loadStandalone.mjs';
 /* ============================================================================
    TESTS FRONT — index.html chargé pour de vrai dans jsdom
    ============================================================================
@@ -20,7 +21,7 @@ import { tmpdir } from "node:os";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");      // radar/scraper
 const FRONTEND = join(ROOT, "..", "frontend");                          // radar/frontend
-const HTML = readFileSync(join(FRONTEND, "index.html"), "utf8");
+const HTML = loadStandalone(join(FRONTEND, "index.html"));
 
 const PASS = [];
 const FAIL = [];
@@ -98,7 +99,7 @@ records = [{"url": u} for u in blob["urls"]]
 cache = dict(zip(blob["urls"], blob["vectors"]))
 write_embeddings(${JSON.stringify(out)}, records, cache)
 `;
-  execFileSync("python3", ["-c", script], { stdio: "pipe" });
+  execFileSync(process.env.PYTHON || (process.platform === "win32" ? "python" : "python3"), ["-X", "utf8", "-c", script], { stdio: "pipe" });
   return readFileSync(out, "utf8");
 }
 
@@ -475,7 +476,7 @@ async function testDesignTokenParity() {
   }
 
   // Polices : même déclaration de famille
-  ok("DA : Sora en police d'affichage", /--font-display:\s*'Sora'/.test(radar));
+  ok("DA : Baloo 2 en police d'affichage", /--font-display:\s*'Baloo 2'/.test(radar));
   ok("DA : Inter en police de texte", /--font-body:\s*'Inter'/.test(radar));
 
   // Contrat de thème partagé entre les trois apps

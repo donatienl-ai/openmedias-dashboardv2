@@ -1,3 +1,4 @@
+import { resolveSaleName, completeRosterRows } from './nameMatching.js';
 // ==========================================
 //  ROSTER DES COMMERCIAUX OPENMEDIAS
 //  Fusionne deux sources (voir loadRosterFromDb) :
@@ -191,12 +192,7 @@ export function getRoster() {
  * Renvoie le `display` du roster, ou le nom brut tel quel si pas de match.
  */
 export function matchSale(rawName) {
-  const norm = normalize(rawName);
-  if (!norm) return null;
-  const found = getRoster().find(
-    (s) => norm.includes(s.last) || (s.aliases || []).some((a) => norm.includes(normalize(a)))
-  );
-  return found ? found.display : rawName;
+  return resolveSaleName(rawName, getRoster());
 }
 
 /**
@@ -205,18 +201,5 @@ export function matchSale(rawName) {
  * Renvoie un tableau trié par valeur décroissante (puis alphabétique).
  */
 export function buildFullList(dataMap, withAmount = false) {
-  const rows = getRoster().map((s) => {
-    const entry = dataMap.get(s.display) || {};
-    // On propage tous les champs de l'entrée (ex: inbound/outbound pour les calls)
-    const base = { name: s.display, ...entry, count: entry.count || 0 };
-    if (withAmount) base.amount = entry.amount || 0;
-    return base;
-  });
-  rows.sort((a, b) => {
-    const va = withAmount ? a.amount : a.count;
-    const vb = withAmount ? b.amount : b.count;
-    if (vb !== va) return vb - va;
-    return a.name.localeCompare(b.name);
-  });
-  return rows;
+  return completeRosterRows(dataMap, getRoster(), withAmount);
 }

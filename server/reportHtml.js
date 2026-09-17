@@ -25,11 +25,7 @@ const C = {
 };
 
 // Masqués par défaut dans le reporting (aligné sur le défaut du dashboard)
-const HIDDEN = new Set([
-  'Romy ABDEN', 'Clauvaine Battery', 'Tim Cattiaux', 'Louis Hubert',
-  'Thomas Jallais', 'Thaivin Jousselin', 'Donatien LEFEBURE', 'Yanis Mehal',
-  'François Millet', 'Theo Molina', 'Fouad Senhadji', 'Rémi Simon',
-]);
+const HIDDEN = new Set(); // Vue globale : aucun masquage historique implicite.
 
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 
@@ -146,7 +142,7 @@ function pctDelta(cur, prev) {
   return prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
 }
 function buildAnomalies(data, compare) {
-  if (!compare) return '';
+  if (!compare || data.errors || compare.errors) return ''; // Pas de variations calculées sur une source indisponible.
   const rdvPrisCur = (data.rdvBooked?.r1?.total || 0) + (data.rdvBooked?.r2?.total || 0);
   const rdvPrisPrev = (compare.rdvBooked?.r1?.total || 0) + (compare.rdvBooked?.r2?.total || 0);
   const propalsCur = (data.propals?.total || 0) + (data.propalsComptes?.total || 0);
@@ -155,8 +151,8 @@ function buildAnomalies(data, compare) {
   const metrics = [
     { label: 'Calls', cur: data.calls?.total || 0, prev: compare.calls?.total || 0, min: 5 },
     { label: 'RDV pris', cur: rdvPrisCur, prev: rdvPrisPrev, min: 3 },
-    { label: 'Propals', cur: propalsCur, prev: propalsPrev, min: 3 },
-    { label: 'Signatures', cur: data.signatures?.total || 0, prev: compare.signatures?.total || 0, min: 1 },
+    { label: 'Propositions suivies', cur: propalsCur, prev: propalsPrev, min: 3 },
+    { label: 'Ventes gagnées', cur: data.signatures?.total || 0, prev: compare.signatures?.total || 0, min: 1 },
     { label: 'CA', cur: data.revenue?.totalAmount || 0, prev: compare.revenue?.totalAmount || 0, min: 500, isAmount: true },
   ];
 
@@ -187,6 +183,7 @@ function buildAnomalies(data, compare) {
 }
 
 export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light', preset = 'today', range = null, compare = null }) {
+  const unavailable = (...keys) => keys.some(key => data.errors?.[key]);
   const dark = theme === 'dark';
   const isToday = preset === 'today';
   // Texte de période pour les libellés ("du jour" / "hier" / label de plage)
@@ -250,11 +247,11 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
 
         <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.zoneLbl};text-transform:uppercase;font-family:${FONT};padding:18px 0 6px;">Activité ${periodTxt}</div>
         <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-          ${kpiChipP(P, 'Calls', calls.truncated ? `${fmt(calls.total)}+` : calls.total, `${callsOut} out · ${callsIn} in`, P.accBlue)}
-          ${kpiChipP(P, 'R1', r1.total, 'échanges', P.accGreen)}
-          ${kpiChipP(P, 'R2', r2.total, 'retours', P.accCyan)}
-          ${kpiChipP(P, 'R1 pris', r1p.total, 'bookés', P.accAmber)}
-          ${kpiChipP(P, 'R2 pris', r2p.total, 'bookés', P.accAmber)}
+          ${kpiChipP(P, 'Calls', unavailable('calls') ? '—' : calls.truncated ? `${fmt(calls.total)}+` : calls.total, `${callsOut} out · ${callsIn} in`, P.accBlue)}
+          ${kpiChipP(P, 'R1', unavailable('rdvToday') ? '—' : r1.total, 'programmés', P.accGreen)}
+          ${kpiChipP(P, 'R2', unavailable('rdvToday') ? '—' : r2.total, 'programmés', P.accCyan)}
+          ${kpiChipP(P, 'R1 pris', unavailable('rdvBooked') ? '—' : r1p.total, 'bookés', P.accAmber)}
+          ${kpiChipP(P, 'R2 pris', unavailable('rdvBooked') ? '—' : r2p.total, 'bookés', P.accAmber)}
         </tr></table>
 
         <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.zoneLbl};text-transform:uppercase;font-family:${FONT};padding:14px 0 6px;">Résultats ${periodTxt}</div>
@@ -262,8 +259,8 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
           <td width="50%" style="padding:3px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
               <td style="background-color:${P.chipBg};border:1px solid ${P.chipBorder};border-radius:10px;padding:14px 12px;text-align:center;">
-                <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.accOrange};text-transform:uppercase;font-family:${FONT};">Propals</div>
-                <div style="font-size:26px;font-weight:800;color:${P.chipVal};font-family:${FONT};padding:2px 0;">${propalsTotal}</div>
+                <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.accOrange};text-transform:uppercase;font-family:${FONT};">Propositions suivies</div>
+                <div style="font-size:26px;font-weight:800;color:${P.chipVal};font-family:${FONT};padding:2px 0;">${unavailable('propals','propalsComptes') ? '—' : propalsTotal}</div>
                 <div style="font-size:9px;color:${P.chipSub};font-family:${FONT};">${propals.total} pistes · ${propalsComptes.total} comptes</div>
               </td>
             </tr></table>
@@ -271,8 +268,8 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
           <td width="50%" style="padding:3px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
               <td style="background-color:${P.chipBg};border:1px solid ${C.blue};border-radius:10px;padding:14px 12px;text-align:center;">
-                <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.accBlue};text-transform:uppercase;font-family:${FONT};">Signatures</div>
-                <div style="font-size:26px;font-weight:800;color:${P.chipVal};font-family:${FONT};padding:2px 0;">${sig.total}</div>
+                <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:${P.accBlue};text-transform:uppercase;font-family:${FONT};">Ventes gagnées</div>
+                <div style="font-size:26px;font-weight:800;color:${P.chipVal};font-family:${FONT};padding:2px 0;">${unavailable('signatures') ? '—' : sig.total}</div>
                 <div style="font-size:9px;color:${P.chipSub};font-family:${FONT};">${isToday ? 'du jour' : periodTxt}</div>
               </td>
             </tr></table>
@@ -283,10 +280,10 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
           <td style="background-color:${C.blue};background:linear-gradient(135deg,${C.blue},${C.blueLight});border-radius:12px;padding:16px 20px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
               <td>
-                <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:#DBEAFE;text-transform:uppercase;font-family:${FONT};">💰 CA réalisé · ${esc(monthLabel)}</div>
+                <div style="font-size:9px;letter-spacing:2px;font-weight:700;color:#DBEAFE;text-transform:uppercase;font-family:${FONT};">💰 CA gagné · ${esc(monthLabel)}</div>
                 <div style="font-size:10px;color:#BFDBFE;font-family:${FONT};padding-top:2px;">Cumul des deals signés depuis le 1er du mois</div>
               </td>
-              <td style="font-size:26px;font-weight:800;color:${C.white};text-align:right;font-family:${FONT};white-space:nowrap;">${fmt(caMonth.totalAmount)} €</td>
+              <td style="font-size:26px;font-weight:800;color:${C.white};text-align:right;font-family:${FONT};white-space:nowrap;">${unavailable('monthRevenue') ? '—' : fmt(caMonth.totalAmount)} €</td>
             </tr></table>
           </td>
         </tr></table>
@@ -317,12 +314,12 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
   );
 
   const propalsSection = twoColSection(
-    miniList({ emoji: '📄', title: `Propals Pistes · ${propals.total}`, color: C.orange, bg: '#FFF7ED', rows: active(propals.detail), valueFn: (r) => r.count, emptyText: 'Aucune propal piste' }),
+    miniList({ emoji: '📄', title: `Propositions suivies — pistes · ${propals.total}`, color: C.orange, bg: '#FFF7ED', rows: active(propals.detail), valueFn: (r) => r.count, emptyText: 'Aucune propal piste' }),
     miniList({ emoji: '🏢', title: `Propositions Comptes · ${propalsComptes.total}`, color: C.amber, bg: '#FFFBEB', rows: active(propalsComptes.detail), valueFn: (r) => r.count, emptyText: 'Aucune proposition compte' })
   );
 
   // Signatures : carte navy, lignes blanches
-  let sigInner = sectionLabel('✍️', `Signatures ${periodTxt}`, C.blue, '#EFF6FF');
+  let sigInner = sectionLabel('✍️', `Ventes gagnées ${periodTxt}`, C.blue, '#EFF6FF');
   const sigRows = active(sig.detail, true);
   if (sigRows.length === 0) {
     sigInner += emptyBox('Aucune signature sur la période');
@@ -363,10 +360,10 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
   const bdcSection = card(bdcInner);
 
   const caSection = listSection({
-    emoji: '💰', title: `CA ${esc(monthLabel)} — détail par sales`, color: C.blue, bg: '#EFF6FF',
+    emoji: '💰', title: `CA gagné ${esc(monthLabel)} — détail par sales`, color: C.blue, bg: '#EFF6FF',
     rows: active(caMonth.detail, true),
     valueFn: (r) => `${fmt(r.amount)} €`,
-    totalLabel: 'Total équipe', totalValue: `${fmt(caMonth.totalAmount)} €`,
+    totalLabel: 'Total équipe', totalValue: `${unavailable('monthRevenue') ? '—' : fmt(caMonth.totalAmount)} €`,
     emptyText: 'Aucun CA ce mois-ci', head: ['Commercial', 'CA'],
   });
 
@@ -399,15 +396,16 @@ export function buildReportHtml({ data, monthRevenue, monthLabel, theme = 'light
     <tr><td align="center" style="padding:24px 12px;">
       <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;">
         ${hero}
+        <tr><td style="padding:12px;font-size:12px;color:#50628A;font-family:Arial,sans-serif;">CA gagné : opportunités Salesforce par date de clôture. Propositions suivies : statuts actuels modifiés sur la période, sans historique exact des envois. Vue globale sans masquage individuel.${data.errors ? ' Certaines sources sont indisponibles : les sections concernées sont masquées.' : ''}</td></tr>
         ${anomalyCard}
-        ${callsSection}
-        ${rdvSection}
-        ${rdvPrisSection}
-        ${propalsSection}
-        ${sigSection}
-        ${bdcSection}
-        ${caSection}
-        ${sfSection}
+        ${unavailable('calls') ? '' : callsSection}
+        ${unavailable('rdvToday') ? '' : rdvSection}
+        ${unavailable('rdvBooked') ? '' : rdvPrisSection}
+        ${unavailable('propals','propalsComptes') ? '' : propalsSection}
+        ${unavailable('signatures') ? '' : sigSection}
+        ${unavailable('bdc') ? '' : bdcSection}
+        ${unavailable('monthRevenue') ? '' : caSection}
+        ${unavailable('salesforge') ? '' : sfSection}
         ${footer}
       </table>
     </td></tr>

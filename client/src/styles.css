@@ -144,21 +144,7 @@ body {
    l'impression de deux écrans recollés. Mêmes noms de classe que côté
    planning (planning/frontend/index.html) pour une apparence identique des
    deux côtés du portail. */
-.app-switch {
-  display: inline-flex; align-items: center; gap: 2px;
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 13px; padding: 4px;
-}
-.app-switch-btn {
-  background: none; border: none; color: var(--text-soft);
-  font-family: var(--font-display); font-size: 13px; font-weight: 700;
-  padding: 7px 16px; border-radius: 9px; cursor: pointer; white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
-}
-.app-switch-btn:hover { color: var(--text); }
-.app-switch-btn.active { background: var(--om-blue); color: #fff; cursor: default; }
 @media (max-width: 640px) {
-  .app-switch { width: 100%; }
-  .app-switch-btn { flex: 1; text-align: center; }
 }
 
 /* ===== TOPBAR =====

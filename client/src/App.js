@@ -1,3 +1,7 @@
+import MonthlyObjectiveDialog from './components/MonthlyObjectiveDialog';
+import Login from './components/Login';
+import Kpi from './components/Kpi';
+import DataGuide from './components/DataGuide';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
@@ -32,7 +36,7 @@ const HIDDEN_BLOCKS_FOR_COMMERCIAL = ['activite', 'classements', 'objectifs', 'n
 const BLOCK_LABELS = {
   hero: 'KPI principaux',
   money: 'CA + Signatures',
-  ca12mois: 'CA — 12 mois glissants',
+  ca12mois: 'CA gagné — 12 mois glissants',
   activite: 'Activité (Calls, RDV pris, BDC)',
   classements: 'Classements (Propals, RDV, SalesForge)',
   objectifs: 'Objectifs individuels',
@@ -58,169 +62,6 @@ function isAdminCred(cred) {
 }
 
 // ---------- LOGIN ----------
-function Login({ onSuccess }) {
-  const [mode, setMode] = useState('commercial'); // 'commercial' (par défaut) ou 'legacy'
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  // Repliés dans un seul disclosure (voir plus bas) : avant, le switch
-  // "Mot de passe unique (admin)" (bouton souligné) et le lien "Accès édito
-  // par code" (lien souligné à l'opacité différente) étaient posés l'un sous
-  // l'autre sans traitement commun, comme deux échappatoires sans lien visuel.
-  const [showMoreOptions, setShowMoreOptions] = useState(false);
-  // Mot de passe oublié : mini-formulaire (email seul) plutôt qu'un écran à
-  // part — endpoint monté sous /planning (routeur planning/backend/router.js,
-  // partagé avec les comptes du planning), d'où le chemin absolu ci-dessous
-  // au lieu du chemin relatif 'api/...' utilisé pour les routes propres à ce
-  // serveur racine.
-  const [showForgot, setShowForgot] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotMsg, setForgotMsg] = useState('');
-  const [forgotLoading, setForgotLoading] = useState(false);
-
-  const submitForgot = async () => {
-    if (!forgotEmail.trim()) { setForgotMsg('Email requis.'); return; }
-    setForgotLoading(true); setForgotMsg('');
-    try {
-      const res = await fetch('/planning/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: forgotEmail.trim() }),
-      });
-      const data = await res.json().catch(() => ({}));
-      // Avant : res.ok n'était jamais vérifié, donc une erreur (400, ou 429
-      // si la limite de fréquence est atteinte) affichait quand même le
-      // message de succès générique (data.message undefined -> fallback)
-      // au lieu de prévenir l'utilisateur que sa demande a été rejetée.
-      setForgotMsg(!res.ok
-        ? (data.error || 'Une erreur est survenue.')
-        : (data.message || 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.'));
-    } catch {
-      setForgotMsg('Erreur réseau.');
-    } finally { setForgotLoading(false); }
-  };
-
-  const submit = async () => {
-    setLoading(true); setError('');
-    try {
-      const body = mode === 'legacy' ? { password } : { email, password };
-      const res = await fetch('api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && mode === 'legacy') {
-        onSuccess({ mode: 'legacy', password });
-      } else if (res.ok) {
-        onSuccess({ mode: 'commercial', commercialId: data.commercialId, nom: data.nom, isAdmin: !!data.isAdmin, role: data.role, teamId: data.teamId });
-      } else {
-        setError(data.error || 'Identifiants incorrects');
-      }
-    } catch {
-      setError('Erreur de connexion au serveur');
-    } finally { setLoading(false); }
-  };
-
-  if (showForgot) {
-    return (
-      <div className="login-wrap">
-        <div className="login-card">
-          <div className="brand-mark" style={{ marginBottom: 14 }} />
-          <div className="login-eyebrow">OpenMedias · Sales Dashboard</div>
-          <div className="login-title">Mot de passe<br />oublié</div>
-          <input
-            className="login-input" type="email" placeholder="Email du compte"
-            value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submitForgot()} autoFocus
-          />
-          <button className="login-btn" onClick={submitForgot} disabled={forgotLoading}>
-            {forgotLoading ? 'Envoi…' : 'Envoyer le lien'}
-          </button>
-          {forgotMsg && <div className="login-hint">{forgotMsg}</div>}
-          <button
-            className="login-link-btn"
-            onClick={() => { setShowForgot(false); setForgotMsg(''); setForgotEmail(''); }}
-            style={{ marginTop: 14 }}
-          >
-            ← Retour à la connexion
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="login-wrap">
-      <div className="login-card">
-        <div className="brand-mark" style={{ marginBottom: 14 }} />
-        <div className="login-eyebrow">OpenMedias · Sales Dashboard</div>
-        <div className="login-title">Performance<br />Commerciale</div>
-        {mode === 'commercial' ? (
-          <>
-            <input
-              className="login-input" type="email" placeholder="Email"
-              value={email} onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus
-            />
-            <input
-              className="login-input" type="password" placeholder="Mot de passe"
-              value={password} onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submit()}
-              style={{ marginTop: 8 }}
-            />
-          </>
-        ) : (
-          <input
-            className="login-input" type="password" placeholder="Mot de passe"
-            value={password} onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submit()} autoFocus
-          />
-        )}
-        <button className="login-btn" onClick={submit} disabled={loading}>
-          {loading ? 'Connexion…' : 'Accéder au dashboard'}
-        </button>
-        {error && <div className="login-error">{error}</div>}
-        {mode === 'commercial' && (
-          <button
-            className="login-link-btn"
-            onClick={() => { setShowForgot(true); setError(''); }}
-            style={{ marginTop: 12 }}
-          >
-            Mot de passe oublié ?
-          </button>
-        )}
-        {/* Options de secours (mot de passe unique admin, ancien accès par
-            code) repliées dans un seul disclosure au même traitement visuel
-            — avant, un bouton souligné et un lien souligné à une autre
-            opacité cohabitaient sans rien qui les présente comme la même
-            catégorie "solutions de repli". */}
-        <button
-          className="login-link-btn"
-          onClick={() => setShowMoreOptions((o) => !o)}
-          style={{ marginTop: mode === 'commercial' ? 6 : 12 }}
-        >
-          Autres options de connexion {showMoreOptions ? '▴' : '▾'}
-        </button>
-        {showMoreOptions && (
-          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <button
-              className="login-link-btn"
-              onClick={() => { setMode((m) => (m === 'commercial' ? 'legacy' : 'commercial')); setError(''); }}
-            >
-              {mode === 'commercial' ? 'Mot de passe unique (admin)' : 'Compte commercial (email)'}
-            </button>
-            <a className="login-link-btn" href="/planning?pin=1">
-              Accès édito par code (ancien système)
-            </a>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ---------- MODALE détail ----------
 function DetailModal({ open, title, rows, isAmount, accent, onClose, cmpRows, extraCols }) {
   if (!open) return null;
@@ -287,38 +128,6 @@ function DetailModal({ open, title, rows, isAmount, accent, onClose, cmpRows, ex
 }
 
 // ---------- KPI cliquable (avec métrique secondaire optionnelle) ----------
-function Kpi({ label, value, sub, color, dot, glow, onClick, clickable, secondary, delta }) {
-  return (
-    <div
-      className={`tile kpi ${glow ? 'glow-blue' : ''} col-2 ${clickable ? 'clickable' : ''}`}
-      onClick={onClick}
-    >
-      <div className="kpi-top">
-        <span className="tile-dot" style={{ background: dot }} />
-        <span className={`kpi-label ${color}`}>{label}</span>
-        {delta !== null && delta !== undefined && (
-          <span className={`kpi-delta ${delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat'}`}>
-            {delta > 0 ? '▲' : delta < 0 ? '▼' : '•'} {Math.abs(delta)}%
-          </span>
-        )}
-        {clickable && <span className="kpi-expand">⤢</span>}
-      </div>
-      <div className="kpi-num">{value}</div>
-      <div className="kpi-sub">{sub}</div>
-      {secondary && (
-        <div className="kpi-secondary">
-          {(Array.isArray(secondary) ? secondary : [secondary]).map((sec, i) => (
-            <span className="kpi-sec-item" key={i}>
-              <span className="kpi-sec-dot" style={{ background: sec.dot }} />
-              <span className="kpi-sec-val">{sec.value}</span>
-              <span className="kpi-sec-label">{sec.label}</span>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function TileHead({ dotClass, title, clickable }) {
   return (
@@ -410,7 +219,7 @@ function ConversionFunnel({ stages }) {
       ))}
       {globalRate !== null && (
         <div className="funnel-v3-foot">
-          Conversion globale {stages[0]?.label} → {stages[stages.length - 1]?.label} : <strong>{globalRate}%</strong>
+          Ratio ventes / appels {stages[0]?.label} → {stages[stages.length - 1]?.label} : <strong>{globalRate}%</strong>
         </div>
       )}
     </div>
@@ -953,18 +762,18 @@ function TvView({ password, hiddenSales, onClose, teams = TEAMS }) {
   const dow = now.getDay(); // 0=dim … 6=sam
   const workdaysElapsed = (dow === 0 || dow === 6) ? 5 : dow;
 
-  const statusFor = (name) => (weekSigners.has(name)
+  const statusFor = (name) => (!week || week.errors?.signatures ? { cls: '', emoji: '—', days: 0, unknown: true } : weekSigners.has(name)
     ? { ...SIGN_STATUS.ok, days: 0 }
     : { ...SIGN_STATUS[workdaysElapsed], days: workdaysElapsed });
 
   const agoSec = lastFetch ? Math.round((now.getTime() - lastFetch) / 1000) : null;
 
-  const renderRankCol = (icon, title, rows, accent) => {
+  const renderRankCol = (icon, title, rows, accent, unavailable) => {
     const max = Math.max(1, ...rows.map((r) => r.count));
     return (
       <div className="tv-col">
         <div className="tv-col-head">{icon} {title}</div>
-        {rows.length === 0 ? (
+        {unavailable ? <div className="tv-empty">Source indisponible</div> : rows.length === 0 ? (
           <div className="tv-empty">Aucune donnée</div>
         ) : (
           <div className="tv-rank-list">
@@ -993,30 +802,31 @@ function TvView({ password, hiddenSales, onClose, teams = TEAMS }) {
         </div>
         <div className="tv-head-right">
           <span className="tv-clock">{now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
-          {agoSec !== null && <span className="tv-maj">MAJ il y a {agoSec}s</span>}
+          {agoSec !== null && <span className="tv-maj">Vue reçue il y a {agoSec}s</span>}
           <button className="tv-ctrl" onClick={toggleFullscreen} title="Plein écran">⛶</button>
           <button className="tv-ctrl" onClick={onClose} title="Quitter le mode TV">✕</button>
         </div>
       </div>
 
       {err && <div className="tv-err">Erreur : {err}</div>}
+      {d.errors && <div className="tv-err">Certaines sources sont indisponibles. Les valeurs manquantes sont masquées.</div>}
 
       <div className="tv-teamcards">
         {teamCards.map((tc) => (
           <div className={`tv-teamcard ${tc.accent}`} key={tc.id}>
             <span className="tv-tc-label">{tc.label}</span>
-            <span className="tv-tc-val">{fmt(tc.ca)} €</span>
-            <span className="tv-tc-sub">CA du mois</span>
+            <span className="tv-tc-val">{d.errors?.monthRevenue ? '—' : `${fmt(tc.ca)} €`}</span>
+            <span className="tv-tc-sub">CA gagné du mois</span>
           </div>
         ))}
       </div>
 
       <div className="tv-cols">
-        {renderRankCol('📞', 'Calls du jour', callsRank, 'acc-blue')}
-        {renderRankCol('🤝', 'R1 pris du jour', r1Rank, 'acc-green')}
+        {renderRankCol('📞', 'Calls du jour', callsRank, 'acc-blue', d.errors?.calls)}
+        {renderRankCol('🤝', 'R1 pris du jour', r1Rank, 'acc-green', d.errors?.rdvBooked)}
         <div className="tv-col">
           <div className="tv-col-head">💰 CA du mois</div>
-          {caRows.length === 0 ? (
+          {d.errors?.monthRevenue ? <div className="tv-empty">Source indisponible</div> : caRows.length === 0 ? (
             <div className="tv-empty">Aucune donnée</div>
           ) : (
             <div className="tv-rank-list">
@@ -1029,7 +839,7 @@ function TvView({ password, hiddenSales, onClose, teams = TEAMS }) {
                     <span className="tv-samount">{fmt(r.amount)} €</span>
                     <span
                       className={`tv-badge ${st.cls}`}
-                      title={st.days ? `${st.days} jour(s) ouvré(s) sans signer cette semaine` : 'A signé cette semaine'}
+                      title={st.unknown ? 'Statut Salesforce indisponible' : st.days ? `${st.days} jour(s) ouvré(s) sans signer cette semaine` : 'A signé cette semaine'}
                     >
                       {st.emoji}{st.days ? ` ${st.days}j` : ''}
                     </span>
@@ -1234,7 +1044,7 @@ function MaSemaineModal({ open, onClose, nom, callsTotal, propalsTotal, propalsA
               <div className="funnel-stage-val" style={{ color: '#3B82F6' }}>{fmt(callsTotal)}</div>
             </div>
             <div className="lb-col">
-              <div className="lb-col-title">📄 Propals actives</div>
+              <div className="lb-col-title">📄 Propositions suivies</div>
               <div className="funnel-stage-val" style={{ color: '#F97316' }}>{fmt(propalsTotal)}</div>
               <div className="kpi-sub" style={{ marginTop: 2 }}>{fmt(propalsAmount)} € estimés</div>
             </div>
@@ -1262,6 +1072,9 @@ function MaSemaineModal({ open, onClose, nom, callsTotal, propalsTotal, propalsA
 }
 
 function Dashboard({ password, onLogout, theme, onToggleTheme }) {
+  const [showObjectiveEditor, setShowObjectiveEditor] = useState(false);
+  const [objectiveSaved, setObjectiveSaved] = useState(false);
+  const dashboardRequestId = useRef(0);
   const isAdmin = isAdminCred(password);
   // Rôle du compte connecté, pour adapter les filtres visibles à ce qu'il peut
   // réellement voir — le serveur ne renvoie déjà que ses propres données à un
@@ -1334,14 +1147,16 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   // CA mensuel sur 12 mois glissants (graphique d'évolution, indépendant de la
   // période sélectionnée en haut de page — cf. server /api/revenue-by-month).
   const [monthlyRevenue, setMonthlyRevenue] = useState([]);
+  const [monthlyRevenueError, setMonthlyRevenueError] = useState(false);
   const loadMonthlyRevenue = useCallback(async () => {
     try {
       const r = await fetch('api/revenue-by-month?months=12', { headers: credHeaders(password) });
-      if (r.ok) {
-        const d = await r.json();
-        if (Array.isArray(d.months)) setMonthlyRevenue(d.months);
-      }
-    } catch { /* silencieux */ }
+      if (!r.ok) throw new Error('CA mensuel indisponible');
+      const result = await r.json();
+      if (!Array.isArray(result.months)) throw new Error('Format inattendu');
+      setMonthlyRevenue(result.months);
+      setMonthlyRevenueError(false);
+    } catch { setMonthlyRevenueError(true); }
   }, [password]);
   useEffect(() => { loadMonthlyRevenue(); }, [loadMonthlyRevenue]);
 
@@ -1465,6 +1280,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   };
 
   const load = useCallback(async () => {
+    const requestId = ++dashboardRequestId.current;
     setLoading(true); setError('');
     try {
       const qs = new URLSearchParams({ preset: period.preset });
@@ -1477,10 +1293,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
       });
       if (res.status === 401) { onLogout(); return; }
       if (!res.ok) throw new Error('Erreur serveur');
-      setData(await res.json());
+      const nextData = await res.json();
+      if (requestId === dashboardRequestId.current) setData(nextData);
     } catch (e) {
-      setError(String(e.message || e));
-    } finally { setLoading(false); }
+      if (requestId === dashboardRequestId.current) setError(String(e.message || e));
+    } finally { if (requestId === dashboardRequestId.current) setLoading(false); }
   }, [password, onLogout, period]);
 
   // Fetch newsletter stats (indépendant, non bloquant)
@@ -1567,6 +1384,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   if (loading && !data) {
     return (
       <div className="shell">
+      {showObjectiveEditor && <MonthlyObjectiveDialog value={monthlyObjective} save={saveMonthlyObjective} close={() => setShowObjectiveEditor(false)} />}
         <div className="loading-wrap">
           <div className="spinner" />
           <div>Chargement des données…</div>
@@ -1677,15 +1495,15 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     })
     .sort((a, b) => b.pct - a.pct);
 
-  // ===== Tunnel de conversion Calls → RDV pris → Propal → Signature =====
+  // ===== Volumes d’activité Calls → RDV pris → Propal → Signature =====
   // Aucune nouvelle donnée : les 4 totaux existent déjà (calls, rdvB.r1/r2,
   // propals + propalsComptes, sig) — juste des ratios entre étapes.
   const funnelRate = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null);
   const funnelStages = [
     { label: 'Calls', value: calls.total, color: '#3B82F6' },
     { label: 'RDV pris', value: rdvB.r1.total + rdvB.r2.total, color: '#FBBF24', text: '#713F12' },
-    { label: 'Propals', value: propals.total + propalsComptes.total, color: '#F97316' },
-    { label: 'Signatures', value: sig.total, color: '#8B5CF6' },
+    { label: 'Propositions suivies', value: propals.total + propalsComptes.total, color: '#F97316' },
+    { label: 'Ventes gagnées', value: sig.total, color: '#8B5CF6' },
   ].map((s, i, arr) => ({ ...s, rate: i === 0 ? null : funnelRate(s.value, arr[i - 1].value) }));
 
   // ===== Leaderboard hebdo (Calls / RDV pris / CA), respecte le filtre équipe/masquage =====
@@ -1711,7 +1529,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const now = new Date();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const expectedByNow = monthlyObjective > 0 ? monthlyObjective * (now.getDate() / daysInMonth) : 0;
-  const objectivePct = expectedByNow > 0 ? Math.round((monthRev.totalAmount / expectedByNow) * 100) : null;
+  const objectivePct = !d.errors?.monthRevenue && expectedByNow > 0 ? Math.round((monthRev.totalAmount / expectedByNow) * 100) : null;
   const objectiveStatus = objectivePct === null ? null : objectivePct >= 90 ? 'ok' : objectivePct >= 70 ? 'warn' : 'danger';
 
   // ===== % d'évolution vs période de comparaison (6 KPIs, filtres appliqués) =====
@@ -1728,6 +1546,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     dSig = pct(sig.total, fBlock(cmp.signatures || { total: 0, totalAmount: 0, detail: [] }, true).total);
     dCA = pct(rev.totalAmount, fBlock(cmp.revenue || { totalAmount: 0, detail: [] }, true).totalAmount);
   }
+
+  if (d.errors?.calls || cmp?.errors?.calls) dCalls = null;
+  if (d.errors?.rdvToday || cmp?.errors?.rdvToday) { dR1 = null; dR2 = null; }
+  if (d.errors?.propals || d.errors?.propalsComptes || cmp?.errors?.propals || cmp?.errors?.propalsComptes) dPropals = null;
+  if (d.errors?.signatures || cmp?.errors?.signatures) dSig = null;
+  if (d.errors?.revenue || cmp?.errors?.revenue) dCA = null;
 
   // Totaux calls entrants/sortants (recalculés si filtre ou masquage actif)
   const callsIn = mustRecalc
@@ -1751,16 +1575,17 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   // sortir un chiffre en réunion sans repasser par le reporting email.
   // Respecte les mêmes filtres/masquages que ce qui est affiché à l'écran.
   const exportCsv = () => {
+    if (d.errors) { window.alert('Certaines sources sont indisponibles. Recharge la vue avant d’exporter les chiffres.'); return; }
     const sections = [
       ['Calls', calls, false],
-      ['R1 tenus', rdvT.r1, false],
-      ['R2 tenus', rdvT.r2, false],
+      ['R1 programmés', rdvT.r1, false],
+      ['R2 programmés', rdvT.r2, false],
       ['R1 pris', rdvB.r1, false],
       ['R2 pris', rdvB.r2, false],
-      ['Propals pistes', propals, true],
-      ['Propals comptes', propalsComptes, true],
-      ['Signatures', sig, true],
-      ['CA', rev, true],
+      ['Propositions suivies — pistes', propals, true],
+      ['Propositions suivies — comptes', propalsComptes, true],
+      ['Ventes gagnées', sig, true],
+      ['CA gagné', rev, true],
       ['RDV SalesForge', sf, false],
       ['BDC envoyés', bdc.sent, false],
       ['BDC signés', bdc.signed, false],
@@ -1794,24 +1619,19 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
   // Réglage de l'objectif de CA mensuel (admin) — même pattern léger que
   // "addMyself" (window.prompt) plutôt qu'une nouvelle modale pour un seul champ.
-  const editMonthlyObjective = async () => {
-    const input = window.prompt(
-      "Objectif de CA mensuel (€), pour l'alerte de rythme sur la tuile CA. 0 pour désactiver l'alerte.",
-      String(monthlyObjective || '')
-    );
-    if (input === null) return;
-    const n = Math.max(0, parseInt(input.replace(/[^\d]/g, ''), 10) || 0);
-    try {
-      const r = await fetch('api/admin/settings', {
-        method: 'POST',
-        headers: credHeaders(password, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ monthlyRevenueObjective: n }),
-      });
-      if (!r.ok) throw new Error('Échec de la sauvegarde');
-      load(); // recharge le dashboard pour refléter le nouvel objectif
-    } catch (e) {
-      window.alert(String(e.message || e));
-    }
+  const editMonthlyObjective = () => { setObjectiveSaved(false); setShowObjectiveEditor(true); };
+  const saveMonthlyObjective = async (amount) => {
+    const response = await fetch('api/admin/settings', {
+      method: 'POST', headers: credHeaders(password, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ monthlyRevenueObjective: amount }),
+    });
+    const saved = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(saved.error || 'Enregistrement impossible. Réessaie.');
+    if (!Number.isSafeInteger(saved.monthlyRevenueObjective)) throw new Error('Le serveur n’a pas confirmé le montant enregistré.');
+    ++dashboardRequestId.current; // An older in-flight read must not undo the confirmed write.
+    setLoading(false);
+    setData(current => ({ ...current, settings: { ...current?.settings, monthlyRevenueObjective: saved.monthlyRevenueObjective } }));
+    setObjectiveSaved(true);
   };
 
   // ouvre une modale
@@ -1851,7 +1671,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
   const BLOCKS = {
     hero: (
       <>
-        <Kpi label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total}
+        <Kpi unavailable={!!(d.errors?.calls)} label="Calls" value={calls.truncated ? `${fmt(calls.total)}+` : calls.total}
           sub={calls.truncated ? 'plafonné' : 'passés'} color="c-blue" dot="#3B82F6"
           secondary={[
             { value: callsOut, label: 'out', dot: '#2563EB' },
@@ -1859,70 +1679,57 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           ]}
           delta={dCalls}
           clickable onClick={() => openModal('Calls par commercial', calls.detail, false, 'c-blue', cmp ? cmpDetail(cmp.calls) : [])} />
-        <Kpi label="R1" value={rdvT.r1.total} sub="échanges" color="c-green" dot="#22C55E"
-          secondary={{ value: rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
+        <Kpi unavailable={!!(d.errors?.rdvToday)} label="R1" value={rdvT.r1.total} sub="programmés sur la période" color="c-green" dot="#22C55E"
+          secondary={{ value: d.errors?.rdvBooked ? '—' : rdvB.r1.total, label: 'pris', dot: '#FBBF24' }}
           delta={dR1}
           clickable onClick={() => openModal('R1 par commercial', rdvT.r1.detail, false, 'c-green', cmp ? cmpDetail(cmp.rdvToday?.r1) : [])} />
-        <Kpi label="R2" value={rdvT.r2.total} sub="retours" color="c-bluer2" dot="#22D3EE"
-          secondary={{ value: rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
+        <Kpi unavailable={!!(d.errors?.rdvToday)} label="R2" value={rdvT.r2.total} sub="programmés sur la période" color="c-bluer2" dot="#22D3EE"
+          secondary={{ value: d.errors?.rdvBooked ? '—' : rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
           delta={dR2}
           clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.rdvToday?.r2) : [])} />
-        <Kpi label="Propals" value={propals.total + propalsComptes.total} sub="envoyées" color="c-orange" dot="#F97316"
+        <Kpi unavailable={!!(d.errors?.propals || d.errors?.propalsComptes)} label="Propositions suivies" value={propals.total + propalsComptes.total} sub="statuts actuels · modifiées sur la période" color="c-orange" dot="#F97316"
           secondary={[
             { value: propals.total, label: 'pistes', dot: '#F97316' },
             { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
             { value: `${fmt(propals.totalAmount)} €`, label: 'estimé pistes', dot: '#FDBA74' },
           ]}
           delta={dPropals}
-          clickable onClick={() => openModal('Propals (pistes + comptes) par commercial', propalsMerged, false, 'c-orange', [], propalsExtraCols)} />
-        <Kpi label="Signatures" value={sig.total} sub="deals signés" color="c-violet" dot="#3B82F6" glow
-          secondary={!isThisMonth ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
+          clickable onClick={() => openModal('Propositions suivies (pistes + comptes) par commercial', propalsMerged, false, 'c-orange', [], propalsExtraCols)} />
+        <Kpi unavailable={!!(d.errors?.signatures)} label="Ventes gagnées" value={sig.total} sub="opportunités Salesforce" color="c-violet" dot="#3B82F6" glow
+          secondary={!isThisMonth && !d.errors?.monthSignatures ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
           delta={dSig} />
         <div className="tile hero-ca col-2">
-          <div className="lbl">CA · {isToday ? 'du jour' : 'période'}
+          <div className="lbl">CA gagné · {isToday ? 'du jour' : 'période'}
             {dCA !== null && dCA !== undefined && (
               <span className={`hero-delta ${dCA > 0 ? 'up' : dCA < 0 ? 'down' : 'flat'}`}>
                 {dCA > 0 ? '▲' : dCA < 0 ? '▼' : '•'} {Math.abs(dCA)}%
               </span>
             )}
           </div>
-          <div className="val">{fmt(rev.totalAmount)}€</div>
-          <div className="sub">{isToday ? 'cumul signé' : rangeLabel.toLowerCase()}</div>
-          {!isThisMonth && (
+          <div className="val">{d.errors?.revenue ? '—' : `${fmt(rev.totalAmount)} €`}</div>
+          <div className="sub">{d.errors?.revenue ? 'Source indisponible' : 'Salesforce · date de clôture'}</div>
+          {!isThisMonth && !d.errors?.monthRevenue && (
             <div className="hero-month"><span className="hero-month-dot" />ce mois · {fmt(monthRev.totalAmount)} €</div>
           )}
-          {objectiveStatus && (
-            <div
-              className={`objective-badge ${objectiveStatus}`}
-              onClick={isAdmin ? editMonthlyObjective : undefined}
-              style={isAdmin ? { cursor: 'pointer' } : undefined}
-              title={
-                isAdmin
-                  ? `Objectif du mois : ${fmt(monthlyObjective)}€ — clique pour modifier`
-                  : `Objectif du mois : ${fmt(monthlyObjective)}€`
-              }
-            >
-              🎯 {objectivePct}% du rythme visé
-            </div>
-          )}
-          {!objectiveStatus && isAdmin && (
-            <div
-              className="objective-badge muted"
-              onClick={editMonthlyObjective}
-              style={{ cursor: 'pointer' }}
-              title="Définir un objectif de CA mensuel"
-            >
-              🎯 Définir un objectif
-            </div>
-          )}
+          {isAdmin && <div className="objective-summary">
+            <strong>Objectif global : {monthlyObjective ? `${fmt(monthlyObjective)} € / mois` : 'désactivé'}</strong>
+            {monthlyObjective > 0 && !mustRecalc && !d.errors?.monthRevenue && <>
+              <span className={`objective-badge ${objectiveStatus || 'muted'}`}>{Math.round(monthRev.totalAmount / monthlyObjective * 100)}% de l’objectif atteint</span>
+              {objectivePct !== null && <small>{objectivePct}% du rythme prévu à ce jour</small>}
+            </>}
+            {mustRecalc && <small>Vue filtrée : progression globale masquée.</small>}
+            {d.errors?.monthRevenue && <small>CA mensuel indisponible.</small>}
+            <button type="button" className="objective-edit" onClick={editMonthlyObjective}>{monthlyObjective ? 'Modifier l’objectif' : 'Définir l’objectif'}</button>
+            {objectiveSaved && <span className="objective-saved" role="status">Objectif enregistré</span>}
+          </div>}
         </div>
       </>
     ),
 
     money: (
       <>
-        <div className="tile col-8 clickable" onClick={() => openModal(`CA · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue', cmp ? cmpDetailAmt(cmp.revenue) : [])}>
-          <TileHead dotClass="bg-blue" title={`CA ${isToday ? 'du jour' : '· ' + rangeLabel} par commercial`} clickable />
+        <div className="tile col-8 clickable" onClick={() => openModal(`CA gagné · ${rangeLabel} par commercial`, rev.detail, true, 'c-blue', cmp ? cmpDetailAmt(cmp.revenue) : [])}>
+          <TileHead dotClass="bg-blue" title={`CA gagné ${isToday ? 'du jour' : '· ' + rangeLabel} par commercial`} clickable />
           <div className="chart-box" style={{ height: 250 }}>
             {caBySales.length === 0 ? (
               <div className="empty">Aucune donnée</div>
@@ -1945,7 +1752,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
 
         <div className="tile col-4">
-          <TileHead dotClass="bg-violet" title={isToday ? 'Signatures du jour' : `Signatures · ${rangeLabel}`} />
+          <TileHead dotClass="bg-violet" title={isToday ? 'Ventes gagnées du jour' : `Ventes gagnées · ${rangeLabel}`} />
           {sig.detail.length === 0 ? (
             <div className="empty">Aucune signature</div>
           ) : (
@@ -1964,7 +1771,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
     ca12mois: (
       <div className="tile col-12">
-        <TileHead dotClass="bg-blue" title="CA — 12 derniers mois" />
+        <TileHead dotClass="bg-blue" title="CA gagné — 12 derniers mois" />
         <div className="chart-box" style={{ height: 220 }}>
           {revenueByMonthChart.every((m) => m.value === 0) ? (
             <div className="empty">Aucune donnée</div>
@@ -2083,7 +1890,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     classements: (
       <>
         <div className="tile col-3">
-          <TileHead dotClass="bg-orange" title="Propals" />
+          <TileHead dotClass="bg-orange" title="Propositions suivies" />
           <div
             className="subsec clickable-zone"
             onClick={() => openModal('Propals Pistes par commercial', propals.detail, false, 'c-orange', cmp ? cmpDetail(cmp.propals) : [], [{ label: 'Estimé', render: (r) => `${fmt(r.amount || 0)} €` }])}
@@ -2166,7 +1973,8 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     synthese: (
       <>
         <div className="tile col-12">
-          <TileHead dotClass="bg-violet" title={`Tunnel de conversion · ${rangeLabel}`} />
+          <TileHead dotClass="bg-violet" title={`Volumes d’activité · ${rangeLabel}`} />
+          <p className="data-guide-note" style={{ fontSize: 12, marginBottom: 12 }}>Volumes de la période, sans suivi des mêmes prospects entre étapes.</p>
           <ConversionFunnel stages={funnelStages} />
         </div>
         {!isRestrictedCommercial && (
@@ -2355,7 +2163,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             {emailMsg && <span className="maj">{emailMsg}</span>}
-            {d.generatedAt && <span className="maj">MAJ {timeLabel(d.generatedAt)}</span>}
+            {d.generatedAt && <span className="maj">Vue calculée à {timeLabel(d.generatedAt)}</span>}
             <button className={`refresh-btn ${loading ? 'loading' : ''}`} onClick={load} disabled={loading}>
               <span className="refresh-icon">↻</span>
               {loading ? 'Maj…' : 'Rafraîchir'}
@@ -2373,9 +2181,13 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
         </div>
       )}
 
+      <DataGuide data={d} />
+
       <div className="dash-blocks">
         {visibleBlockOrder.map((blockId, idx) => {
-          const content = BLOCKS[blockId];
+          const dependencies = { money: ['revenue','signatures'], activite: ['calls','rdvBooked','bdc'], classements: ['propals','propalsComptes','rdvToday','rdvBooked','salesforge'], objectifs: ['monthRevenue'], synthese: ['calls','rdvBooked','propals','propalsComptes','signatures'] };
+          const missing = (dependencies[blockId] || []).some(key => d.errors?.[key]) || (blockId === 'ca12mois' && monthlyRevenueError);
+          const content = missing ? <div className="tile col-12"><div className="empty">{BLOCK_LABELS[blockId]} : source indisponible. Réessaie après le prochain chargement.</div></div> : BLOCKS[blockId];
           if (!content && !editMode) return null;
           return (
             <div
@@ -2402,7 +2214,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
 
       <div className="foot">
         <span className="foot-brand">OPENMEDIAS</span>
-        <span className="foot-sub">Live · Le robot trop rigolo 🤖 · {new Date().getFullYear()}</span>
+        <span className="foot-sub">Données synchronisées périodiquement · {new Date().getFullYear()}</span>
       </div>
 
       {showEmail && (

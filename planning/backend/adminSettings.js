@@ -4,6 +4,7 @@
 // planning — un seul backend admin, quelle que soit la page depuis laquelle on
 // les modifie (console cachée du dashboard OU Paramètres du planning).
 const { db } = require('./db');
+const { parseMonthlyObjective } = require('./objectiveValue');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS dashboard_settings (
@@ -78,6 +79,7 @@ function set(key, value) {
 }
 
 function updateReportSettings(patch = {}) {
+  const objective = patch.monthlyRevenueObjective === undefined ? undefined : parseMonthlyObjective(patch.monthlyRevenueObjective);
   if (patch.reportTheme === 'light' || patch.reportTheme === 'dark') set('reportTheme', patch.reportTheme);
   if (typeof patch.reportTo === 'string') set('reportTo', patch.reportTo);
   if (PRESETS.includes(patch.reportPreset)) set('reportPreset', patch.reportPreset);
@@ -88,8 +90,7 @@ function updateReportSettings(patch = {}) {
     set('reportDays', JSON.stringify(days));
   }
   if (patch.monthlyRevenueObjective !== undefined) {
-    const n = Math.max(0, parseInt(patch.monthlyRevenueObjective, 10) || 0);
-    set('monthlyRevenueObjective', String(n));
+    set('monthlyRevenueObjective', String(objective));
   }
   return getReportSettings();
 }

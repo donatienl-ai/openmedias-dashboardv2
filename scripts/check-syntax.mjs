@@ -19,9 +19,9 @@ const ROOT = path.join(__dirname, '..');
 function jsFilesIn(dir) {
   const abs = path.join(ROOT, dir);
   if (!fs.existsSync(abs)) return [];
-  return fs.readdirSync(abs).filter((f) => f.endsWith('.js')).map((f) => path.join(dir, f));
+  return fs.readdirSync(abs, { withFileTypes: true }).flatMap((f) => f.isDirectory() && f.name !== 'tests' ? jsFilesIn(path.join(dir, f.name)) : f.isFile() && f.name.endsWith('.js') ? [path.join(dir, f.name)] : []);
 }
-const files = [...jsFilesIn('server'), ...jsFilesIn('planning/backend')];
+const files = [...jsFilesIn('server'), ...jsFilesIn('planning/backend'), ...jsFilesIn('planning/frontend'), ...jsFilesIn('recouvrement/frontend'), ...jsFilesIn('radar/frontend')];
 
 let failed = false;
 for (const f of files) {

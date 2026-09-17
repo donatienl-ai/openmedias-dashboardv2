@@ -1,3 +1,5 @@
+import { createDashboardService, withLiveDashboardSettings } from './dashboardService.js';
+import { buildSourceSnapshot } from './sourceSnapshot.js';
 // ==========================================
 //  SERVEUR PRINCIPAL - OPENMEDIAS DASHBOARD
 // ==========================================
@@ -252,113 +254,13 @@ app.get('/api/debug/names', async (req, res) => {
 
 // Agrège toutes les sources pour une plage donnée.
 // Utilisé par la route /api/dashboard ET par le reporting email.
-async function collectData(preset, range) {
-  const r = { start: range.start, end: range.end };
-
-  // On lance tous les appels en parallèle. Si une source plante,
-  // on renvoie quand même les autres avec une erreur partielle.
-  const results = await Promise.allSettled([
-    getCalls(r),              // 0
-    getRdvInRange(r),         // 1
-    getRdvBookedInRange(r),   // 2
-    getPropals(r),            // 3
-    getSignatures(r),         // 4
-    getRevenue(r),            // 5
-    getSalesforgeRdv(r),      // 6 (UTM salesforge via Calendly, suit la période)
-    getBdc(r),                // 7 (BDC envoyés/signés via DocuSign)
-    getPropalsComptes(r),     // 8 (propositions sur Comptes, Salesforce)
-  ]);
-
-  const pick = (i, fallback) =>
-    results[i].status === 'fulfilled' ? results[i].value : fallback;
-
-  const errors = {};
-  const labels = ['calls', 'rdvToday', 'rdvBooked', 'propals', 'signatures', 'revenue', 'salesforge', 'bdc', 'propalsComptes'];
-  results.forEach((res2, i) => {
-    if (res2.status === 'rejected') errors[labels[i]] = String(res2.reason?.message || res2.reason);
-  });
-
-  const rdvToday = pick(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } });
-  const rdvBooked = pick(2, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } });
-
-  const revenue = pick(5, { totalAmount: 0, detail: [] });
-  const signatures = pick(4, { total: 0, totalAmount: 0, detail: [] });
-
-  // Repère "mois en cours" affiché sous CA & Signatures, indépendant de la période.
-  // Si la période sélectionnée EST déjà ce mois, on réutilise (pas de requête en plus).
-  let monthRevenue = revenue;
-  let monthSignatures = signatures;
-  if (preset !== 'this_month') {
-    const m = resolveRange('this_month');
-    const [mr, ms] = await Promise.allSettled([
-      getRevenue({ start: m.start, end: m.end }),
-      getSignatures({ start: m.start, end: m.end }),
-    ]);
-    if (mr.status === 'fulfilled') monthRevenue = mr.value;
-    if (ms.status === 'fulfilled') monthSignatures = ms.value;
-  }
-
-  return {
-    generatedAt: new Date().toISOString(),
-    range: { preset, label: range.label, start: range.start.toISOString(), end: range.end.toISOString() },
-    calls: pick(0, { total: 0, detail: [] }),
-    rdvToday,
-    rdvBooked,
-    propals: pick(3, { total: 0, totalAmount: 0, detail: [] }),
-    signatures,
-    revenue,
-    monthRevenue,
-    monthSignatures,
-    salesforge: pick(6, { total: 0, detail: [] }),
-    bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
-    propalsComptes: pick(8, { total: 0, totalAmount: 0, detail: [] }),
-    // Objectif de CA mensuel (alerte de seuil sur la tuile CA, cf. client) —
-    // exposé à TOUT compte connecté (pas juste admin) puisque c'est juste un
-    // repère informatif, contrairement au reste de la console admin.
-    settings: { monthlyRevenueObjective: getReportSettings().monthlyRevenueObjective },
-    errors: Object.keys(errors).length ? errors : null,
-  };
-}
-
-// Données de comparaison (totaux/détails des 6 KPIs principaux, hors SalesForge)
-async function collectCompareData(range) {
-  const r = { start: range.start, end: range.end };
-  const results = await Promise.allSettled([
-    getCalls(r),               // 0
-    getRdvInRange(r),          // 1 (R1/R2 tenus)
-    getRdvBookedInRange(r),    // 2 (R1/R2 pris)
-    getPropals(r),             // 3
-    getPropalsComptes(r),      // 4
-    getSignatures(r),          // 5
-    getRevenue(r),             // 6
-  ]);
-  const v = (idx, fb) => (results[idx].status === 'fulfilled' ? results[idx].value : fb);
-  return {
-    calls: v(0, { total: 0, detail: [] }),
-    rdvToday: v(1, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } }),
-    rdvBooked: v(2, { r1: { total: 0, detail: [] }, r2: { total: 0, detail: [] } }),
-    propals: v(3, { total: 0, totalAmount: 0, detail: [] }),
-    propalsComptes: v(4, { total: 0, totalAmount: 0, detail: [] }),
-    signatures: v(5, { total: 0, totalAmount: 0, detail: [] }),
-    revenue: v(6, { totalAmount: 0, detail: [] }),
-  };
-}
-
-// Construit le payload complet du dashboard (données + comparatif) pour une plage.
-// C'est la fonction "lourde" (appels APIs) que le cache enveloppe.
-async function computeDashboard(preset, range) {
-  // Comparatif désactivé sur les très longues périodes (>70j) pour préserver les quotas
-  const durationDays = (range.end - range.start) / 86400000;
-  const wantCompare = durationDays <= 70;
-  const compRange = wantCompare ? comparisonRange(preset, range) : null;
-
-  const [data, compare] = await Promise.all([
-    collectData(preset, range),
-    compRange ? collectCompareData(compRange).catch(() => null) : Promise.resolve(null),
-  ]);
-
-  return { ...data, compare };
-}
+const { collectData, collectCompareData, computeDashboard } = createDashboardService({
+  getCalls, getRdvInRange, getRdvBookedInRange, getPropals, getSignatures, getRevenue, getSalesforgeRdv, getBdc, getPropalsComptes, resolveRange, comparisonRange, getReportSettings,
+  sourceSnapshot: () => buildSourceSnapshot({
+    aircall: getAircallCacheStats(), calendly: getCalendlyCacheStats(),
+    salesforce: getSalesforceCacheStats(), docusign: getDocusignCacheStats(),
+  }),
+});
 
 // Cache mémoire + rafraîchissement en arrière-plan (voir dashboardCache.js).
 // On pré-chauffe les périodes les plus consultées ; les autres (yesterday,
@@ -384,7 +286,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     }
     const preset = req.query.preset || 'today';
     const range = resolveRange(preset, req.query.start, req.query.end);
-    const full = await dashboardCache.get(preset, range);
+    const full = withLiveDashboardSettings(await dashboardCache.get(preset, range), getReportSettings());
     // Mot de passe legacy et comptes admin gardent la vue complète (toute l'équipe).
     if (req.commercial && !isAdminAccount(req.commercial)) {
       if (req.commercial.role === 'manager' && req.commercial.team_id) {
@@ -494,8 +396,7 @@ async function sendReportNow({ to, theme, preset = 'today', start, end }) {
   const month = resolveRange('this_month');
   const data = await collectData(preset, range);
   // CA du mois (cumul depuis le 1er, indépendant de la période du rapport)
-  let monthRevenue = { totalAmount: 0, detail: [] };
-  try { monthRevenue = await getRevenue({ start: month.start, end: month.end }); } catch (e) { /* section vide si KO */ }
+  const monthRevenue = data.monthRevenue;
 
   // Comparatif (même logique que computeDashboard : désactivé sur >70j pour
   // préserver les quotas API) — alimente la section "Points notables" (anomalies).
@@ -635,7 +536,8 @@ app.get('/api/admin/cache', requireAdmin, (req, res) => {
 });
 
 app.post('/api/admin/settings', requireAdmin, (req, res) => {
-  res.json(updateReportSettings(req.body || {}));
+  try { res.json(updateReportSettings(req.body || {})); }
+  catch (error) { res.status(error instanceof RangeError ? 400 : 500).json({ error: error.message }); }
 });
 
 // Envoie le reporting pour la VUE COURANTE (période + thème transmis par le front),
@@ -741,6 +643,7 @@ app.use('/radar', (req, res) => {
 
 // --- Sert le build React en production ---
 const clientBuild = path.join(__dirname, '..', 'client', 'build');
+app.use('/shared', express.static(path.join(__dirname, '..', 'shared')));
 app.use(express.static(clientBuild));
 app.get('*', (req, res) => {
   res.sendFile(path.join(clientBuild, 'index.html'));

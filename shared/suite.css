@@ -1,0 +1,29 @@
+/* Composants et repères visuels communs aux quatre outils OpenMedias. */
+:root {
+  --font-display: 'Baloo 2', 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --suite-blue: #2E5CE0;
+  --suite-focus: #5C82F0;
+}
+.app-switch {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--surface2, var(--panel-2)); border: 1px solid var(--border);
+  border-radius: 13px; padding: 4px; max-width: 100%;
+}
+.app-switch-btn {
+  background: none; border: none; color: var(--text-dim, var(--text-soft));
+  font: 700 13px var(--font-body); padding: 8px 14px; border-radius: 9px;
+  cursor: pointer; white-space: nowrap; min-height: 36px;
+}
+.app-switch-btn:hover { color: var(--text); }
+.app-switch-btn.active { background: var(--suite-blue); color: #fff; }
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: 3px solid var(--suite-focus); outline-offset: 3px;
+}
+@media (max-width:640px) {
+  .app-switch { flex-wrap: wrap; width: 100%; }
+  .app-switch-btn { flex: 1 1 auto; text-align: center; padding: 8px 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

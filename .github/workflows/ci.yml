@@ -50,6 +50,9 @@ jobs:
       # planning/frontend/index.html est un HTML autonome de ~3900 lignes, hors
       # du build React et hors de check-syntax : sans ces tests, une régression
       # sur la navigation de mois ne se voit qu'en production.
+      - name: Tests des indicateurs et du rapprochement des commerciaux
+        run: npm run test:data
+
       - name: Tests du planning (sélecteur de mois)
         run: npm run test:planning
 
