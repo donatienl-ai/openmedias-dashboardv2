@@ -81,7 +81,13 @@ SOURCES = [
          path_filter="/economie/",
          paginate=True, page_pattern="query", exclude=NOISE),
 
-    dict(source="Nous", media="BFM Business", emission="Entreprises d'avenir",
+    # Média corrigé en BFM TV (et non BFM Business) le 2026-09-17, à la demande
+    # de Donatien — "Entreprises d'Avenir" est bien une émission BFM TV (elle
+    # vit sous une rubrique "BFM Pratique" partagée, mais le partenaire éditorial
+    # est BFM TV, pas BFM Business), distincte de "Vision d'Entreprises" ci-dessus
+    # qui, elle, est bien BFM Business. Sans ce fix les deux émissions
+    # retombaient sous le même filtre média "BFM Business" côté radar.
+    dict(source="Nous", media="BFM TV", emission="Entreprises d'avenir",
          kind="html",
          url="https://www.bfmtv.com/pratique/entreprises-d-avenir/",
          path_filter="/entreprises-d-avenir/",
