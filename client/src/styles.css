@@ -277,6 +277,34 @@ body {
 .hero-ca .lbl { font-size: 10px; letter-spacing: 2px; color: #D6D5FF; text-transform: uppercase; font-weight: 700; }
 .hero-ca .val { font-family: var(--font-display); font-size: 40px; font-weight: 800; color: #fff; line-height: 1; margin-top: 8px; letter-spacing: -1px; }
 .hero-ca .sub { font-size: 10px; color: #D6D5FF; margin-top: 6px; }
+/* .objective-summary/.objective-edit/.objective-saved sont partagées avec
+   MonthlyObjectiveDialog.css (popup d'édition, fond clair neutre) — sur le
+   dégradé bleu de cette carte, on les recale sur le même vocabulaire blanc/
+   translucide que .objective-badge et .hero-month juste au-dessus, plutôt
+   que le bouton gris clair + texte sombre hérités du popup. */
+.hero-ca .objective-summary { margin-top: 12px; }
+.hero-ca .objective-summary > strong { color: rgba(255, 255, 255, 0.92); }
+.hero-ca .objective-summary > small { color: rgba(255, 255, 255, 0.68); }
+.hero-ca .objective-edit {
+  display: inline-flex; align-items: center;
+  margin-top: 10px; padding: 7px 14px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--radius-sm);
+  color: #fff; font-size: 12px; font-weight: 700;
+  transition: background 0.15s, border-color 0.15s;
+}
+.hero-ca .objective-edit:hover { background: rgba(255, 255, 255, 0.26); border-color: rgba(255, 255, 255, 0.45); }
+.hero-ca .objective-edit:active { transform: scale(0.97); }
+.hero-ca .objective-saved {
+  display: inline-flex; align-items: center;
+  margin-top: 8px; margin-left: 10px;
+  padding: 3px 9px;
+  background: rgba(34, 197, 94, 0.25);
+  border-radius: 999px;
+  color: #DCFCE7; font-size: 11px; font-weight: 700;
+  animation: fadeIn 0.2s ease;
+}
 
 /* ===== CHART TILE ===== */
 .chart-box { width: 100%; }
