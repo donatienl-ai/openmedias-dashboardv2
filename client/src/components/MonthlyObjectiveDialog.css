@@ -6,7 +6,7 @@
 .objective-dialog input { width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); color: var(--text); font: inherit; }
 .objective-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
 .objective-dialog-actions button, .objective-edit { padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; font: 600 13px var(--font-body); background: var(--panel-2); color: var(--text); }
-.objective-dialog-actions button[type=submit] { background: #2563eb; color: white; border-color: #2563eb; }
+.objective-dialog-actions button[type=submit] { background: var(--om-blue); color: white; border-color: var(--om-blue); }
 .objective-dialog button:disabled { opacity: .6; cursor: wait; }
 .objective-dialog .objective-error { color: #ef4444; }
 .objective-summary { margin-top: 12px; font-size: 11px; line-height: 1.6; }
