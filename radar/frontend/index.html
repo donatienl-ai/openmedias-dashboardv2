@@ -15,17 +15,15 @@
    ========================================================================== */
 :root {
   /* --- canoniques, identiques au dashboard ---
-     Accent recalé en bleu nuit (#3E63B0) — le premier indigo #3B3BF9,
-     pourtant mesuré en direct sur le site, rendait "trop violet" une fois
-     généralisé sur tout l'outil (retour Donatien). Thème sombre par défaut
-     ici (fond #050A14), donc variante CLAIRE du bleu nuit ; la variante
-     foncée (#10204D, pour fond blanc) est utilisée côté recouvrement/
-     frontend/index.html et planning/frontend/index.html dans leur thème
-     clair par défaut. Même changement fait côté recouvrement/frontend/
-     index.html, planning/frontend/index.html et client/src/styles.css. */
-  --om-blue:#3E63B0; --om-blue-light:#6B8FD1; --om-blue-lighter:#9FB8E8;
-  --bg:#050A14; --panel:#0B1322; --panel-2:#101B30;
-  --border:#1B2A45; --border-soft:#16223A;
+     Accent = indigo du site (#3B3BF9), utilisé uniquement pour les boutons /
+     contrôles interactifs (jamais en fond de grande surface — c'est ce qui
+     donnait l'impression "trop violet" avant). Les fonds/bordures suivent
+     #1A1A2E (bleu nuit du site openmedias.fr), en rampe de gris-bleu neutre —
+     mêmes valeurs partagées avec client/src/styles.css et le thème sombre de
+     recouvrement/frontend/index.html et planning/frontend/index.html. */
+  --om-blue:#3B3BF9; --om-blue-light:#5C5CFB; --om-blue-lighter:#8A8AFD;
+  --bg:#1A1A2E; --panel:#21213A; --panel-2:#292948;
+  --border:#35355A; --border-soft:#26263E;
   --green:#22C55E; --orange:#F97316; --amber:#FBBF24;
   --text:#FFFFFF; --text-soft:#8295B5; --text-muted:#54678A;
   /* "Baloo 2" (Google Fonts) en approximation libre de "Garet", la police
@@ -66,7 +64,7 @@
 html,body{min-height:100vh}
 body{
   font-family:var(--font-body);
-  background:radial-gradient(1200px 600px at 50% -10%,rgba(62,99,176,.22),transparent),var(--bg);
+  background:radial-gradient(1200px 600px at 50% -10%,rgba(59,59,249,.22),transparent),var(--bg);
   color:var(--text);-webkit-font-smoothing:antialiased;line-height:1.5;
 }
 .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
@@ -143,7 +141,7 @@ header{
   color:var(--text);font:inherit;font-size:16px;padding:18px 18px 18px 50px;
   outline:none;transition:border-color .15s,box-shadow .15s;
 }
-.searchbox textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(62,99,176,.18)}
+.searchbox textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,59,249,.18)}
 .searchbox textarea::placeholder{color:var(--text-muted)}
 .searchbox .ico{position:absolute;left:17px;top:19px;color:var(--text-muted);pointer-events:none}
 
@@ -171,7 +169,7 @@ header{
   transition:border-color .12s,color .12s,background .12s;
 }
 .chip:hover{border-color:var(--blue-light);color:var(--text);background:var(--panel2)}
-.chip.on{background:rgba(62,99,176,.16);border-color:var(--blue);color:var(--blue-lighter)}
+.chip.on{background:rgba(59,59,249,.16);border-color:var(--blue);color:var(--blue-lighter)}
 
 /* chips média */
 .media-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;align-items:center}
@@ -182,7 +180,7 @@ header{
   transition:border-color .12s,color .12s,background .12s;
 }
 .mchip:hover{border-color:var(--blue-light);color:var(--text)}
-.mchip.on{background:rgba(62,99,176,.14);border-color:var(--blue);color:var(--blue-lighter)}
+.mchip.on{background:rgba(59,59,249,.14);border-color:var(--blue);color:var(--blue-lighter)}
 
 /* ── PÉRIODE ── */
 .period-chips{display:flex;gap:6px;align-items:center}
@@ -192,7 +190,7 @@ header{
   transition:border-color .12s,color .12s,background .12s;
 }
 .pchip:hover{color:var(--text);border-color:var(--blue-light)}
-.pchip.on{background:rgba(62,99,176,.14);border-color:var(--blue);color:var(--blue-lighter)}
+.pchip.on{background:rgba(59,59,249,.14);border-color:var(--blue);color:var(--blue-lighter)}
 [data-theme="light"] .pchip.on{color:var(--blue)}
 /* ── URL SCAN ── */
 .url-scan-bar{
@@ -211,7 +209,7 @@ header{
 .url-scan-bar .scan-btn:hover{opacity:.85}
 .url-scan-bar .scan-btn:disabled{opacity:.5;cursor:wait}
 .scan-kw-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-.scan-kw{font-size:11px;background:rgba(62,99,176,.12);border:1px solid rgba(62,99,176,.3);
+.scan-kw{font-size:11px;background:rgba(59,59,249,.12);border:1px solid rgba(59,59,249,.3);
   color:var(--blue-lighter);border-radius:6px;padding:3px 9px;font-weight:600;}
 [data-theme="light"] .scan-kw{color:var(--blue)}
 
@@ -321,8 +319,8 @@ header{
 
 /* ── ANGLE ÉDITORIAL ── */
 .angle-box{
-  background:linear-gradient(135deg,rgba(62,99,176,.08),rgba(62,99,176,.03));
-  border:1px solid rgba(62,99,176,.25);border-radius:var(--radius);
+  background:linear-gradient(135deg,rgba(59,59,249,.08),rgba(59,59,249,.03));
+  border:1px solid rgba(59,59,249,.25);border-radius:var(--radius);
   padding:20px 24px;grid-column:1/-1;
 }
 .angle-box .angle-title{font-size:13px;font-weight:700;color:var(--blue-light);margin-bottom:10px;display:flex;align-items:center;gap:8px}

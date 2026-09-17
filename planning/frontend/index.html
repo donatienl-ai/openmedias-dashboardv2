@@ -14,15 +14,14 @@
   --surface2: #F3F6FB;
   --border: #DEE6F0;
   --border-soft: #E8EEF6;
-  /* Accent recalé en bleu nuit profond (#10204D) — le premier indigo
-     #3B3BF9, pourtant mesuré en direct sur le site, rendait "trop violet"
-     une fois généralisé sur tout l'outil (retour Donatien). Le thème sombre
-     ci-dessous utilise une variante plus claire du même bleu (pas ce ton-ci,
-     invisible sur fond déjà sombre) — même logique que recouvrement/frontend/
-     index.html et client/src/styles.css (dashboard). */
-  --accent: #10204D;
-  --accent-light: #1B3068;
-  --accent-dim: rgba(16,32,77,0.08);
+  /* Accent = indigo du site (#3B3BF9), utilisé uniquement pour les boutons /
+     contrôles interactifs (jamais en fond de grande surface — c'est ce qui
+     donnait l'impression "trop violet" avant). Les fonds/bordures, eux,
+     suivent maintenant #1A1A2E (bleu nuit du site) côté thème sombre — voir
+     plus bas. */
+  --accent: #3B3BF9;
+  --accent-light: #5C5CFB;
+  --accent-dim: rgba(59,59,249,0.08);
   --gold: #D97706; --gold-dim: rgba(217,119,6,0.10);
   --red: #DC2626; --red-dim: rgba(220,38,38,0.08);
   --green: #16A34A; --green-dim: rgba(22,163,74,0.08);
@@ -49,8 +48,12 @@
   --bdc: #F5D400; --bdc-bg: #fffce8; --bdc-text: #8A6D00;
 }
 [data-theme="dark"] {
-  --bg: #050A14; --surface: #0B1322; --surface2: #101B30; --border: #1B2A45; --border-soft: #16223A;
-  --accent: #3E63B0; --accent-light: #6B8FD1; --accent-dim: rgba(62,99,176,0.16);
+  /* Fonds/bordures alignés sur #1A1A2E (bleu nuit du site openmedias.fr),
+     en rampe de gris-bleu neutre plutôt que sur une teinte plus bleutée
+     inventée — même valeurs partagées avec client/src/styles.css et
+     radar/frontend/index.html (thème sombre par défaut là-bas). */
+  --bg: #1A1A2E; --surface: #21213A; --surface2: #292948; --border: #35355A; --border-soft: #26263E;
+  --accent: #3B3BF9; --accent-light: #5C5CFB; --accent-dim: rgba(59,59,249,0.16);
   --text: #FFFFFF; --text-dim: #8295B5; --text-muted: #54678A;
   --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
   --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
@@ -62,18 +65,14 @@
 body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
 
 /* ── PIN ─────────────────────────────────────── */
-/* Fond marine (#0D0D2B, mesuré sur openmedias.fr) réservé à l'écran de
+/* Fond marine (#1A1A2E, fond du site openmedias.fr) réservé à l'écran de
    connexion, vu quelques secondes — pas répliqué sur tout l'outil (aurait
    nui à la lisibilité d'un outil utilisé des heures). Même traitement que
    recouvrement/frontend/index.html. */
-#pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0D0D2B; z-index: 100; }
+#pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #1A1A2E; z-index: 100; }
 .pin-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); backdrop-filter: blur(6px); }
 .pin-logo { font-family: var(--font-display); font-weight: 800; font-size: 24px; margin-bottom: 6px; letter-spacing: -0.5px; color: #fff; }
-/* Toujours sur le fond marine #0D0D2B, quel que soit le thème clair/sombre
-   de l'appli — d'où une valeur fixe (le bleu nuit clair) plutôt que
-   var(--accent-light), qui serait devenue trop sombre pour rester lisible
-   ici une fois --accent-light recalé pour le thème clair (fond blanc). */
-.pin-logo span { color: #6B8FD1; }
+.pin-logo span { color: var(--accent-light); }
 #pin-screen .form-label { color: rgba(255,255,255,0.7); }
 #pin-screen .form-input { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); color: #fff; }
 #pin-screen .form-input:focus { background: rgba(255,255,255,0.1); }
@@ -83,12 +82,6 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 #pin-screen .login-switch a:hover { color: #fff; }
 #pin-screen .btn-secondary { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18); color: #fff; }
 #pin-screen .btn-secondary:hover { background: rgba(255,255,255,0.14); }
-/* Le bouton principal doit rester bien visible sur le fond marine quel que
-   soit le thème clair/sombre choisi dans l'appli — sinon en thème clair il
-   hériterait du bleu nuit très sombre (#10204D), à peine perceptible sur un
-   fond déjà sombre. */
-#pin-screen .btn-primary { background: #3E63B0; }
-#pin-screen .btn-primary:hover { background: #6B8FD1; }
 .pin-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 40px; }
 #pin-screen .pin-sub { color: rgba(255,255,255,0.55); }
 .pin-dots { display: flex; gap: 14px; justify-content: center; margin-bottom: 32px; }
@@ -323,7 +316,7 @@ header {
 .a-programmer-card .adc-media { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
 .a-programmer-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px 0; }
 .cal-day.drag-over { outline: 2px dashed #ff9900; outline-offset: -2px; background: #ff990011; }
-.a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(16,32,77,0.08); }
+.a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(59,59,249,0.08); }
 
 /* Boîte à idées (rétroplanning réseaux sociaux) — même contenu que le panneau
    "À programmer" (cartes glissables), mais en popover ancré sous un bouton de
@@ -380,7 +373,7 @@ header {
 }
 .idc-channel-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .idea-box-add-row-wrap { margin-top: 10px; }
-.social-cal-day.drag-over-idea { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(16,32,77,0.08); }
+.social-cal-day.drag-over-idea { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(59,59,249,0.08); }
 .media-tab { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; transition: all 0.15s; box-shadow: var(--shadow); }
 .media-tab:hover { color: var(--text); border-color: var(--text-muted); }
 .media-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(79,110,247,0.3); }
