@@ -131,10 +131,68 @@ function fmtCACompact(v){
 
 // Statuts d'échéance personnalisables (Paramètres > Recouvrement) — chargés
 // une fois au démarrage, indexés par id pour un accès O(1) depuis les
-// colonnes Éch. 2/3/4 et le select de la fiche détail. La liste elle-même
-// (ordonnée) sert à construire ce select.
+// colonnes Éch. 2/3/4 et les pastilles de statut ci-dessous.
 let financeInstallmentStatuses=[];
 let financeInstallmentStatusById={};
+
+// ── Pastille de statut cliquable (remplace le <select> natif) ───────────────
+// Un <select>/<option> natif ne peut pas afficher la couleur choisie dans
+// Paramètres (la plupart des navigateurs ignorent tout style sur <option>),
+// ce qui rendait la personnalisation invisible à l'usage. Ce petit composant
+// maison affiche la couleur en permanence (pastille + libellé) et ouvre au
+// clic une liste d'options elles-mêmes colorées — remplace le select partout
+// où un statut d'échéance se choisit (fiche détail, ajout, ajout rapide).
+let financeStatusPillCallbacks={};
+let financeStatusPillSeq=0;
+function financeStatusPillContentHtml(id,statusId){
+  const cur=statusId!=null?financeInstallmentStatusById[statusId]:null;
+  const noneOpt=`<button type="button" class="finance-status-picker-opt" onclick="selectFinanceStatusPill('${id}',null)"><span class="finance-status-pill-dot" style="background:var(--text-muted)"></span>Sans statut</button>`;
+  const opts=financeInstallmentStatuses.map(s=>`<button type="button" class="finance-status-picker-opt" onclick="selectFinanceStatusPill('${id}',${s.id})"><span class="finance-status-pill-dot" style="background:${s.color}"></span>${s.label}</button>`).join('');
+  return `<button type="button" class="finance-status-pill" onclick="toggleFinanceStatusPicker('${id}',event)">
+      <span class="finance-status-pill-dot" style="background:${cur?cur.color:'var(--text-muted)'}"></span>${cur?cur.label:'Sans statut'}<span class="finance-status-pill-caret">▾</span>
+    </button>
+    <div class="finance-status-picker" style="display:none">${noneOpt}${opts}</div>`;
+}
+// onSelect(statusId) est appelé après la mise à jour visuelle de la pastille —
+// à l'appelant de décider quoi en faire (PATCH immédiat sur une échéance
+// existante, ou simple mémorisation pour un formulaire d'ajout pas encore
+// soumis).
+function financeStatusPillHtml(statusId,onSelect){
+  const id='fsp'+(++financeStatusPillSeq);
+  financeStatusPillCallbacks[id]=onSelect;
+  return `<div class="finance-status-pill-wrap" id="${id}">${financeStatusPillContentHtml(id,statusId)}</div>`;
+}
+function toggleFinanceStatusPicker(id,event){
+  event.stopPropagation();
+  const wrap=document.getElementById(id);
+  if(!wrap)return;
+  const picker=wrap.querySelector('.finance-status-picker');
+  const willOpen=picker.style.display==='none';
+  closeFinanceStatusPickers();
+  if(willOpen)picker.style.display='';
+}
+function closeFinanceStatusPickers(){
+  document.querySelectorAll('.finance-status-picker').forEach(p=>p.style.display='none');
+}
+function selectFinanceStatusPill(id,statusId){
+  const wrap=document.getElementById(id);
+  if(!wrap)return;
+  wrap.innerHTML=financeStatusPillContentHtml(id,statusId);
+  closeFinanceStatusPickers();
+  const cb=financeStatusPillCallbacks[id];
+  if(cb)cb(statusId);
+}
+// Ferme picker de statut ET popover d'ajout rapide (cf. plus bas) au clic en
+// dehors, ou à l'échap — deux popovers indépendants mais même réflexe de
+// fermeture, donc un seul jeu d'écouteurs globaux pour les deux.
+document.addEventListener('click',(e)=>{
+  if(!e.target.closest('.finance-status-pill-wrap'))closeFinanceStatusPickers();
+  if(!e.target.closest('#finance-quickadd-popover')&&!e.target.closest('.finance-installment-add-btn'))closeFinanceInstallmentQuickAdd();
+});
+document.addEventListener('keydown',(e)=>{
+  if(e.key==='Escape'){closeFinanceStatusPickers();closeFinanceInstallmentQuickAdd();}
+});
+
 async function init(){
   meta=await fetch(`${API}/meta`).then(r=>r.json());
   financeInstallmentStatuses=await fetch(`${API}/finance/installment-statuses`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
@@ -152,6 +210,7 @@ const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',li
 const FINANCE_CANAL_LABEL={email:'📧 Email',telephone:'📞 Téléphone',courrier:'✉️ Courrier',sms:'💬 SMS',autre:'Autre'};
 let financeInvoicesCache=[];
 let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
+let financeNewInstallmentStatusId=null; // statut choisi dans le formulaire "nouvelle échéance" de la fiche
 // Filtre actif de la barre d'onglets (façon Pennylane : Toutes/À venir/En
 // retard/Encaissée/…) — remplace l'ancien select de statut + case "en retard
 // uniquement" par des chips cliquables avec compteur en direct. Multi-sélection :
@@ -632,7 +691,7 @@ function renderFinanceInvoices(){
   const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
   wrap.innerHTML=`<table>
     <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Échéance${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th>Montant HT</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
-    <tbody>${list.map(inv=>`<tr>
+    <tbody>${list.map(inv=>`<tr class="finance-invoice-row" onclick="financeRowClick(event,'${inv.id}')">
       <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeLastRelanceBadge(inv)}</td>
       <td>${inv.customerName||'—'}</td>
       <td>${inv.contactName||'—'}</td>
@@ -649,6 +708,15 @@ function renderFinanceInvoices(){
     </tr>`).join('')}</tbody>
   </table>`;
 }
+// Clic n'importe où sur la ligne = ouvre la fiche facture (avant : seul le
+// n° de facture l'ouvrait). Les contrôles interactifs de la ligne (date,
+// select de statut, pastilles d'échéance, bouton "+") gardent leur propre
+// action et ne doivent PAS en plus ouvrir la fiche — d'où ce garde-fou sur
+// l'élément cliqué plutôt qu'un stopPropagation sur chacun d'eux.
+function financeRowClick(event,invId){
+  if(event.target.closest('button,select,input,a,label'))return;
+  openFinanceInvoiceDetail(invId);
+}
 // Colonnes Éch. 2/3/4 : une pastille de couleur (statut d'échéance, cf.
 // Paramètres > Recouvrement) plutôt que date+montant en clair — reste léger
 // visuellement même pour les factures qui n'ont que 2 ou 3 tranches (la
@@ -658,15 +726,63 @@ function renderFinanceInvoices(){
 // dessus, c'est la deadline Pennylane) ; une 5e tranche éventuelle (rare)
 // n'est pas cachée silencieusement : elle apparaît en badge "+N" sur la
 // dernière colonne plutôt que de rajouter une colonne par tranche possible.
+// Case vide (pas encore de tranche à ce rang) : bouton "+" qui ouvre le
+// popover d'ajout rapide (cf. openFinanceInstallmentQuickAdd) directement
+// depuis le tableau, sans passer par la fiche facture complète.
 function financeInstallmentCellHtml(inv,idx){
   const list=inv.installments||[];
   const inst=list[idx];
-  if(!inst)return '<span class="finance-installment-empty">—</span>';
+  if(!inst)return `<button type="button" class="finance-installment-add-btn" title="Ajouter une échéance" onclick="openFinanceInstallmentQuickAdd(event,'${inv.id}')">+</button>`;
   const color=inst.statusColor||'var(--text-muted)';
   const label=inst.statusLabel||'Sans statut';
   const title=`${label} — ${formatDateFR(inst.dueDate)} · ${fmtCA(inst.solde)} restant sur ${fmtCA(inst.amount)}`.replace(/"/g,'&quot;');
   const extra=(idx===2&&list.length>3)?`<span class="finance-installment-more">+${list.length-3}</span>`:'';
   return `<button type="button" class="finance-installment-dot" style="background:${color}" title="${title}" onclick="openFinanceInvoiceDetail('${inv.id}')"></button>${extra}`;
+}
+// ── Ajout rapide d'une échéance depuis le tableau (sans ouvrir la fiche) ────
+let financeQuickAddState=null; // {invoiceId, statusId} tant que le popover est ouvert
+function openFinanceInstallmentQuickAdd(event,invoiceId){
+  event.stopPropagation();
+  closeFinanceStatusPickers();
+  closeFinanceInstallmentQuickAdd();
+  const rect=event.currentTarget.getBoundingClientRect();
+  const defaultStatusId=financeInstallmentStatuses[0]?financeInstallmentStatuses[0].id:null;
+  financeQuickAddState={invoiceId,statusId:defaultStatusId};
+  const pop=document.createElement('div');
+  pop.id='finance-quickadd-popover';
+  pop.className='finance-quickadd-popover';
+  pop.style.top=`${rect.bottom+6+window.scrollY}px`;
+  pop.style.left=`${Math.min(rect.left+window.scrollX,window.innerWidth-260)}px`;
+  pop.innerHTML=`
+    <div class="form-label" style="margin-bottom:6px">Nouvelle échéance</div>
+    <input class="form-input" id="finance-quickadd-date" type="date" style="margin-bottom:6px;width:100%">
+    <input class="form-input" id="finance-quickadd-amount" type="number" step="0.01" placeholder="Montant €" style="margin-bottom:8px;width:100%">
+    <div style="margin-bottom:10px">${financeStatusPillHtml(defaultStatusId,(statusId)=>{if(financeQuickAddState)financeQuickAddState.statusId=statusId;})}</div>
+    <div style="display:flex;gap:6px">
+      <button type="button" class="btn-primary" style="flex:1" onclick="submitFinanceInstallmentQuickAdd()">Ajouter</button>
+      <button type="button" class="btn-secondary" onclick="closeFinanceInstallmentQuickAdd()">Annuler</button>
+    </div>`;
+  document.body.appendChild(pop);
+  document.getElementById('finance-quickadd-date').focus();
+}
+function closeFinanceInstallmentQuickAdd(){
+  const pop=document.getElementById('finance-quickadd-popover');
+  if(pop)pop.remove();
+  financeQuickAddState=null;
+}
+async function submitFinanceInstallmentQuickAdd(){
+  if(!financeQuickAddState)return;
+  const {invoiceId,statusId}=financeQuickAddState;
+  const dueDate=document.getElementById('finance-quickadd-date').value;
+  const amount=Number(document.getElementById('finance-quickadd-amount').value);
+  if(!dueDate){ showToast('Date d’échéance requise','error'); return; }
+  if(!amount||amount<=0){ showToast('Montant invalide','error'); return; }
+  const r=await fetch(`${API}/finance/invoices/${invoiceId}/installments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({dueDate,amount,statusId})});
+  const d=await r.json();
+  if(!r.ok){ showToast(d.error||'Échec de l’ajout','error'); return; }
+  closeFinanceInstallmentQuickAdd();
+  await refreshFinanceInvoices();
+  showToast('Échéance ajoutée ✓');
 }
 // Jours de retard recalculés en LOCAL après une correction d'échéance, pour
 // rafraîchir tri/KPI/barre de retard sans attendre un refetch complet —
@@ -744,6 +860,10 @@ async function openFinanceInvoiceDetail(id){
     fetch(`${API}/finance/invoices/${id}/installments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]),
   ]);
   const statutOptionsHtml=(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
+  // État du formulaire "nouvelle échéance" (pastille de statut, cf. plus
+  // haut) — remis au premier statut de la liste à chaque ouverture de fiche.
+  financeNewInstallmentStatusId=financeInstallmentStatuses[0]?financeInstallmentStatuses[0].id:null;
+  const newInstallmentStatusPillHtml=financeStatusPillHtml(financeNewInstallmentStatusId,(statusId)=>{financeNewInstallmentStatusId=statusId;});
   document.getElementById('modal-body').innerHTML=`
     <div class="finance-detail-section">
       <div class="form-group" style="margin-bottom:8px">
@@ -781,7 +901,7 @@ async function openFinanceInvoiceDetail(id){
         <input class="form-input" id="finance-installment-label" placeholder="Libellé (optionnel)…" style="max-width:150px">
         <input class="form-input" id="finance-installment-date" type="date">
         <input class="form-input" id="finance-installment-amount" type="number" step="0.01" placeholder="Montant €" style="max-width:110px">
-        <select class="form-select" id="finance-installment-status" style="max-width:170px">${financeInstallmentStatusSelectHtml(financeInstallmentStatuses[0]?financeInstallmentStatuses[0].id:null)}</select>
+        ${newInstallmentStatusPillHtml}
         <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceInstallment('${id}')">+ Ajouter</button>
       </div>
       <div id="finance-installments-list">${financeInstallmentsListHtml(id,installments)}</div>
@@ -836,14 +956,9 @@ function financeCommentsListHtml(comments){
       <div class="finance-relance-meta">${c.auteur||'—'} · ${new Date(c.created_at).toLocaleString('fr-FR')}</div>
     </div>`).join('');
 }
-// Select des statuts d'échéance (Paramètres > Recouvrement) — "Sans statut"
-// en premier (valeur vide) pour pouvoir explicitement débrancher une échéance
-// d'un statut sans devoir en choisir un autre.
-function financeInstallmentStatusSelectHtml(selectedId){
-  const none=`<option value="" ${selectedId==null?'selected':''}>Sans statut</option>`;
-  const opts=financeInstallmentStatuses.map(s=>`<option value="${s.id}" ${s.id===selectedId?'selected':''}>${s.label}</option>`).join('');
-  return none+opts;
-}
+// Une échéance existante affiche sa pastille de statut (cliquable, PATCH
+// immédiat au choix — cf. financeStatusPillHtml plus haut) au lieu du select
+// natif d'origine.
 function financeInstallmentsListHtml(invoiceId,installments){
   if(!installments.length)return '<div class="idea-box-empty">Aucune échéance personnalisée — la facture garde son échéance Pennylane unique.</div>';
   return installments.map(inst=>`
@@ -854,7 +969,7 @@ function financeInstallmentsListHtml(invoiceId,installments){
         <button class="btn-secondary" style="font-size:11px;padding:3px 8px;margin-left:auto" onclick="deleteFinanceInstallment('${invoiceId}',${inst.id})">✕</button>
       </div>
       <div class="finance-installment-row-fields">
-        <select class="form-select finance-inline-select" style="max-width:170px" onchange="patchFinanceInstallment('${invoiceId}',${inst.id},{statusId:this.value||null})">${financeInstallmentStatusSelectHtml(inst.statusId)}</select>
+        ${financeStatusPillHtml(inst.statusId,(statusId)=>patchFinanceInstallment(invoiceId,inst.id,{statusId}))}
         <label class="finance-installment-paid-field">Réglé <input type="number" class="form-input" step="0.01" min="0" style="max-width:100px" value="${inst.paidAmount||0}" onchange="patchFinanceInstallment('${invoiceId}',${inst.id},{paidAmount:this.value})"></label>
         <span style="font-size:12px;font-weight:600;${inst.solde>0?'color:#dc2626':'color:var(--green)'}">${inst.solde>0?`${fmtCA(inst.solde)} restant`:'Soldée'}</span>
       </div>
@@ -883,7 +998,7 @@ async function submitFinanceInstallment(id){
   const label=document.getElementById('finance-installment-label').value.trim();
   const dueDate=document.getElementById('finance-installment-date').value;
   const amount=Number(document.getElementById('finance-installment-amount').value);
-  const statusId=document.getElementById('finance-installment-status').value||null;
+  const statusId=financeNewInstallmentStatusId;
   if(!dueDate){ showToast('Date d’échéance requise','error'); return; }
   if(!amount||amount<=0){ showToast('Montant invalide','error'); return; }
   const r=await fetch(`${API}/finance/invoices/${id}/installments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({label,dueDate,amount,statusId})});

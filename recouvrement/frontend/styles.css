@@ -510,7 +510,17 @@ td { padding: 10px 14px; font-size: 13px; }
   cursor: pointer; font-family: 'Inter', sans-serif;
 }
 .period-apply:hover { background: var(--accent-light); }
-.report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 24px; }
+/* repeat(auto-fit,...) posait un piège CSS Grid classique ici : avec la carte
+   "Répartition..." juste après qui span TOUTES les colonnes (grid-column:1/-1),
+   auto-fit calculait le nombre de colonnes qui rentrent en LARGEUR DISPONIBLE
+   (souvent 6-9 sur un grand écran) plutôt que le nombre de cartes réellement
+   posées (4) — la carte qui span "occupait" ces colonnes fantômes et empêchait
+   leur collapse, donc les 4 vraies cartes KPI restaient tassées à gauche sur
+   une fraction de la largeur pendant que la carte du dessous, elle, étirait
+   bien sur toute la page. 4 colonnes fixes (on affiche toujours exactement 4
+   KPI avant la carte de répartition) lève l'ambiguïté et étire les 4 cartes
+   sur toute la largeur, comme la carte de répartition juste en dessous. */
+.report-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
 /* min-width:0 est le correctif clé : par défaut, un enfant de grid a
    min-width:auto, donc CSS Grid ne le laisse jamais devenir plus étroit que
    son contenu — un gros montant ("16 848 623 €") forçait alors la carte à
@@ -758,8 +768,55 @@ td { padding: 10px 14px; font-size: 13px; }
    même rendu visuel dans les deux contextes. */
 .finance-installment-dot { width: 12px; height: 12px; min-width: 12px; border-radius: 50%; border: none; padding: 0; cursor: pointer; display: inline-block; }
 .finance-installment-cell { text-align: center; }
-.finance-installment-empty { color: var(--text-muted); font-size: 12px; }
 .finance-installment-more { font-size: 10px; color: var(--text-muted); margin-left: 3px; vertical-align: middle; }
+/* Case vide d'une colonne Éch. 2/3/4 : bouton "+" discret (visible seulement
+   au survol de la ligne) plutôt qu'un tiret statique — ouvre le popover
+   d'ajout rapide sans passer par la fiche facture. */
+.finance-installment-add-btn {
+  width: 18px; height: 18px; border-radius: 50%; border: 1px dashed var(--border);
+  background: none; color: var(--text-muted); font-size: 12px; line-height: 1;
+  cursor: pointer; opacity: 0; transition: opacity 0.12s, border-color 0.12s, color 0.12s;
+}
+.finance-invoice-row:hover .finance-installment-add-btn, .finance-installment-add-btn:focus { opacity: 1; }
+.finance-installment-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+/* Ligne du tableau cliquable dans son ensemble (pas seulement le n° de
+   facture) — cf. financeRowClick(). */
+.finance-invoice-row { cursor: pointer; }
+.finance-invoice-row:hover { background: var(--surface2); }
+
+/* Pastille de statut cliquable — remplace le <select> natif partout où un
+   statut d'échéance se choisit : la couleur personnalisée reste visible en
+   permanence (un <option> natif l'aurait ignorée dans la plupart des
+   navigateurs), et s'ouvre en liste déroulante elle-même colorée au clic. */
+.finance-status-pill-wrap { position: relative; display: inline-block; }
+.finance-status-pill {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--surface2);
+  border: 1px solid var(--border); border-radius: 999px; padding: 5px 10px 5px 8px;
+  font-size: 12px; font-weight: 600; color: var(--text); cursor: pointer;
+  font-family: 'Inter', sans-serif; white-space: nowrap;
+}
+.finance-status-pill:hover { border-color: var(--accent); }
+.finance-status-pill-dot { width: 9px; height: 9px; min-width: 9px; border-radius: 50%; display: inline-block; }
+.finance-status-pill-caret { font-size: 9px; color: var(--text-muted); margin-left: 2px; }
+.finance-status-picker {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; min-width: 170px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg, var(--shadow)); padding: 4px; display: flex; flex-direction: column; gap: 1px;
+}
+.finance-status-picker-opt {
+  display: flex; align-items: center; gap: 8px; background: none; border: none; text-align: left;
+  padding: 7px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text);
+  cursor: pointer; font-family: 'Inter', sans-serif; white-space: nowrap;
+}
+.finance-status-picker-opt:hover { background: var(--surface2); }
+
+/* Popover flottant d'ajout rapide d'échéance (cf. openFinanceInstallmentQuickAdd) —
+   positionné en position:fixed au clic, jamais dans le flux normal de la page. */
+.finance-quickadd-popover {
+  position: fixed; z-index: 50; width: 240px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-lg, var(--shadow));
+  padding: 12px;
+}
 
 /* Barre d'onglets de classement (façon Pennylane : "Toutes 4298 / À traiter 73
    / À venir 24 / En retard 244 / Plus (4)") — remplace l'ancien select de
