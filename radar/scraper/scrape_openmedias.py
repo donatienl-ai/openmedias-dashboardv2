@@ -176,6 +176,71 @@ def clean_date(value):
     return ""
 
 
+# Balises meta usuelles pour la date de publication d'un article — couvre la
+# quasi-totalité des CMS (WordPress/Yoast, Drupal, sites maison...).
+_META_DATE_TAGS = [
+    ("property", "article:published_time"),
+    ("property", "article:modified_time"),
+    ("property", "og:published_time"),
+    ("property", "og:updated_time"),
+    ("name", "date"),
+    ("name", "publish-date"),
+    ("name", "publication_date"),
+    ("name", "sailthru.date"),
+    ("itemprop", "datePublished"),
+    ("itemprop", "dateCreated"),
+]
+
+
+def date_from_page(url):
+    """Dernier recours quand ni l'URL ni le flux (sitemap) ne portent de date
+    exploitable — cas de TIME (business-a-succes/<slug-texte>/, aucune date
+    dans le slug), et potentiellement toute source future dans le même cas.
+    Va chercher la date de publication directement sur la page de l'épisode
+    (meta tags usuels, <time datetime>, puis JSON-LD en dernier recours).
+
+    Coûte un fetch HTTP par appel — voir merge(), qui n'appelle cette fonction
+    que pour un épisode dont la date est encore vide après le scrape normal,
+    jamais pour les ~99% d'épisodes dont l'URL suffit déjà. Une fois trouvée,
+    la date est backfillée dans le catalogue (merge()) et ne sera plus jamais
+    re-cherchée pour cet épisode aux runs suivants.
+    """
+    html = fetch(url)
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "lxml")
+
+    for attr, key in _META_DATE_TAGS:
+        tag = soup.find("meta", attrs={attr: key})
+        if tag and tag.get("content"):
+            d = clean_date(tag["content"])
+            if d:
+                return d
+
+    for tag in soup.find_all("time"):
+        d = clean_date(tag.get("datetime") or tag.get_text())
+        if d:
+            return d
+
+    for tag in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        try:
+            payload = json.loads(tag.string or "")
+        except (TypeError, ValueError):
+            continue
+        nodes = payload if isinstance(payload, list) else [payload]
+        # @graph : certains sites (Yoast notamment) imbriquent les objets
+        # schema.org dans un unique bloc JSON-LD plutôt qu'un tableau plat.
+        nodes = nodes + [n for obj in nodes if isinstance(obj, dict)
+                          for n in (obj.get("@graph") or []) if isinstance(n, dict)]
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            d = clean_date(node.get("datePublished") or node.get("dateCreated") or "")
+            if d:
+                return d
+    return ""
+
+
 # ===========================================================================
 # 3. PARSING
 # ===========================================================================
@@ -487,9 +552,15 @@ def merge(existing, scraped, backfill=True):
         url = (r.get("url") or "").strip()
         if not url:
             continue
-        if url in by_url:
+        is_new = url not in by_url
+        changed = False
+        if is_new:
+            r = dict(r)
+            r["first_seen"] = TODAY
+            by_url[url] = r
+            added += 1
+        else:
             old = by_url[url]
-            changed = False
             # on complète les trous sans écraser ce qui est déjà renseigné
             for field in ("thumb", "date", "title", "emission", "media"):
                 if not old.get(field) and r.get(field):
@@ -498,13 +569,19 @@ def merge(existing, scraped, backfill=True):
             if old.get("source") != r.get("source"):
                 old["source"] = r["source"]
                 changed = True
-            if changed:
-                updated += 1
-        else:
-            r = dict(r)
-            r["first_seen"] = TODAY
-            by_url[url] = r
-            added += 1
+
+        # Dernier recours, quel que soit le média : ni l'URL ni le flux n'ont
+        # donné de date exploitable (cf. date_from_page ci-dessus) -> un seul
+        # fetch, uniquement pour un épisode qui en a réellement besoin.
+        rec = by_url[url]
+        if not rec.get("date"):
+            fetched = date_from_page(url)
+            if fetched:
+                rec["date"] = fetched
+                changed = True
+
+        if not is_new and changed:
+            updated += 1
 
     records = list(by_url.values())
     # tri stable : plus récent d'abord (date de pub, sinon détection)
