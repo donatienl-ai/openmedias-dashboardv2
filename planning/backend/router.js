@@ -1406,6 +1406,15 @@ app.get('/api/social-team', requireContentTeam, (req, res) => {
   ).all());
 });
 
+// ── RECOUVREMENT / PENNYLANE (nouveau projet) ────────────────────────────────
+// Toutes les routes /api/finance/* (factures, KPI, relances, commentaires,
+// échéances personnalisées + statuts configurables) vivent dans ce module
+// dédié, plutôt qu'en ligne ici — plus lisible, et surtout : évite la
+// duplication qu'il y avait avant (une ancienne copie de ces routes était
+// restée en dur dans ce fichier après l'extraction vers financeRoutes.js,
+// et comme Express prend toujours le PREMIER handler enregistré sur une
+// route, c'était cette vieille copie — sans les échéances/statuts
+// personnalisés — qui répondait réellement, jamais la nouvelle).
 require('./financeRoutes')(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES });
 
 // ── SEED ──────────────────────────────────────────────────────────────────────

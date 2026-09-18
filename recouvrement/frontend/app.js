@@ -450,22 +450,14 @@ function renderFinanceSyncOverview(k){
   wrap.style.display='';
   wrap.innerHTML=`Synchro Pennylane — Toutes ${overview.total} · ${parts}`;
 }
-// Donut SVG en pur CSS/SVG (pas de lib de charts) — technique du cercle de
-// rayon 15.9155 dont la circonférence vaut ~100, pour poser des pourcentages
-// directement en stroke-dasharray/dashoffset. Même esprit visuel que les
-// donuts qu'on voit chez Kollekt/LeanPay pour la répartition par statut.
-function financeStatutDonutSvg(segs){
-  const R=15.9155;
-  let acc=0;
-  const arcs=segs.filter(s=>s.pct>0).map(s=>{
-    const dashoffset=-acc;
-    acc+=s.pct;
-    return `<circle cx="18" cy="18" r="${R}" fill="none" stroke="${s.color}" stroke-width="4" stroke-dasharray="${s.pct} ${100-s.pct}" stroke-dashoffset="${dashoffset}" transform="rotate(-90 18 18)"></circle>`;
-  }).join('');
-  return `<svg viewBox="0 0 36 36" class="finance-donut" role="img" aria-label="Répartition de l'encours par statut">
-    <circle cx="18" cy="18" r="${R}" fill="none" stroke="var(--surface2)" stroke-width="4"></circle>
-    ${arcs}
-  </svg>`;
+// Barre de répartition empilée (remplace l'ancien donut SVG, jugé "pas
+// terrible" à l'usage) — chaque statut est un segment coloré dont la largeur
+// est sa part de l'encours total, dans l'ordre de FINANCE_STATUS_LABEL.
+function financeStatutBarHtml(segs){
+  const parts=segs.filter(s=>s.pct>0)
+    .map(s=>`<div class="finance-statut-bar-seg" style="width:${s.pct}%;background:${s.color}" title="${s.label} — ${Math.round(s.pct*10)/10}%"></div>`)
+    .join('');
+  return `<div class="finance-statut-bar">${parts||'<div class="finance-statut-bar-empty"></div>'}</div>`;
 }
 // Delta vs période précédente (même durée, juste avant) — affiché en petit
 // sous le chiffre principal, comme "DSO 47j ↑1,8% vs période précédente" chez
@@ -485,11 +477,22 @@ function renderFinanceKpis(k){
   if(!wrap||!k)return;
   const statutSegs=Object.keys(FINANCE_STATUS_LABEL).map(key=>({key,label:FINANCE_STATUS_LABEL[key],color:FINANCE_STATUS_COLOR[key]}));
   const parStatut=k.parStatut||{};
+  // Filet de sécurité : une facture dont internalStatus ne correspond à aucun
+  // des 5 statuts connus (donnée invalide/orpheline) ne doit pas silencieusement
+  // disparaître de la barre — elle tombe dans un segment "Autre" visible plutôt
+  // que de fausser le total sans qu'on puisse le voir.
+  const knownKeys=new Set(statutSegs.map(s=>s.key));
+  let autreMontant=0,autreCount=0;
+  for(const [key,v] of Object.entries(parStatut)){
+    if(!knownKeys.has(key)){ autreMontant+=v.montant||0; autreCount+=v.count||0; }
+  }
+  if(autreCount>0)statutSegs.push({key:'__autre',label:'Autre',color:'var(--text-muted)'});
   const statutTotal=Object.values(parStatut).reduce((s,v)=>s+(v.montant||0),0);
   const nonActionable=(k.montantEnRetard||0)-(k.montantActionable||0);
   const prevBounds=financePreviousPeriodBounds();
   const prevK=prevBounds?computeFinanceKpisFromCache(prevBounds):null;
-  const donutSegs=statutSegs.map(s=>({pct:statutTotal?((parStatut[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
+  const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMontant}};
+  const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
   wrap.innerHTML=`
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div></div>
     <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
@@ -497,13 +500,11 @@ function renderFinanceKpis(k){
     <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
     <div class="kpi-card" style="grid-column:1/-1">
       <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
-      <div class="finance-donut-row">
-        <div class="finance-donut-wrap">
-          ${financeStatutDonutSvg(donutSegs)}
-          <div class="finance-donut-center"><div class="finance-donut-center-val">${fmtCACompact(statutTotal)}</div><div class="finance-donut-center-lbl">encours</div></div>
-        </div>
-        <div class="finance-aging-legend">${statutSegs.filter(s=>(parStatut[s.key]||{}).count).map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${(parStatut[s.key]||{}).count} · ${fmtCA((parStatut[s.key]||{}).montant||0)}</span>`).join('')}</div>
+      <div class="finance-statut-bar-row">
+        ${financeStatutBarHtml(barSegs)}
+        <div class="finance-statut-bar-total">${fmtCACompact(statutTotal)}<span>encours</span></div>
       </div>
+        <div class="finance-aging-legend">${statutSegs.filter(s=>(parStatutForSegs[s.key]||{}).count).map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${(parStatutForSegs[s.key]||{}).count} · ${fmtCA((parStatutForSegs[s.key]||{}).montant||0)}</span>`).join('')}</div>
     </div>
   `;
 }

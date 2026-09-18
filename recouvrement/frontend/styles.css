@@ -870,17 +870,17 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-period-field input[type=date]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
 .finance-period-reset { background: none; border: none; color: var(--accent); font-size: 11.5px; font-weight: 700; cursor: pointer; padding: 0; text-decoration: underline; font-family: 'Inter', sans-serif; }
 
-/* Donut "répartition par statut" (remplace l'ancienne barre segmentée) — SVG
-   pur, pas de lib de charts, cf. financeStatutDonutSvg(). Le total est
-   superposé au centre du donut plutôt que redonné à côté, comme chez
-   Kollekt/LeanPay (repère immédiat sans balayer la légende). */
-.finance-donut-row { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-top: 6px; }
-.finance-donut-wrap { position: relative; width: 108px; height: 108px; flex-shrink: 0; }
-.finance-donut { width: 100%; height: 100%; }
-.finance-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: none; }
-.finance-donut-center-val { font-size: 14px; font-weight: 800; color: var(--text); line-height: 1.15; }
-.finance-donut-center-lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
-.finance-donut-row .finance-aging-legend { margin-top: 0; flex: 1 1 200px; }
+/* Barre de répartition par statut (remplace le donut SVG — retour à une
+   barre segmentée, jugée plus lisible à l'usage, cf. financeStatutBarHtml()).
+   Le total est affiché à droite de la barre plutôt qu'au centre, une barre
+   n'ayant pas de "centre" naturel comme un donut. */
+.finance-statut-bar-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+.finance-statut-bar { flex: 1 1 220px; min-width: 160px; height: 14px; border-radius: 7px; overflow: hidden; display: flex; background: var(--surface2); }
+.finance-statut-bar-seg { height: 100%; }
+.finance-statut-bar-empty { width: 100%; height: 100%; }
+.finance-statut-bar-total { font-size: 15px; font-weight: 800; color: var(--text); white-space: nowrap; flex-shrink: 0; }
+.finance-statut-bar-total span { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-left: 4px; }
+.finance-statut-bar-row + .finance-aging-legend { margin-top: 10px; }
 
 /* Delta période précédente affiché en petit sous les 2 KPI principaux — vert
    quand la métrique s'améliore, rouge quand elle se dégrade (une baisse
