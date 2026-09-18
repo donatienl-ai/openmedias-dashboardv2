@@ -285,16 +285,25 @@ body {
 .bg-orange { background: var(--orange); }
 .bg-violet { background: var(--violet); }
 
-/* ===== HERO CA ===== */
+/* ===== HERO CA =====
+   Avant : degrade plein 3 tons (om-blue -> om-blue-light -> om-blue-lighter,
+   ce dernier un lavande pale #A8A8FD) couvrant toute la carte - meme defaut
+   que l'ecran de login au 1er tour (une grande zone monochrome-indigo lit
+   comme "tout est violet"). Repasse sur le meme panel neutre que les autres
+   tuiles + une lueur radiale indigo en coin (identique au traitement de
+   .login-wrap) : la carte reste identifiable comme la tuile "vedette" par sa
+   couleur de marque, sans noyer l'ecran. */
 .hero-ca {
-  background: linear-gradient(135deg, var(--om-blue) 0%, var(--om-blue-light) 55%, var(--om-blue-lighter) 100%);
-  border: none;
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(109, 109, 252, 0.30), transparent 60%),
+    var(--panel);
+  border: 1px solid var(--border);
   display: flex; flex-direction: column; justify-content: center;
   min-height: 110px;
 }
-.hero-ca .lbl { font-size: 10px; letter-spacing: 2px; color: #D6D5FF; text-transform: uppercase; font-weight: 700; }
-.hero-ca .val { font-family: var(--font-display); font-size: 40px; font-weight: 800; color: #fff; line-height: 1; margin-top: 8px; letter-spacing: -1px; }
-.hero-ca .sub { font-size: 10px; color: #D6D5FF; margin-top: 6px; }
+.hero-ca .lbl { font-size: 10px; letter-spacing: 2px; color: var(--om-blue-light); text-transform: uppercase; font-weight: 700; }
+.hero-ca .val { font-family: var(--font-display); font-size: 40px; font-weight: 800; color: var(--text); line-height: 1; margin-top: 8px; letter-spacing: -1px; }
+.hero-ca .sub { font-size: 10px; color: var(--text-soft); margin-top: 6px; }
 /* .objective-summary/.objective-edit/.objective-saved sont partagées avec
    MonthlyObjectiveDialog.css (popup d'édition, fond clair neutre) — sur le
    dégradé bleu de cette carte, on les recale sur le même vocabulaire blanc/

@@ -56,10 +56,14 @@ body{
 
 /* ── HEADER ── */
 header{
+  /* Fond plein (comme .topbar du dashboard et header de Recouvrement/Planning)
+     plutot que le fond translucide + flou depose ici a l'origine : c'etait
+     un traitement propre au radar, une source de plus de "ca ne ressemble
+     pas au reste" independante de la couleur de marque. */
   position:sticky;top:0;z-index:20;
-  background:color-mix(in srgb,var(--bg) 80%,transparent);
-  backdrop-filter:blur(12px);
+  background:var(--panel);
   border-bottom:1px solid var(--border);
+  box-shadow:0 2px 12px rgba(16,26,46,0.04);
 }
 .bar{display:flex;align-items:center;justify-content:space-between;min-height:68px;gap:16px;flex-wrap:wrap;padding:14px 0}
 .bar-left{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
@@ -73,15 +77,18 @@ header{
 }
 /* Le mode présentation masque la navigation : on projette le radar seul. */
 .demo-mode .app-switch{display:none!important}
-.logo{
-  width:30px;height:30px;border-radius:9px;flex-shrink:0;
-  background:linear-gradient(140deg,var(--blue),#1d4ed8);
-  box-shadow:0 0 0 1px var(--border),0 6px 18px -6px var(--blue);
-  display:flex;align-items:center;justify-content:center;font-size:14px;
-}
+/* Repris a l'identique de .brand-mark (dashboard) / .header-mark
+   (Recouvrement, Planning) : un simple trait de couleur, pas une icone-badge
+   avec degrade et glow — c'etait le 2e plus gros ecart visuel entre Radar et
+   le reste (en plus du fond translucide ci-dessus), et #1d4ed8 etait un bleu
+   brut jamais migre vers l'indigo de marque. */
+.logo{width:4px;height:27px;border-radius:3px;background:var(--om-blue);flex-shrink:0}
 .brand-text{}
-.brand-eyebrow{font-size:9px;letter-spacing:3px;font-weight:700;color:var(--blue-light);text-transform:uppercase}
-.brand-title{font-family:var(--font-display);font-size:17px;font-weight:800;color:var(--text);letter-spacing:-.3px;line-height:1.1}
+/* Tailles alignees sur .brand-eyebrow/.brand-title du dashboard et
+   .header-eyebrow/.header-logo de Recouvrement/Planning (12px/14px) au lieu
+   des 9px/17px propres au radar. */
+.brand-eyebrow{font-size:12px;letter-spacing:0.6px;font-weight:800;color:var(--text);text-transform:uppercase;line-height:1.25}
+.brand-title{font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--text);letter-spacing:0.4px;text-transform:uppercase;line-height:1.25;white-space:nowrap}
 .hbtns{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .hbtn{
   border:1px solid var(--border);background:var(--panel);color:var(--text-soft);
