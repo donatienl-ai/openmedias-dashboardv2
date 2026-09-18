@@ -43,9 +43,13 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
    independante du theme clair/sombre choisi pour l'espace de travail - ecran
    de quelques secondes, pas un espace de travail (cf. audit UX/DA). */
 #pin-screen {
-  --bg: #0D0D2B; --surface: #12123A; --surface2: #1A1A4A; --border: #2A2A5C;
-  --text: #FFFFFF; --text-dim: #A6A6E8; --text-muted: #7A7AC4;
-  --accent: #6D6DFC; --accent-light: #8A8AFC; --accent-dim: rgba(109,109,252,0.20);
+  /* Reprend a l'identique les valeurs du theme sombre existant de l'appli
+     (deja neutres, deja valides) plutot qu'une navy/gris invente : seuls le
+     CTA et le logo portent l'indigo de marque, le reste de l'ecran reste
+     neutre - un premier essai rendait tout l'ecran trop monochrome-violet. */
+  --bg: #050A14; --surface: #0B1322; --surface2: #101B30; --border: #1B2A45;
+  --text: #FFFFFF; --text-dim: #8295B5; --text-muted: #54678A;
+  --accent: #6D6DFC; --accent-light: #8A8AFC; --accent-dim: rgba(109,109,252,0.14);
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 100;
 }
 .pin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); }

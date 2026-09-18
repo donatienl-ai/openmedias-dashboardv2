@@ -44,13 +44,17 @@ body {
    personnalisees sont redefinies ici : toute regle .login-* qui lit var(--bg),
    var(--panel), var(--text)... en aval recoit automatiquement ces valeurs. */
 .login-wrap {
-  --bg: #0D0D2B;
-  --panel: #12123A;
-  --border: #2A2A5C;
+  /* Retour aux neutres du theme sombre existant de l'appli (deja neutres,
+     deja valides) - seuls le CTA et l'eyebrow portent l'indigo de marque.
+     Un premier essai avait invente une navy/gris plus violaces pour tout
+     l'ecran, ce qui rendait l'ensemble trop monochrome-violet. */
+  --bg: #050A14;
+  --panel: #0B1322;
+  --border: #1B2A45;
   --text: #FFFFFF;
-  --text-soft: #A6A6E8;
-  --text-muted: #7A7AC4;
-  --om-blue: #3B3BF9;
+  --text-soft: #8295B5;
+  --text-muted: #54678A;
+  --om-blue: #6D6DFC;
   --om-blue-light: #8A8AFC;
   min-height: 100vh;
   display: flex;
