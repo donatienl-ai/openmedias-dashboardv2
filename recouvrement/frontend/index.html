@@ -104,51 +104,37 @@
          permanence faisait doublon (relevé dans l'audit UX). -->
     <div id="finance-sync-overview" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
 
-    <!-- Sous-navigation Vue d'ensemble / Factures / Litiges — cf.
-         setFinanceSubview(). Vue d'ensemble = lecture (KPI + répartition),
-         Factures = action (période/onglets/tableau), Litiges = vue dédiée. -->
-    <div class="finance-subnav" id="finance-subnav">
-      <button type="button" class="finance-subnav-btn active" data-view="overview" onclick="setFinanceSubview('overview')">Vue d'ensemble</button>
-      <button type="button" class="finance-subnav-btn" data-view="factures" onclick="setFinanceSubview('factures')">Factures</button>
-      <button type="button" class="finance-subnav-btn" data-view="litiges" onclick="setFinanceSubview('litiges')">Litiges <span class="finance-subnav-badge" id="finance-subnav-litiges-count">0</span></button>
-    </div>
+    <!-- Vue d'ensemble et Factures sont fusionnées en une seule vue (KPI +
+         répartition + période/onglets/tableau, tout sur la même page) — plus
+         de sous-navigation ni de vue "Litiges" à part (cf. app.js). -->
+    <div class="report-grid" id="finance-kpis"></div>
 
-    <div id="finance-view-overview" class="finance-subview">
-      <div class="report-grid" id="finance-kpis"></div>
+    <!-- Filtre de période : calendrier personnalisable (Du/Au) sur la date
+         d'ÉCHÉANCE — restreint à la fois les onglets, le tableau et les KPI
+         ci-dessous. Cf. financeMatchesPeriod() / computeFinanceKpisFromCache(). -->
+    <div class="finance-period-bar">
+      <span class="finance-period-tag">Période</span>
+      <label class="finance-period-field">Du <input type="date" id="finance-period-from" onchange="setFinancePeriodFrom(this.value)"></label>
+      <label class="finance-period-field">Au <input type="date" id="finance-period-to" onchange="setFinancePeriodTo(this.value)"></label>
+      <button type="button" class="finance-period-reset" id="finance-period-reset" onclick="resetFinancePeriod()" style="display:none">Réinitialiser</button>
     </div>
-
-    <div id="finance-view-factures" class="finance-subview" style="display:none">
-      <!-- Filtre de période : calendrier personnalisable (Du/Au) sur la date
-           d'ÉCHÉANCE — restreint à la fois les onglets, le tableau et les KPI
-           ci-dessous. Cf. financeMatchesPeriod() / computeFinanceKpisFromCache(). -->
-      <div class="finance-period-bar">
-        <span class="finance-period-tag">Période</span>
-        <label class="finance-period-field">Du <input type="date" id="finance-period-from" onchange="setFinancePeriodFrom(this.value)"></label>
-        <label class="finance-period-field">Au <input type="date" id="finance-period-to" onchange="setFinancePeriodTo(this.value)"></label>
-        <button type="button" class="finance-period-reset" id="finance-period-reset" onclick="resetFinancePeriod()" style="display:none">Réinitialiser</button>
+    <!-- Barre de classement façon Pennylane (Toutes/À venir/En retard/…,
+         chacun avec son compteur, multi-sélectionnable) — cf.
+         renderFinanceTabs(). La recherche est fusionnée dans la même ligne
+         (au lieu d'une carte à part) pour réduire l'empilement de blocs
+         avant le tableau. -->
+    <div class="finance-tabs-row">
+      <div class="finance-tabs" id="finance-tabs"></div>
+      <!-- Tri "priorité" (montant × retard) — répond à "qu'est-ce que je
+           traite en premier", que le tri colonne par colonne ne couvre pas.
+           Bouton à part plutôt qu'un 4e en-tête cliquable : ce n'est pas une
+           colonne du tableau, c'est un mode de tri transversal. -->
+      <button type="button" class="finance-priority-btn" id="finance-priority-btn" onclick="setFinanceSort('priority')" title="Trier par urgence réelle : montant restant dû × jours de retard">⚡ Priorité<span id="finance-priority-arrow"></span></button>
+      <div class="finance-search-inline">
+        <input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
       </div>
-      <!-- Barre de classement façon Pennylane (Toutes/À traiter/À venir/En
-           retard/Plus, chacun avec son compteur) — cf. renderFinanceTabs(). La
-           recherche est fusionnée dans la même ligne (au lieu d'une carte à
-           part) pour réduire l'empilement de blocs avant le tableau. -->
-      <div class="finance-tabs-row">
-        <div class="finance-tabs" id="finance-tabs"></div>
-        <!-- Tri "priorité" (montant × retard) — répond à "qu'est-ce que je
-             traite en premier", que le tri colonne par colonne ne couvre pas.
-             Bouton à part plutôt qu'un 4e en-tête cliquable : ce n'est pas une
-             colonne du tableau, c'est un mode de tri transversal. -->
-        <button type="button" class="finance-priority-btn" id="finance-priority-btn" onclick="setFinanceSort('priority')" title="Trier par urgence réelle : montant restant dû × jours de retard">⚡ Priorité<span id="finance-priority-arrow"></span></button>
-        <div class="finance-search-inline">
-          <input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
-        </div>
-      </div>
-      <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
     </div>
-
-    <div id="finance-view-litiges" class="finance-subview" style="display:none">
-      <div class="info-banner neutral" style="margin-bottom:12px">💡 Photo en direct des factures actuellement marquées « Litige » — pas d'historique de durée (on ne garde pas encore de date de passage en litige), juste l'état courant.</div>
-      <div class="media-table-card" id="finance-litiges-table" style="overflow-x:auto"></div>
-    </div>
+    <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
   </div>
 </div>
 

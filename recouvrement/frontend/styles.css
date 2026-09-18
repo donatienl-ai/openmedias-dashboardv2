@@ -825,18 +825,6 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-kpi-delta.down { color: var(--green); }
 .finance-kpi-delta.flat { color: var(--text-muted); }
 
-/* Sous-navigation Vue d'ensemble / Factures / Litiges — sépare la lecture
-   (KPI + répartition) de l'action (tableau de factures), et isole les litiges
-   dans leur propre vue plutôt que noyés dans le tableau général filtré par
-   statut interne (relevé dans l'audit UX, aligné avec ce que fait Kollekt). */
-.finance-subnav { display: flex; align-items: center; gap: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px; box-shadow: var(--shadow); margin-bottom: 14px; width: fit-content; }
-.finance-subnav-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--text-dim); font-size: 13px; font-weight: 700; padding: 8px 16px; border-radius: 10px; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
-.finance-subnav-btn:hover { background: var(--surface2); color: var(--text); }
-.finance-subnav-btn.active { background: var(--accent-dim); color: var(--accent); }
-.finance-subnav-badge { background: var(--surface2); color: var(--text-dim); font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
-.finance-subnav-btn.active .finance-subnav-badge { background: #dc2626; color: #fff; }
-.finance-subnav-btn.litiges-empty .finance-subnav-badge { background: var(--surface2); color: var(--text-dim); }
-
 /* Snapshot client dans la fiche détail — décompte EN DIRECT sur nos propres
    factures suivies (jamais un score externe/IA), affiché seulement quand ce
    client a plus d'une facture ouverte (sinon ça n'apporte rien face à la

@@ -173,30 +173,12 @@ function financeSortArrow(key){
   return `<span class="sort-arrow">${financeSortDir===1?'▲':'▼'}</span>`;
 }
 
-// Sous-navigation Vue d'ensemble / Factures / Litiges — sépare la lecture
-// (KPI + répartition par statut) de l'action (période/onglets/tableau), et
-// donne aux litiges leur propre vue plutôt que noyés dans le tableau général
-// filtré par statut interne (relevé dans l'audit UX).
-let financeSubview='overview';
-function setFinanceSubview(key){
-  financeSubview=key;
-  document.querySelectorAll('.finance-subnav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===key));
-  document.getElementById('finance-view-overview').style.display=key==='overview'?'':'none';
-  document.getElementById('finance-view-factures').style.display=key==='factures'?'':'none';
-  document.getElementById('finance-view-litiges').style.display=key==='litiges'?'':'none';
-  if(key==='litiges')renderFinanceLitiges();
-}
-// Badge du nombre de litiges en cours sur l'onglet lui-même — mis à jour à
-// chaque refresh du cache (synchro, ou changement de statut interne d'une
-// facture) sans attendre que l'utilisateur ouvre la vue Litiges.
-function updateFinanceLitigesBadge(){
-  const badge=document.getElementById('finance-subnav-litiges-count');
-  if(!badge)return;
-  const n=financeInvoicesCache.filter(i=>i.internalStatus==='litige').length;
-  badge.textContent=n;
-  badge.parentElement.classList.toggle('litiges-empty',n===0);
-  if(financeSubview==='litiges')renderFinanceLitiges();
-}
+// Vue d'ensemble et Factures sont à nouveau fusionnées en une seule vue (KPI
+// + répartition + période/onglets/tableau, tout sur la même page) — la
+// sous-navigation à 3 onglets (Vue d'ensemble/Factures/Litiges) est retirée,
+// tout comme la vue "Litiges" dédiée : un litige reste un statut interne
+// comme un autre (visible dans le tableau et le select de statut), il n'a
+// plus sa propre vue à part.
 
 // Filtre de période : calendrier personnalisable (Du/Au), sur la date
 // d'ÉCHÉANCE de la facture — remplace l'ancien système à granularités fixes
@@ -281,7 +263,6 @@ async function refreshFinanceInvoices(){
   renderFinanceKpis(computeFinanceKpisFromCache());
   renderFinanceTabs();
   renderFinanceInvoices();
-  updateFinanceLitigesBadge();
 }
 // Statuts Pennylane exclus de l'encours de recouvrement (mêmes exclusions que
 // /api/finance/kpis côté back : un brouillon, un avoir, une annulation... ne
@@ -657,31 +638,6 @@ function renderFinanceInvoices(){
     </tr>`).join('')}</tbody>
   </table>`;
 }
-// Vue dédiée "Litiges" — un snapshot en direct des factures actuellement en
-// statut interne litige, pas une file d'attente triée par ancienneté (on ne
-// garde pas de date de passage en litige, donc pas de tri honnête possible
-// par "depuis quand" — cf. le bandeau d'avertissement au-dessus du tableau).
-function renderFinanceLitiges(){
-  const wrap=document.getElementById('finance-litiges-table');
-  if(!wrap)return;
-  const list=financeInvoicesCache.filter(inv=>inv.internalStatus==='litige');
-  if(!list.length){
-    wrap.innerHTML='<div class="idea-box-empty" style="padding:24px 0">Aucun litige en cours 🎉</div>';
-    return;
-  }
-  wrap.innerHTML=`<table>
-    <thead><tr><th>Facture</th><th>Entreprise</th><th>Contact</th><th>Échéance</th><th>Retard</th><th>Montant TTC</th><th></th></tr></thead>
-    <tbody>${list.map(inv=>`<tr>
-      <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button></td>
-      <td>${inv.customerName||'—'}</td>
-      <td>${inv.contactName||inv.contactEmail||inv.customerEmail||'—'}</td>
-      <td>${formatDateFR(inv.deadline)}</td>
-      <td>${financeRetardBarHtml(inv)}</td>
-      <td style="font-weight:600;color:#dc2626">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}</td>
-      <td><button class="btn-secondary" style="font-size:11px;padding:4px 10px" onclick="openFinanceInvoiceDetail('${inv.id}')">Ouvrir</button></td>
-    </tr>`).join('')}</tbody>
-  </table>`;
-}
 // Jours de retard recalculés en LOCAL après une correction d'échéance, pour
 // rafraîchir tri/KPI/barre de retard sans attendre un refetch complet —
 // même formule que joursDeRetard() côté back (router.js).
@@ -717,7 +673,6 @@ async function patchFinanceInvoice(id,patch){
     renderFinanceTabs();
     renderFinanceInvoices();
     renderFinanceKpis(computeFinanceKpisFromCache());
-    updateFinanceLitigesBadge();
     if(financeSelectedInvoiceId===id)openFinanceInvoiceDetail(id);
     showToast('Facture mise à jour');
   }catch(e){ showToast(e.message||"Échec de la mise à jour",'error'); }
