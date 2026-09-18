@@ -274,6 +274,19 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_finance_installments_invoice ON finance_invoice_installments(invoice_id);
+
+  -- Statuts d'échéance personnalisables (Paramètres > Recouvrement) : contrairement
+  -- à internal_status côté facture (figé dans le code, cf. FINANCE_INTERNAL_STATUSES
+  -- plus bas), cette liste est éditable par l'équipe elle-même sans redéploiement —
+  -- chaque échéance (finance_invoice_installments) référence un statut d'ici via
+  -- status_id. sort_order pilote l'ordre d'affichage (select, colonnes du tableau).
+  CREATE TABLE IF NOT EXISTS finance_installment_statuses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#64748b',
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 // Migration : contact réel (nom/mail/tel d'une personne, cf. sous-endpoint
 // Pennylane /customers/{id}/contacts) — distinct de email/phone ci-dessus,
@@ -291,6 +304,31 @@ try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN remaining_amount_ht REA
 // Le montant dû, lui, n'est jamais touché par cette correction : seule la
 // date qui sert au calcul du retard change (voir PATCH /api/finance/invoices/:id).
 try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN deadline_manual INTEGER DEFAULT 0'); } catch(e) {}
+// Migration : suivi fin par échéance — un statut personnalisable (cf.
+// finance_installment_statuses ci-dessus) et le montant déjà réglé sur CETTE
+// tranche (le solde restant = amount - paid_amount se calcule à la volée,
+// jamais stocké). `paid` (0/1) reste lu par du code plus ancien éventuel et
+// se garde en synchro automatique avec paid_amount (voir financeRoutes.js).
+try { db.exec('ALTER TABLE finance_invoice_installments ADD COLUMN status_id INTEGER'); } catch(e) {}
+try { db.exec('ALTER TABLE finance_invoice_installments ADD COLUMN paid_amount REAL DEFAULT 0'); } catch(e) {}
+
+// Seed : statuts d'échéance par défaut, uniquement si la liste est encore
+// vide (première mise en route de la fonctionnalité) — l'équipe est ensuite
+// libre de les renommer/recolorer/réordonner/supprimer depuis Paramètres.
+try {
+  const noStatuses = db.prepare('SELECT COUNT(*) AS n FROM finance_installment_statuses').get().n === 0;
+  if (noStatuses) {
+    const seed = [
+      ['À venir', '#64748b'],
+      ['Relancée', '#d4a017'],
+      ['Partiellement réglée', '#0d9488'],
+      ['Litige', '#dc2626'],
+      ['Soldée', '#16a34a'],
+    ];
+    const insert = db.prepare('INSERT INTO finance_installment_statuses (label, color, sort_order) VALUES (?,?,?)');
+    seed.forEach(([label, color], i) => insert.run(label, color, i));
+  }
+} catch(e) {}
 
 // Seed setting: horizon de visibilité commercial (en mois), 3 par défaut
 try {

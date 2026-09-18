@@ -493,6 +493,20 @@
       <div id="commerciaux-list" class="param-table"></div>
     </div>
 
+    <!-- Statuts d'échéance personnalisables (Recouvrement) : ces échéances
+         2/3/4 (paiement fractionné) portent un statut librement défini ici —
+         libellé + couleur + ordre d'affichage — plutôt qu'une liste figée
+         dans le code, cf. finance_installment_statuses / renderFinanceInstallmentStatusesList(). -->
+    <div class="param-card">
+      <div class="param-section-title" style="margin-bottom:10px"><span class="dot" style="background:var(--accent)"></span>💶 Recouvrement — statuts d'échéance</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Utilisés sur les échéances 2/3/4 d'une facture fractionnée (Recouvrement) — l'ordre ci-dessous est celui affiché dans le select de chaque échéance.</div>
+      <div id="finance-installment-statuses-list" class="param-table"></div>
+      <div class="form-row" style="margin-top:12px;align-items:flex-end">
+        <div class="form-group"><label class="form-label">Nouveau statut</label><input class="form-input" id="param-nouveau-statut-echeance" placeholder="Ex: Relancée" onkeydown="if(event.key==='Enter')addFinanceInstallmentStatus()"></div>
+        <button class="btn-secondary" onclick="addFinanceInstallmentStatus()">+ Ajouter</button>
+      </div>
+    </div>
+
     <!-- Réglages historiquement propres à OpenDashboard (reporting email,
          connexions, groupements d'affichage) — portés ici pour n'avoir qu'un
          seul endroit de gestion admin, quelle que soit la page de départ.

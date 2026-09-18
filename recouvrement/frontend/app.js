@@ -129,8 +129,16 @@ function fmtCACompact(v){
   return new Intl.NumberFormat('fr-FR',{notation:'compact',style:'currency',currency:'EUR',minimumFractionDigits:0,maximumFractionDigits:1}).format(v);
 }
 
+// Statuts d'échéance personnalisables (Paramètres > Recouvrement) — chargés
+// une fois au démarrage, indexés par id pour un accès O(1) depuis les
+// colonnes Éch. 2/3/4 et le select de la fiche détail. La liste elle-même
+// (ordonnée) sert à construire ce select.
+let financeInstallmentStatuses=[];
+let financeInstallmentStatusById={};
 async function init(){
   meta=await fetch(`${API}/meta`).then(r=>r.json());
+  financeInstallmentStatuses=await fetch(`${API}/finance/installment-statuses`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
+  financeInstallmentStatusById=Object.fromEntries(financeInstallmentStatuses.map(s=>[s.id,s]));
   await loadFinance();
 }
 
@@ -623,7 +631,7 @@ function renderFinanceInvoices(){
   }
   const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
   wrap.innerHTML=`<table>
-    <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Échéance${financeSortArrow('deadline')}</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th>Montant HT</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
+    <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Échéance${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th>Montant HT</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
     <tbody>${list.map(inv=>`<tr>
       <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeLastRelanceBadge(inv)}</td>
       <td>${inv.customerName||'—'}</td>
@@ -631,12 +639,34 @@ function renderFinanceInvoices(){
       <td>${inv.contactEmail||inv.customerEmail||'—'}</td>
       <td>${inv.contactPhone||inv.customerPhone||'—'}</td>
       <td><div class="finance-deadline-cell"><input type="date" class="form-input finance-deadline-input" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${inv.id}',{deadline:this.value})" title="${inv.deadlineManual?'Échéance corrigée manuellement — ne sera plus écrasée par la synchro Pennylane':'Échéance Pennylane'}">${inv.deadlineManual?'<span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}</div></td>
+      <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,0)}</td>
+      <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,1)}</td>
+      <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,2)}</td>
       <td>${financeRetardBarHtml(inv)}</td>
       <td>${fmtCA(inv.remainingAmountHt!=null?inv.remainingAmountHt:inv.amountHt)}</td>
       <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}</td>
       <td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select></td>
     </tr>`).join('')}</tbody>
   </table>`;
+}
+// Colonnes Éch. 2/3/4 : une pastille de couleur (statut d'échéance, cf.
+// Paramètres > Recouvrement) plutôt que date+montant en clair — reste léger
+// visuellement même pour les factures qui n'ont que 2 ou 3 tranches (la
+// majorité). Le détail complet (date, montant, solde) est dans le title au
+// survol, et l'édition reste dans la fiche facture (clic = ouvre la fiche).
+// idx 0/1/2 = échéance 2/3/4 (l'échéance 1 reste la colonne "Échéance" ci-
+// dessus, c'est la deadline Pennylane) ; une 5e tranche éventuelle (rare)
+// n'est pas cachée silencieusement : elle apparaît en badge "+N" sur la
+// dernière colonne plutôt que de rajouter une colonne par tranche possible.
+function financeInstallmentCellHtml(inv,idx){
+  const list=inv.installments||[];
+  const inst=list[idx];
+  if(!inst)return '<span class="finance-installment-empty">—</span>';
+  const color=inst.statusColor||'var(--text-muted)';
+  const label=inst.statusLabel||'Sans statut';
+  const title=`${label} — ${formatDateFR(inst.dueDate)} · ${fmtCA(inst.solde)} restant sur ${fmtCA(inst.amount)}`.replace(/"/g,'&quot;');
+  const extra=(idx===2&&list.length>3)?`<span class="finance-installment-more">+${list.length-3}</span>`:'';
+  return `<button type="button" class="finance-installment-dot" style="background:${color}" title="${title}" onclick="openFinanceInvoiceDetail('${inv.id}')"></button>${extra}`;
 }
 // Jours de retard recalculés en LOCAL après une correction d'échéance, pour
 // rafraîchir tri/KPI/barre de retard sans attendre un refetch complet —
@@ -746,11 +776,12 @@ async function openFinanceInvoiceDetail(id){
     </div>
 
     <div class="finance-detail-section">
-      <div class="form-label">Échéances de paiement</div>
+      <div class="form-label">Échéances de paiement <span style="font-weight:400;color:var(--text-muted)">(2e, 3e, 4e… — l'échéance 1 reste celle du haut de fiche)</span></div>
       <div style="display:flex;gap:8px;margin:6px 0 8px;flex-wrap:wrap">
         <input class="form-input" id="finance-installment-label" placeholder="Libellé (optionnel)…" style="max-width:150px">
         <input class="form-input" id="finance-installment-date" type="date">
         <input class="form-input" id="finance-installment-amount" type="number" step="0.01" placeholder="Montant €" style="max-width:110px">
+        <select class="form-select" id="finance-installment-status" style="max-width:170px">${financeInstallmentStatusSelectHtml(financeInstallmentStatuses[0]?financeInstallmentStatuses[0].id:null)}</select>
         <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceInstallment('${id}')">+ Ajouter</button>
       </div>
       <div id="finance-installments-list">${financeInstallmentsListHtml(id,installments)}</div>
@@ -805,15 +836,28 @@ function financeCommentsListHtml(comments){
       <div class="finance-relance-meta">${c.auteur||'—'} · ${new Date(c.created_at).toLocaleString('fr-FR')}</div>
     </div>`).join('');
 }
+// Select des statuts d'échéance (Paramètres > Recouvrement) — "Sans statut"
+// en premier (valeur vide) pour pouvoir explicitement débrancher une échéance
+// d'un statut sans devoir en choisir un autre.
+function financeInstallmentStatusSelectHtml(selectedId){
+  const none=`<option value="" ${selectedId==null?'selected':''}>Sans statut</option>`;
+  const opts=financeInstallmentStatuses.map(s=>`<option value="${s.id}" ${s.id===selectedId?'selected':''}>${s.label}</option>`).join('');
+  return none+opts;
+}
 function financeInstallmentsListHtml(invoiceId,installments){
   if(!installments.length)return '<div class="idea-box-empty">Aucune échéance personnalisée — la facture garde son échéance Pennylane unique.</div>';
   return installments.map(inst=>`
-    <div class="finance-installment-row ${inst.paid?'paid':''}">
-      <label style="display:flex;align-items:center;gap:6px;flex:1;cursor:pointer">
-        <input type="checkbox" ${inst.paid?'checked':''} onchange="toggleFinanceInstallmentPaid('${invoiceId}',${inst.id},this.checked)">
-        <span>${inst.label?`${inst.label} — `:''}${formatDateFR(inst.due_date)} · ${fmtCA(inst.amount)}</span>
-      </label>
-      <button class="btn-secondary" style="font-size:11px;padding:3px 8px" onclick="deleteFinanceInstallment('${invoiceId}',${inst.id})">✕</button>
+    <div class="finance-installment-row">
+      <div class="finance-installment-row-top">
+        <span class="finance-installment-dot" style="background:${inst.statusColor||'var(--text-muted)'}"></span>
+        <span>${inst.label?`${inst.label} — `:''}${formatDateFR(inst.dueDate)} · ${fmtCA(inst.amount)}</span>
+        <button class="btn-secondary" style="font-size:11px;padding:3px 8px;margin-left:auto" onclick="deleteFinanceInstallment('${invoiceId}',${inst.id})">✕</button>
+      </div>
+      <div class="finance-installment-row-fields">
+        <select class="form-select finance-inline-select" style="max-width:170px" onchange="patchFinanceInstallment('${invoiceId}',${inst.id},{statusId:this.value||null})">${financeInstallmentStatusSelectHtml(inst.statusId)}</select>
+        <label class="finance-installment-paid-field">Réglé <input type="number" class="form-input" step="0.01" min="0" style="max-width:100px" value="${inst.paidAmount||0}" onchange="patchFinanceInstallment('${invoiceId}',${inst.id},{paidAmount:this.value})"></label>
+        <span style="font-size:12px;font-weight:600;${inst.solde>0?'color:#dc2626':'color:var(--green)'}">${inst.solde>0?`${fmtCA(inst.solde)} restant`:'Soldée'}</span>
+      </div>
     </div>`).join('');
 }
 async function viewFinanceInvoicePdf(id){
@@ -839,24 +883,41 @@ async function submitFinanceInstallment(id){
   const label=document.getElementById('finance-installment-label').value.trim();
   const dueDate=document.getElementById('finance-installment-date').value;
   const amount=Number(document.getElementById('finance-installment-amount').value);
+  const statusId=document.getElementById('finance-installment-status').value||null;
   if(!dueDate){ showToast('Date d’échéance requise','error'); return; }
   if(!amount||amount<=0){ showToast('Montant invalide','error'); return; }
-  const r=await fetch(`${API}/finance/invoices/${id}/installments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({label,dueDate,amount})});
+  const r=await fetch(`${API}/finance/invoices/${id}/installments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({label,dueDate,amount,statusId})});
   const d=await r.json();
   if(!r.ok){ showToast(d.error||'Échec de l’ajout','error'); return; }
   document.getElementById('finance-installment-label').value='';
   document.getElementById('finance-installment-date').value='';
   document.getElementById('finance-installment-amount').value='';
-  const installments=await fetch(`${API}/finance/invoices/${id}/installments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
-  document.getElementById('finance-installments-list').innerHTML=financeInstallmentsListHtml(id,installments);
+  // Recharge aussi le cache des factures : la nouvelle échéance doit remonter
+  // dans les colonnes Éch. 2/3/4 du tableau derrière le modal.
+  await refreshFinanceInvoices();
+  openFinanceInvoiceDetail(id);
 }
-async function toggleFinanceInstallmentPaid(invoiceId,installmentId,paid){
-  await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify({paid})});
+// Édition d'une échéance existante (statut et/ou montant réglé) — répercutée
+// dans le cache local (colonnes du tableau) sans tout recharger depuis le
+// serveur, même principe que patchFinanceInvoice() pour la facture entière.
+async function patchFinanceInstallment(invoiceId,installmentId,patch){
+  try{
+    const res=await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
+    if(!res.ok){ const err=await res.json().catch(()=>({})); throw new Error(err.error||'Échec de la mise à jour'); }
+    const updated=await res.json();
+    const inv=financeInvoicesCache.find(i=>i.id===invoiceId);
+    if(inv&&Array.isArray(inv.installments)){
+      const idx=inv.installments.findIndex(x=>x.id===installmentId);
+      if(idx!==-1)inv.installments[idx]=updated;
+    }
+    renderFinanceInvoices();
+    if(financeSelectedInvoiceId===invoiceId)openFinanceInvoiceDetail(invoiceId);
+  }catch(e){ showToast(e.message||'Échec de la mise à jour','error'); }
 }
 async function deleteFinanceInstallment(invoiceId,installmentId){
   await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'DELETE',headers:financeHeaders()});
-  const installments=await fetch(`${API}/finance/invoices/${invoiceId}/installments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
-  document.getElementById('finance-installments-list').innerHTML=financeInstallmentsListHtml(invoiceId,installments);
+  await refreshFinanceInvoices();
+  openFinanceInvoiceDetail(invoiceId);
 }
 async function submitFinanceRelance(id){
   const canal=document.getElementById('finance-relance-canal').value;

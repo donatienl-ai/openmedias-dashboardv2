@@ -67,6 +67,30 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
       GROUP BY invoice_id
     ) lr ON lr.invoice_id = i.id
   `).all();
+  // Échéances de paiement (2e/3e/4e tranche...) de TOUTES les factures, en une
+  // seule requête plutôt qu'une par facture (évite un N+1 sur plusieurs
+  // milliers de lignes) — regroupées ensuite par invoice_id ci-dessous. Sert
+  // les colonnes Éch. 2/3/4 du tableau (échéance 1 = la deadline ci-dessus).
+  const instRows = db.prepare(`
+    SELECT fi.*, s.label AS status_label, s.color AS status_color
+    FROM finance_invoice_installments fi
+    LEFT JOIN finance_installment_statuses s ON s.id = fi.status_id
+    ORDER BY fi.invoice_id, fi.due_date ASC
+  `).all();
+  const installmentsByInvoice = {};
+  for (const row of instRows) {
+    (installmentsByInvoice[row.invoice_id] || (installmentsByInvoice[row.invoice_id] = [])).push({
+      id: row.id,
+      label: row.label,
+      dueDate: row.due_date,
+      amount: row.amount,
+      paidAmount: row.paid_amount || 0,
+      solde: Math.max(0, (row.amount || 0) - (row.paid_amount || 0)),
+      statusId: row.status_id,
+      statusLabel: row.status_label || null,
+      statusColor: row.status_color || null,
+    });
+  }
   const { statut, q, retard_only } = req.query;
   const qLower = q ? String(q).trim().toLowerCase() : '';
   let list = rows.map((r) => ({
@@ -93,6 +117,9 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     internalStatus: r.internal_status,
     daysLate: joursDeRetard(r.deadline),
     lastRelanceAt: r.last_relance_at || null,
+    // Échéances 2, 3, 4... (triées par date) — l'échéance 1 reste `deadline`
+    // ci-dessus, éditable directement, comme avant cette fonctionnalité.
+    installments: installmentsByInvoice[r.id] || [],
   }));
   if (statut) list = list.filter((r) => r.internalStatus === statut);
   if (retard_only === '1') list = list.filter((r) => (r.daysLate || 0) > 0);
@@ -265,9 +292,55 @@ app.post('/api/finance/invoices/:id/comments', requireFinance, (req, res) => {
 
 // Échéances de paiement personnalisées (Pennylane n'expose qu'une seule
 // deadline — `installments` y est encore en alpha et toujours null — donc ces
-// dates d'échelonnement sont gérées entièrement de notre côté).
+// dates d'échelonnement sont gérées entièrement de notre côté). Chaque
+// échéance porte désormais un statut personnalisable (finance_installment_statuses)
+// et un montant déjà réglé — `paid` (0/1) reste maintenu en synchro pour du
+// code plus ancien éventuel, mais paid_amount est la source de vérité.
+function installmentWithStatus(id) {
+  return db.prepare(`
+    SELECT fi.*, s.label AS status_label, s.color AS status_color
+    FROM finance_invoice_installments fi
+    LEFT JOIN finance_installment_statuses s ON s.id = fi.status_id
+    WHERE fi.id = ?
+  `).get(id);
+}
+function shapeInstallment(row) {
+  return {
+    id: row.id,
+    invoiceId: row.invoice_id,
+    label: row.label,
+    dueDate: row.due_date,
+    amount: row.amount,
+    paidAmount: row.paid_amount || 0,
+    solde: Math.max(0, (row.amount || 0) - (row.paid_amount || 0)),
+    paid: !!row.paid,
+    statusId: row.status_id,
+    statusLabel: row.status_label || null,
+    statusColor: row.status_color || null,
+    createdAt: row.created_at,
+  };
+}
+// Valide et normalise un statusId envoyé par le front — null/absent = pas de
+// statut (affiché "Sans statut"), et un id qui ne correspond à aucune ligne
+// de finance_installment_statuses est rejeté plutôt que silencieusement
+// ignoré (évite qu'un statut supprimé entre-temps se retrouve à réapparaître).
+function resolveStatusId(rawStatusId) {
+  if (rawStatusId === undefined) return undefined; // pas touché
+  if (rawStatusId === null || rawStatusId === '') return null;
+  const id = Number(rawStatusId);
+  const exists = db.prepare('SELECT id FROM finance_installment_statuses WHERE id=?').get(id);
+  if (!exists) return false; // signal d'erreur pour l'appelant
+  return id;
+}
+
 app.get('/api/finance/invoices/:id/installments', requireFinance, (req, res) => {
-  res.json(db.prepare('SELECT * FROM finance_invoice_installments WHERE invoice_id=? ORDER BY due_date ASC').all(req.params.id));
+  const rows = db.prepare(`
+    SELECT fi.*, s.label AS status_label, s.color AS status_color
+    FROM finance_invoice_installments fi
+    LEFT JOIN finance_installment_statuses s ON s.id = fi.status_id
+    WHERE fi.invoice_id=? ORDER BY fi.due_date ASC
+  `).all(req.params.id);
+  res.json(rows.map(shapeInstallment));
 });
 
 app.post('/api/finance/invoices/:id/installments', requireFinance, (req, res) => {
@@ -277,19 +350,36 @@ app.post('/api/finance/invoices/:id/installments', requireFinance, (req, res) =>
   const amount = Number(req.body.amount);
   if (!dueDate) return res.status(400).json({ error: 'Date d\'échéance requise' });
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Montant invalide' });
+  const paidAmount = req.body.paidAmount !== undefined ? Number(req.body.paidAmount) : 0;
+  if (Number.isNaN(paidAmount) || paidAmount < 0) return res.status(400).json({ error: 'Montant réglé invalide' });
+  const statusId = resolveStatusId(req.body.statusId);
+  if (statusId === false) return res.status(400).json({ error: 'Statut d\'échéance introuvable' });
   const label = req.body.label ? String(req.body.label).trim() : null;
-  const r = db.prepare('INSERT INTO finance_invoice_installments (invoice_id, label, due_date, amount) VALUES (?,?,?,?)')
-    .run(req.params.id, label, dueDate, amount);
-  res.status(201).json(db.prepare('SELECT * FROM finance_invoice_installments WHERE id=?').get(r.lastInsertRowid));
+  const paid = paidAmount >= amount ? 1 : 0;
+  const r = db.prepare('INSERT INTO finance_invoice_installments (invoice_id, label, due_date, amount, paid, paid_amount, status_id) VALUES (?,?,?,?,?,?,?)')
+    .run(req.params.id, label, dueDate, amount, paid, paidAmount, statusId || null);
+  res.status(201).json(shapeInstallment(installmentWithStatus(r.lastInsertRowid)));
 });
 
 app.patch('/api/finance/invoices/:id/installments/:installmentId', requireFinance, (req, res) => {
   const existing = db.prepare('SELECT * FROM finance_invoice_installments WHERE id=? AND invoice_id=?')
     .get(req.params.installmentId, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Échéance introuvable' });
-  const paid = req.body.paid !== undefined ? (req.body.paid ? 1 : 0) : existing.paid;
-  db.prepare('UPDATE finance_invoice_installments SET paid=? WHERE id=?').run(paid, existing.id);
-  res.json(db.prepare('SELECT * FROM finance_invoice_installments WHERE id=?').get(existing.id));
+  let paidAmount = existing.paid_amount || 0;
+  if (req.body.paidAmount !== undefined) {
+    paidAmount = Number(req.body.paidAmount);
+    if (Number.isNaN(paidAmount) || paidAmount < 0) return res.status(400).json({ error: 'Montant réglé invalide' });
+  }
+  const statusId = resolveStatusId(req.body.statusId);
+  if (statusId === false) return res.status(400).json({ error: 'Statut d\'échéance introuvable' });
+  // `paid` reste dérivé automatiquement de paid_amount vs amount — on ne le
+  // lit plus en entrée (l'ancienne case à cocher a été remplacée par le
+  // montant réglé + le statut), mais on le maintient à jour pour tout code
+  // plus ancien qui le lirait encore.
+  const paid = paidAmount >= existing.amount ? 1 : 0;
+  db.prepare('UPDATE finance_invoice_installments SET paid=?, paid_amount=?, status_id=? WHERE id=?')
+    .run(paid, paidAmount, statusId === undefined ? existing.status_id : statusId, existing.id);
+  res.json(shapeInstallment(installmentWithStatus(existing.id)));
 });
 
 app.delete('/api/finance/invoices/:id/installments/:installmentId', requireFinance, (req, res) => {
@@ -300,5 +390,46 @@ app.delete('/api/finance/invoices/:id/installments/:installmentId', requireFinan
   res.status(204).end();
 });
 
+// ── Statuts d'échéance personnalisables (Paramètres > Recouvrement) ─────────
+// Liste éditable (libellé + couleur + ordre) référencée par status_id sur
+// chaque échéance ci-dessus — contrairement à FINANCE_INTERNAL_STATUSES (le
+// statut de la facture entière), cette liste n'est pas figée dans le code.
+app.get('/api/finance/installment-statuses', requireFinance, (req, res) => {
+  res.json(db.prepare('SELECT * FROM finance_installment_statuses ORDER BY sort_order ASC, id ASC').all());
+});
+
+app.post('/api/finance/installment-statuses', requireFinance, (req, res) => {
+  const label = String(req.body.label || '').trim();
+  if (!label) return res.status(400).json({ error: 'Libellé requis' });
+  const color = /^#[0-9a-fA-F]{6}$/.test(req.body.color || '') ? req.body.color : '#64748b';
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) AS m FROM finance_installment_statuses').get().m;
+  const r = db.prepare('INSERT INTO finance_installment_statuses (label, color, sort_order) VALUES (?,?,?)')
+    .run(label, color, maxOrder + 1);
+  res.status(201).json(db.prepare('SELECT * FROM finance_installment_statuses WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.patch('/api/finance/installment-statuses/:statusId', requireFinance, (req, res) => {
+  const existing = db.prepare('SELECT * FROM finance_installment_statuses WHERE id=?').get(req.params.statusId);
+  if (!existing) return res.status(404).json({ error: 'Statut introuvable' });
+  const label = req.body.label !== undefined ? String(req.body.label).trim() : existing.label;
+  if (!label) return res.status(400).json({ error: 'Libellé requis' });
+  const color = req.body.color !== undefined
+    ? (/^#[0-9a-fA-F]{6}$/.test(req.body.color) ? req.body.color : existing.color)
+    : existing.color;
+  const sortOrder = req.body.sortOrder !== undefined ? Number(req.body.sortOrder) : existing.sort_order;
+  db.prepare('UPDATE finance_installment_statuses SET label=?, color=?, sort_order=? WHERE id=?')
+    .run(label, color, sortOrder, existing.id);
+  res.json(db.prepare('SELECT * FROM finance_installment_statuses WHERE id=?').get(existing.id));
+});
+
+app.delete('/api/finance/installment-statuses/:statusId', requireFinance, (req, res) => {
+  const existing = db.prepare('SELECT id FROM finance_installment_statuses WHERE id=?').get(req.params.statusId);
+  if (!existing) return res.status(404).json({ error: 'Statut introuvable' });
+  // Les échéances qui pointaient sur ce statut retombent à "Sans statut"
+  // plutôt que de garder une référence morte.
+  db.prepare('UPDATE finance_invoice_installments SET status_id=NULL WHERE status_id=?').run(existing.id);
+  db.prepare('DELETE FROM finance_installment_statuses WHERE id=?').run(existing.id);
+  res.status(204).end();
+});
 
 };

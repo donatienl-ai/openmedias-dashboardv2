@@ -2792,6 +2792,10 @@ document.addEventListener('keydown',e=>{if(document.getElementById('pin-screen')
 
 // ── PARAMÈTRES (édito uniquement) ─────────────────────────────────────────────
 let equipesCache=[], commerciauxCache=[], salesTeamsCache=[];
+// Statuts d'échéance personnalisables (Recouvrement, échéances 2/3/4) — table
+// à part (finance_installment_statuses), gérée ici comme tout autre réglage
+// admin centralisé dans Paramètres, même si elle sert l'outil /recouvrement.
+let financeInstallmentStatusesCache=[];
 
 // Rôles disponibles à la création/édition d'un compte — un seul système de
 // comptes pour tout OpenMedias (dashboard + planning), fini les codes PIN.
@@ -2810,15 +2814,19 @@ const ROLES_COMPTE=[
 ];
 
 async function loadParametres(){
-  const [settings,equipes,commerciaux,salesTeams]=await Promise.all([
+  const [settings,equipes,commerciaux,salesTeams,installmentStatuses]=await Promise.all([
     fetch(`${API}/admin/settings`,{headers:{role:'edit'}}).then(r=>r.json()),
     fetch(`${API}/admin/equipes`,{headers:{role:'edit'}}).then(r=>r.json()),
     fetch(`${API}/admin/commerciaux`,{headers:{role:'edit'}}).then(r=>r.json()),
-    fetch(`${API}/admin/sales-teams`,{headers:{role:'edit'}}).then(r=>r.json())
+    fetch(`${API}/admin/sales-teams`,{headers:{role:'edit'}}).then(r=>r.json()),
+    // Requiert un compte admin (requireFinance accepte finance OU admin) —
+    // cohérent avec l'onglet Paramètres lui-même, déjà réservé aux admins.
+    fetch(`${API}/finance/installment-statuses`,{headers:dashAuthHeaders()}).then(r=>r.json()).catch(()=>[]),
   ]);
   document.getElementById('param-horizon').value=settings.horizonMois;
   equipesCache=equipes; commerciauxCache=commerciaux; salesTeamsCache=salesTeams;
-  renderEquipesList(); renderCommerciauxList(); renderSalesTeamsList();
+  financeInstallmentStatusesCache=installmentStatuses;
+  renderEquipesList(); renderCommerciauxList(); renderSalesTeamsList(); renderFinanceInstallmentStatusesList();
   if(isAccountAdmin)loadDashboardAdmin();
 }
 
@@ -3096,6 +3104,67 @@ async function deleteEquipe(id){
   await fetch(`${API}/admin/equipes/${id}`,{method:'DELETE',headers:{role:'edit'}});
   await loadParametres();
   showToast('Équipe supprimée ✓','success');
+}
+
+// ── RECOUVREMENT — statuts d'échéance personnalisables ──────────────────────
+// Contrairement aux réglages ci-dessus (routes /admin/... avec l'en-tête
+// "role:edit"), ces routes vivent sous /api/finance/... et exigent un compte
+// authentifié (x-commercial-id) avec le rôle admin ou finance — cf.
+// requireFinance côté serveur. dashAuthHeaders() (déjà utilisé pour
+// OpenDashboard ci-dessous) porte exactement ce header, pas besoin d'un
+// helper à part.
+function renderFinanceInstallmentStatusesList(){
+  const el=document.getElementById('finance-installment-statuses-list');
+  if(!el)return;
+  const list=financeInstallmentStatusesCache;
+  el.innerHTML=list.length?list.map((s,i)=>`
+    <div class="param-row">
+      <input type="color" value="${s.color}" class="param-status-color" onchange="updateFinanceInstallmentStatus(${s.id},{color:this.value})" title="Couleur">
+      <input class="form-input" style="flex:1;max-width:220px" value="${s.label}" onchange="updateFinanceInstallmentStatus(${s.id},{label:this.value})">
+      <button class="btn-secondary" style="padding:2px 8px" ${i===0?'disabled':''} onclick="moveFinanceInstallmentStatus(${s.id},-1)" title="Monter">▲</button>
+      <button class="btn-secondary" style="padding:2px 8px" ${i===list.length-1?'disabled':''} onclick="moveFinanceInstallmentStatus(${s.id},1)" title="Descendre">▼</button>
+      <button class="btn-secondary" style="padding:2px 8px" onclick="deleteFinanceInstallmentStatus(${s.id})" title="Supprimer">✕</button>
+    </div>`).join(''):'<div style="font-size:12px;color:var(--text-muted)">Aucun statut créé — les échéances afficheront "Sans statut".</div>';
+}
+async function addFinanceInstallmentStatus(){
+  const input=document.getElementById('param-nouveau-statut-echeance');
+  const label=input.value.trim();
+  if(!label)return;
+  const r=await fetch(`${API}/finance/installment-statuses`,{method:'POST',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify({label,color:'#64748b'})});
+  const d=await r.json();
+  if(!r.ok){showToast(d.error||'Erreur','warning');return;}
+  input.value='';
+  await loadFinanceInstallmentStatusesOnly();
+  showToast('Statut créé ✓','success');
+}
+async function updateFinanceInstallmentStatus(id,patch){
+  const r=await fetch(`${API}/finance/installment-statuses/${id}`,{method:'PATCH',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify(patch)});
+  if(!r.ok){showToast('Erreur','warning');return;}
+  await loadFinanceInstallmentStatusesOnly();
+}
+async function moveFinanceInstallmentStatus(id,dir){
+  const list=financeInstallmentStatusesCache;
+  const idx=list.findIndex(s=>s.id===id);
+  const swapIdx=idx+dir;
+  if(idx===-1||swapIdx<0||swapIdx>=list.length)return;
+  const a=list[idx],b=list[swapIdx];
+  await Promise.all([
+    fetch(`${API}/finance/installment-statuses/${a.id}`,{method:'PATCH',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify({sortOrder:b.sort_order})}),
+    fetch(`${API}/finance/installment-statuses/${b.id}`,{method:'PATCH',headers:dashAuthHeaders({'Content-Type':'application/json'}),body:JSON.stringify({sortOrder:a.sort_order})}),
+  ]);
+  await loadFinanceInstallmentStatusesOnly();
+}
+async function deleteFinanceInstallmentStatus(id){
+  if(!confirm('Supprimer ce statut ? Les échéances qui l\'utilisent repasseront à "Sans statut".'))return;
+  await fetch(`${API}/finance/installment-statuses/${id}`,{method:'DELETE',headers:dashAuthHeaders()});
+  await loadFinanceInstallmentStatusesOnly();
+  showToast('Statut supprimé ✓','success');
+}
+// Recharge uniquement les statuts d'échéance (pas tout Paramètres) après une
+// action sur cette liste — plus léger que loadParametres() au complet.
+async function loadFinanceInstallmentStatusesOnly(){
+  financeInstallmentStatusesCache=await fetch(`${API}/finance/installment-statuses`,{headers:dashAuthHeaders()}).then(r=>r.json()).catch(()=>[]);
+  renderFinanceInstallmentStatusesList();
 }
 
 async function loadSalesforceCommerciaux(){

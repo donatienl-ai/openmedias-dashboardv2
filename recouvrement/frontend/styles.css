@@ -748,9 +748,18 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-retard-label { font-size: 10px; color: var(--text-muted); margin-top: 3px; white-space: nowrap; }
 .finance-detail-section { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
 .finance-detail-section:first-child { border-top: none; padding-top: 0; margin-top: 0; }
-.finance-installment-row { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 7px 0; font-size: 12px; }
+.finance-installment-row { display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--border); padding: 8px 0; font-size: 12px; }
 .finance-installment-row:last-child { border-bottom: none; }
-.finance-installment-row.paid { opacity: 0.55; text-decoration: line-through; }
+.finance-installment-row-top { display: flex; align-items: center; gap: 8px; }
+.finance-installment-row-fields { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-left: 18px; }
+.finance-installment-paid-field { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+/* Pastille de statut — colonnes Éch. 2/3/4 du tableau ET fiche détail. Un
+   <button> plutôt qu'un <span> dans le tableau (clic = ouvre la fiche), mais
+   même rendu visuel dans les deux contextes. */
+.finance-installment-dot { width: 12px; height: 12px; min-width: 12px; border-radius: 50%; border: none; padding: 0; cursor: pointer; display: inline-block; }
+.finance-installment-cell { text-align: center; }
+.finance-installment-empty { color: var(--text-muted); font-size: 12px; }
+.finance-installment-more { font-size: 10px; color: var(--text-muted); margin-left: 3px; vertical-align: middle; }
 
 /* Barre d'onglets de classement (façon Pennylane : "Toutes 4298 / À traiter 73
    / À venir 24 / En retard 244 / Plus (4)") — remplace l'ancien select de

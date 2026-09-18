@@ -63,6 +63,9 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--tex
 .param-table { display: flex; flex-direction: column; gap: 8px; }
 .param-row { display: flex; align-items: center; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 12px; flex-wrap: wrap; }
 .param-row .pr-name { font-weight: 700; min-width: 140px; }
+/* Statuts d'échéance (Recouvrement) — pastille de couleur cliquable devant
+   le libellé, dans une .param-row comme les autres listes de Paramètres. */
+.param-status-color { width: 26px; height: 26px; min-width: 26px; border: 1px solid var(--border); border-radius: 50%; padding: 0; cursor: pointer; background: none; }
 .param-row .pr-email { color: var(--text-dim); min-width: 180px; }
 .param-row .pr-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 .param-row select.form-select { width: auto; font-size: 12px; padding: 5px 24px 5px 8px; background-position: right 10px center, right 5px center; }

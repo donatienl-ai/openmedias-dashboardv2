@@ -82,10 +82,17 @@ test('les routes finance extraites conservent leur contrôle d’accès avant ch
   const app=Object.fromEntries(['get','post','patch','delete'].map(method=>[method,(url,...handlers)=>registered.push({method,url,handlers})]));
   const guard=()=>{};
   registerFinanceRoutes(app,{db:{},pennylane:{},requireFinance:guard,FINANCE_INTERNAL_STATUSES:[]});
-  assert.equal(registered.length,13);
+  assert.equal(registered.length,17);
   for(const route of registered){assert.equal(route.handlers[0],guard);assert.ok(route.url.startsWith('/api/finance/'));}
   assert.ok(registered.some(r=>r.method==='post'&&r.url==='/api/finance/sync'));
   assert.ok(registered.some(r=>r.method==='get'&&r.url==='/api/finance/invoices/:id/pdf'));
+  // Statuts d'échéance personnalisables (Paramètres > Recouvrement) — les 4
+  // routes CRUD ajoutées avec les échéances 2/3/4, sous le même contrôle
+  // d'accès que le reste (vérifié par la boucle ci-dessus).
+  assert.ok(registered.some(r=>r.method==='get'&&r.url==='/api/finance/installment-statuses'));
+  assert.ok(registered.some(r=>r.method==='post'&&r.url==='/api/finance/installment-statuses'));
+  assert.ok(registered.some(r=>r.method==='patch'&&r.url==='/api/finance/installment-statuses/:statusId'));
+  assert.ok(registered.some(r=>r.method==='delete'&&r.url==='/api/finance/installment-statuses/:statusId'));
 });
 
 test('un objectif modifié est visible immédiatement même lorsque les chiffres restent en cache',async()=>{
