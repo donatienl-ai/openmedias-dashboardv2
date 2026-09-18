@@ -144,10 +144,15 @@ const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',li
 const FINANCE_CANAL_LABEL={email:'📧 Email',telephone:'📞 Téléphone',courrier:'✉️ Courrier',sms:'💬 SMS',autre:'Autre'};
 let financeInvoicesCache=[];
 let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
-// Filtre actif de la barre d'onglets (façon Pennylane : Toutes/À traiter/À
-// venir/En retard/Plus) — remplace l'ancien select de statut + case "en
-// retard uniquement" par des chips cliquables avec compteur en direct.
-let financeActiveFilter='all';
+// Filtre actif de la barre d'onglets (façon Pennylane : Toutes/À venir/En
+// retard/Encaissée/…) — remplace l'ancien select de statut + case "en retard
+// uniquement" par des chips cliquables avec compteur en direct. Multi-sélection :
+// plusieurs chips peuvent être actifs à la fois (ex. "À venir" + "En retard"),
+// une facture matche dès qu'elle correspond à AU MOINS un des chips actifs.
+// "Toutes" est exclusif — le sélectionner désactive tout le reste, et
+// désélectionner le dernier chip actif retombe automatiquement sur "Toutes"
+// plutôt que de laisser le tableau vide sans filtre visible.
+let financeActiveFilters=new Set(['all']);
 // Tri du tableau (colonne cliquée + sens) — les en-têtes du tableau n'étaient
 // pas triables ici alors que d'autres tableaux de l'app le sont déjà
 // (.sortable-th), gênant sur un métier de relance où trier par échéance ou
@@ -296,15 +301,17 @@ const FINANCE_STATUSES_SOLDEES=['paid','cancelled','partially_cancelled','credit
 const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde'];
 // Recalcule les KPI de recouvrement (encours, montant actionable, taux de
 // retard, aging, répartition par statut, DSO) côté front, à partir du cache
-// local déjà filtré par la période sélectionnée — reproduit exactement le
-// calcul de /api/finance/kpis (même exclusions, même définition d'actionable)
-// mais borné à la plage Du/Au en cours, ce que l'endpoint back ne fait pas.
-// Permet aussi aux cartes KPI de réagir immédiatement à un changement de
-// statut interne ou de période, sans réappeler le serveur.
-function computeFinanceKpisFromCache(boundsOverride){
+// local déjà filtré par la période ET les chips de filtre actifs — reproduit
+// exactement le calcul de /api/finance/kpis (même exclusions, même définition
+// d'actionable) mais borné à la plage Du/Au et au(x) filtre(s) en cours, ce
+// que l'endpoint back ne fait pas. Permet aussi aux cartes KPI de réagir
+// immédiatement à un changement de statut interne, de période, ou de filtre,
+// sans réappeler le serveur.
+function computeFinanceKpisFromCache(boundsOverride,filtersOverride){
   const from=boundsOverride?boundsOverride.from:financePeriodFrom;
   const to=boundsOverride?boundsOverride.to:financePeriodTo;
-  const list=financeInvoicesCache.filter(inv=>invoiceInRange(inv,from,to));
+  const filters=filtersOverride||financeActiveFilters;
+  const list=financeInvoicesCache.filter(inv=>invoiceInRange(inv,from,to)&&financeMatchesFilters(inv,filters));
   const unpaid=list.filter(inv=>{
     const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
     return remaining>0 && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
@@ -345,6 +352,7 @@ function computeFinanceKpisFromCache(boundsOverride){
     periodStartStr=d.toISOString().slice(0,10);
   }
   const caPeriode=financeInvoicesCache.reduce((sum,inv)=>{
+    if(!financeMatchesFilters(inv,filters))return sum;
     if(!inv.dateEmission)return sum;
     if(periodStartStr&&inv.dateEmission<periodStartStr)return sum;
     if(to&&inv.dateEmission>to)return sum;
@@ -495,24 +503,15 @@ function financeRetardBarHtml(inv){
   return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:#dc2626"></div></div><div class="finance-retard-label" style="color:#dc2626;font-weight:700">${daysLate}j de retard</div></div>`;
 }
 
-// Barre d'onglets = calque EXACT du classement Pennylane (capture d'écran de
-// référence : Toutes 4298 / Brouillon 2 / À traiter 73 / À venir 24 / En
-// retard 244 / Plus (4) : Encaissée 2931, Partiellement encaissée 3, Annulée
-// 496, Avoir 528) — plus de reclassement maison ici, chaque onglet teste le
+// Barre d'onglets = calque du classement Pennylane, chaque onglet testant le
 // champ `status` BRUT tel que renvoyé par Pennylane sur la facture (pas notre
 // internalStatus interne, qui reste un attribut séparé éditable dans le
-// tableau ci-dessous pour le suivi de relance).
-// "À traiter" n'a pas de définition publiée par Pennylane (leur doc ne
-// détaille aucun des statuts) — mais status='incomplete' est le seul restant
-// après avoir compté Brouillon/Encaissée/Partiellement encaissée/Annulée/
-// Avoir/À venir/En retard, et ça correspond au chiffre 73 de la référence :
-// c'est notre meilleure hypothèse, à confirmer en ouvrant une facture que
-// Pennylane classe "À traiter" et en vérifiant son statut brut ici.
+// tableau ci-dessous pour le suivi de relance). "Brouillon" et "À traiter"
+// (incomplete) ont été retirés de la barre : ce ne sont pas des statuts sur
+// lesquels le recouvrement agit, ils encombraient la barre pour rien.
 // "Annulée" regroupe cancelled ET partially_cancelled (Pennylane n'affiche
 // qu'une seule case Annulée, pas de case séparée pour l'annulation partielle).
 const PENNYLANE_TAB_STATUSES={
-  draft:['draft'],
-  incomplete:['incomplete'],
   upcoming:['upcoming'],
   late:['late'],
   paid:['paid'],
@@ -527,8 +526,6 @@ const PENNYLANE_TAB_STATUSES={
 // obligeant à lire le texte pour juger de la gravité (relevé dans l'audit UX).
 const FINANCE_TAB_COLOR={
   all: {bg:'var(--accent-dim)', fg:'var(--accent)'},
-  draft: {bg:'var(--surface2)', fg:'var(--text-dim)'},
-  incomplete: {bg:'var(--gold-dim)', fg:'var(--gold)'},
   upcoming: {bg:'var(--accent-dim)', fg:'var(--accent)'},
   late: {bg:'var(--red-dim)', fg:'#dc2626'},
   paid: {bg:'var(--green-dim)', fg:'var(--green)'},
@@ -537,16 +534,33 @@ const FINANCE_TAB_COLOR={
   credit_note: {bg:'rgba(139,92,246,0.14)', fg:'#8b5cf6'},
   archived: {bg:'var(--surface2)', fg:'var(--text-muted)'},
 };
-function financeMatchesFilter(inv,filter){
-  if(filter==='all')return true;
-  const statuses=PENNYLANE_TAB_STATUSES[filter];
+// Test d'UNE facture contre UN chip donné (utilisé pour les compteurs par
+// chip, et comme brique de financeMatchesFilters ci-dessous).
+function financeMatchesFilterKey(inv,key){
+  if(key==='all')return true;
+  const statuses=PENNYLANE_TAB_STATUSES[key];
   return statuses?statuses.includes(inv.status):false;
 }
+// Test contre l'ENSEMBLE des chips actuellement sélectionnés (multi-sélection) —
+// une facture matche dès qu'elle correspond à au moins un chip actif.
+function financeMatchesFilters(inv,filters){
+  if(!filters||filters.has('all'))return true;
+  for(const key of filters){ if(financeMatchesFilterKey(inv,key))return true; }
+  return false;
+}
 function setFinanceFilter(key){
-  if(!key)return; // option placeholder "Plus (N)" sélectionnée sans choix réel
-  financeActiveFilter=key;
+  if(!key)return;
+  if(key==='all'){
+    financeActiveFilters=new Set(['all']);
+  }else{
+    financeActiveFilters.delete('all');
+    if(financeActiveFilters.has(key))financeActiveFilters.delete(key);
+    else financeActiveFilters.add(key);
+    if(!financeActiveFilters.size)financeActiveFilters.add('all'); // plus aucun chip actif -> retombe sur Toutes
+  }
   renderFinanceTabs();
   renderFinanceInvoices();
+  renderFinanceKpis(computeFinanceKpisFromCache());
 }
 // Barre d'onglets avec compteur en direct depuis le cache local — le compteur
 // "Toutes" sert aussi de repère rapide pour vérifier que la dernière synchro
@@ -558,10 +572,10 @@ function renderFinanceTabs(){
   const list=financeInvoicesCache.filter(financeMatchesPeriod);
   const counts={all:list.length};
   for(const key of Object.keys(PENNYLANE_TAB_STATUSES)){
-    counts[key]=list.filter((i)=>financeMatchesFilter(i,key)).length;
+    counts[key]=list.filter((i)=>financeMatchesFilterKey(i,key)).length;
   }
   const chip=(key,label,title)=>{
-    const active=financeActiveFilter===key;
+    const active=financeActiveFilters.has(key);
     const c=FINANCE_TAB_COLOR[key]||FINANCE_TAB_COLOR.all;
     const style=active?` style="background:${c.bg};color:${c.fg}"`:'';
     const countStyle=active?` style="background:${c.fg};color:#fff"`:'';
@@ -569,8 +583,6 @@ function renderFinanceTabs(){
   };
   wrap.innerHTML=`
     ${chip('all','Toutes')}
-    ${chip('draft','Brouillon')}
-    ${chip('incomplete','À traiter')}
     ${chip('upcoming','À venir')}
     ${chip('late','En retard')}
     ${chip('paid','Encaissée')}
@@ -592,7 +604,7 @@ function renderFinanceInvoices(){
   const q=(document.getElementById('finance-search')?.value||'').trim().toLowerCase();
   let list=financeInvoicesCache.filter(inv=>{
     if(!financeMatchesPeriod(inv))return false;
-    if(!financeMatchesFilter(inv,financeActiveFilter))return false;
+    if(!financeMatchesFilters(inv,financeActiveFilters))return false;
     if(q&&!(String(inv.invoiceNumber||'').toLowerCase().includes(q)||inv.customerName.toLowerCase().includes(q)||(inv.contactName||'').toLowerCase().includes(q)))return false;
     return true;
   });
