@@ -311,6 +311,26 @@ try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN deadline_manual INTEGER
 // se garde en synchro automatique avec paid_amount (voir financeRoutes.js).
 try { db.exec('ALTER TABLE finance_invoice_installments ADD COLUMN status_id INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE finance_invoice_installments ADD COLUMN paid_amount REAL DEFAULT 0'); } catch(e) {}
+// Migration : l'échéance 1 (= la deadline principale de la facture, jusqu'ici
+// une simple date sans statut propre) peut désormais recevoir la même pastille
+// de statut personnalisable que les échéances 2/3/4, pour rentrer dans la même
+// chaîne de validation (voir computeEcheanceReference dans financeRoutes.js).
+try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN deadline_status_id INTEGER'); } catch(e) {}
+// Migration : un statut d'échéance peut être marqué "compte comme réglée" —
+// c'est ce flag (et non le libellé "Soldée" en dur) qui fait avancer la
+// référence de retard à l'échéance suivante et qui déclenche le passage
+// automatique de la facture en statut "Soldée" une fois TOUTES ses échéances
+// (1, 2, 3, 4...) à un statut ainsi marqué. Reste éditable dans Paramètres :
+// on peut cocher/décocher cette case sur n'importe quel statut, y compris en
+// créer un autre que "Soldée" qui compte aussi comme réglé.
+let justAddedCompteRegle = false;
+try { db.exec('ALTER TABLE finance_installment_statuses ADD COLUMN compte_regle INTEGER DEFAULT 0'); justAddedCompteRegle = true; } catch(e) {}
+if (justAddedCompteRegle) {
+  // Statut par défaut : seul "Soldée" comptait implicitement comme réglé
+  // avant ce flag — on le coche une seule fois, à la création de la colonne,
+  // pour ne pas écraser un choix que l'équipe aurait fait depuis Paramètres.
+  try { db.prepare("UPDATE finance_installment_statuses SET compte_regle=1 WHERE label='Soldée'").run(); } catch(e) {}
+}
 
 // Seed : statuts d'échéance par défaut, uniquement si la liste est encore
 // vide (première mise en route de la fonctionnalité) — l'équipe est ensuite

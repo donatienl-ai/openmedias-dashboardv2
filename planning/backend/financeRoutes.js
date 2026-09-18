@@ -14,6 +14,61 @@ function joursDeRetard(deadline) {
   return Math.round((today - d) / 86400000);
 }
 
+// Un statut d'échéance "compte comme réglée" quand la case cochée en
+// Paramètres (compte_regle) le dit — pas quand son libellé vaut "Soldée" en
+// dur, pour que l'équipe puisse renommer/dupliquer ce comportement sur un
+// autre statut sans toucher au code.
+function isStatusReglee(statusId) {
+  if (statusId == null) return false;
+  const s = db.prepare('SELECT compte_regle FROM finance_installment_statuses WHERE id=?').get(statusId);
+  return !!(s && s.compte_regle);
+}
+// Chaîne de validation d'une facture : échéance 1 (= la deadline principale,
+// avec son propre statut deadline_status_id — même pastille que 2/3/4) puis
+// les échéances suivantes dans l'ordre de leur date. `installmentItems` peut
+// être des lignes SQL brutes (due_date/status_id) ou déjà mises en forme
+// (dueDate/statusId) — les deux formes sont acceptées.
+function buildEcheanceChain(invoiceRow, installmentItems) {
+  const chain = [{
+    num: 1,
+    due: invoiceRow.deadline,
+    statusId: invoiceRow.deadline_status_id !== undefined ? invoiceRow.deadline_status_id : invoiceRow.deadlineStatusId,
+  }];
+  (installmentItems || []).forEach((inst, i) => {
+    chain.push({
+      num: i + 2,
+      due: inst.due_date !== undefined ? inst.due_date : inst.dueDate,
+      statusId: inst.status_id !== undefined ? inst.status_id : inst.statusId,
+    });
+  });
+  return chain;
+}
+// Référence de retard : la 1ère échéance de la chaîne qui n'est PAS encore à
+// un statut "compte comme réglée" (dans l'ordre 1→2→3→4, jamais la plus
+// tardive parmi les non réglées) — c'est sa date qui sert au calcul de
+// "jours de retard". Si tout est réglé, allReglees=true (déclenche le passage
+// auto de la facture en "Soldée", cf. maybeAutoSolde).
+function computeEcheanceReference(chain) {
+  for (const item of chain) {
+    if (!isStatusReglee(item.statusId)) return { due: item.due, num: item.num, allReglees: false };
+  }
+  const last = chain[chain.length - 1];
+  return { due: last.due, num: last.num, allReglees: true };
+}
+// Si la chaîne d'échéances d'une facture est intégralement réglée, on la fait
+// basculer en statut "Soldée" — même esprit que le passage auto "à relancer"
+// -> "en cours" à la première relance : un signal automatique, mais qui ne
+// vient jamais écraser un litige ou une promesse de paiement posés à la main.
+function maybeAutoSolde(invoiceId) {
+  const invoice = db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(invoiceId);
+  if (!invoice) return;
+  const installments = db.prepare('SELECT * FROM finance_invoice_installments WHERE invoice_id=? ORDER BY due_date ASC').all(invoiceId);
+  const ref = computeEcheanceReference(buildEcheanceChain(invoice, installments));
+  if (ref.allReglees && !['litige', 'promesse_paiement', 'solde'].includes(invoice.internal_status)) {
+    db.prepare("UPDATE pennylane_invoices SET internal_status='solde' WHERE id=?").run(invoiceId);
+  }
+}
+
 app.post('/api/finance/sync', requireFinance, async (req, res) => {
   try {
     const result = await pennylane.syncFinance(db);
@@ -54,7 +109,8 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
   const rows = db.prepare(`
     SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
            c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone,
-           lr.last_relance_at AS last_relance_at
+           lr.last_relance_at AS last_relance_at,
+           ds.label AS deadline_status_label, ds.color AS deadline_status_color
     FROM pennylane_invoices i
     LEFT JOIN pennylane_customers c ON c.id = i.customer_id
     -- Dernière relance par facture (toutes canaux confondus) — sert le badge
@@ -66,6 +122,9 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
       FROM finance_relances
       GROUP BY invoice_id
     ) lr ON lr.invoice_id = i.id
+    -- Statut de l'échéance 1 (= la deadline principale) — même pastille
+    -- personnalisable que les échéances 2/3/4 ci-dessous.
+    LEFT JOIN finance_installment_statuses ds ON ds.id = i.deadline_status_id
   `).all();
   // Échéances de paiement (2e/3e/4e tranche...) de TOUTES les factures, en une
   // seule requête plutôt qu'une par facture (évite un N+1 sur plusieurs
@@ -93,34 +152,53 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
   }
   const { statut, q, retard_only } = req.query;
   const qLower = q ? String(q).trim().toLowerCase() : '';
-  let list = rows.map((r) => ({
-    id: r.id,
-    invoiceNumber: r.invoice_number,
-    customerId: r.customer_id,
-    customerName: r.customer_name || '',
-    customerEmail: r.customer_email || '',
-    customerPhone: r.customer_phone || '',
-    contactName: r.contact_name || '',
-    contactEmail: r.contact_email || '',
-    contactPhone: r.contact_phone || '',
-    dateEmission: r.date_emission,
-    deadline: r.deadline,
-    deadlineManual: !!r.deadline_manual,
-    amountHt: r.amount_ht,
-    amountTtc: r.amount,
-    remainingAmountHt: r.remaining_amount_ht,
-    remainingAmountTtc: r.remaining_amount,
-    // Alias conservés pour compat avec un ancien code éventuel côté front.
-    amount: r.amount,
-    remainingAmount: r.remaining_amount,
-    status: r.status,
-    internalStatus: r.internal_status,
-    daysLate: joursDeRetard(r.deadline),
-    lastRelanceAt: r.last_relance_at || null,
-    // Échéances 2, 3, 4... (triées par date) — l'échéance 1 reste `deadline`
-    // ci-dessus, éditable directement, comme avant cette fonctionnalité.
-    installments: installmentsByInvoice[r.id] || [],
-  }));
+  let list = rows.map((r) => {
+    const installments = installmentsByInvoice[r.id] || [];
+    // Référence de retard : la 1ère échéance (1, puis 2/3/4...) pas encore à
+    // un statut "compte comme réglée" — remplace le calcul figé sur la seule
+    // deadline principale, pour que valider l'échéance 1 fasse glisser le
+    // repère de retard sur l'échéance 2, etc.
+    const echRef = computeEcheanceReference(buildEcheanceChain(r, installments));
+    return {
+      id: r.id,
+      invoiceNumber: r.invoice_number,
+      customerId: r.customer_id,
+      customerName: r.customer_name || '',
+      customerEmail: r.customer_email || '',
+      customerPhone: r.customer_phone || '',
+      contactName: r.contact_name || '',
+      contactEmail: r.contact_email || '',
+      contactPhone: r.contact_phone || '',
+      dateEmission: r.date_emission,
+      deadline: r.deadline,
+      deadlineManual: !!r.deadline_manual,
+      // Statut de l'échéance 1, même pastille personnalisable que 2/3/4.
+      deadlineStatusId: r.deadline_status_id,
+      deadlineStatusLabel: r.deadline_status_label || null,
+      deadlineStatusColor: r.deadline_status_color || null,
+      amountHt: r.amount_ht,
+      amountTtc: r.amount,
+      remainingAmountHt: r.remaining_amount_ht,
+      remainingAmountTtc: r.remaining_amount,
+      // Alias conservés pour compat avec un ancien code éventuel côté front.
+      amount: r.amount,
+      remainingAmount: r.remaining_amount,
+      status: r.status,
+      internalStatus: r.internal_status,
+      daysLate: joursDeRetard(echRef.due),
+      // Numéro de l'échéance actuellement de référence pour le retard (1 par
+      // défaut) — sert le front à afficher "Éch. 2 — 5j de retard" plutôt
+      // qu'un nombre de jours qui change sans que la date affichée en Éch. 1
+      // n'ait bougé.
+      retardEcheanceNum: echRef.num,
+      retardEcheanceDue: echRef.due,
+      allEcheancesReglees: echRef.allReglees,
+      lastRelanceAt: r.last_relance_at || null,
+      // Échéances 2, 3, 4... (triées par date) — l'échéance 1 reste `deadline`
+      // ci-dessus, éditable directement, comme avant cette fonctionnalité.
+      installments,
+    };
+  });
   if (statut) list = list.filter((r) => r.internalStatus === statut);
   if (retard_only === '1') list = list.filter((r) => (r.daysLate || 0) > 0);
   if (qLower) {
@@ -254,10 +332,15 @@ app.patch('/api/finance/invoices/:id', requireFinance, (req, res) => {
     deadline = d;
     deadlineManual = 1;
   }
+  // Statut de l'échéance 1 (même pastille personnalisable que 2/3/4) — sert
+  // la chaîne de validation, cf. computeEcheanceReference/maybeAutoSolde.
+  const deadlineStatusId = resolveStatusId(req.body.deadlineStatusId);
+  if (deadlineStatusId === false) return res.status(400).json({ error: 'Statut d\'échéance introuvable' });
   // L'attribution par collaborateur a été retirée (une seule personne gère le
   // recouvrement) — seuls le statut interne et l'échéance restent modifiables ici.
-  db.prepare('UPDATE pennylane_invoices SET internal_status=?, deadline=?, deadline_manual=? WHERE id=?')
-    .run(internalStatus, deadline, deadlineManual, req.params.id);
+  db.prepare('UPDATE pennylane_invoices SET internal_status=?, deadline=?, deadline_manual=?, deadline_status_id=? WHERE id=?')
+    .run(internalStatus, deadline, deadlineManual, deadlineStatusId === undefined ? existing.deadline_status_id : deadlineStatusId, req.params.id);
+  maybeAutoSolde(req.params.id);
   res.json(db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id));
 });
 
@@ -350,14 +433,18 @@ app.post('/api/finance/invoices/:id/installments', requireFinance, (req, res) =>
   const amount = Number(req.body.amount);
   if (!dueDate) return res.status(400).json({ error: 'Date d\'échéance requise' });
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Montant invalide' });
-  const paidAmount = req.body.paidAmount !== undefined ? Number(req.body.paidAmount) : 0;
-  if (Number.isNaN(paidAmount) || paidAmount < 0) return res.status(400).json({ error: 'Montant réglé invalide' });
   const statusId = resolveStatusId(req.body.statusId);
   if (statusId === false) return res.status(400).json({ error: 'Statut d\'échéance introuvable' });
+  // Si on crée directement l'échéance sur un statut "compte comme réglée"
+  // (ex. import d'un historique déjà soldé), le montant réglé se solde tout
+  // seul sur le montant total, sauf si paidAmount est explicitement fourni.
+  let paidAmount = req.body.paidAmount !== undefined ? Number(req.body.paidAmount) : (isStatusReglee(statusId || null) ? amount : 0);
+  if (Number.isNaN(paidAmount) || paidAmount < 0) return res.status(400).json({ error: 'Montant réglé invalide' });
   const label = req.body.label ? String(req.body.label).trim() : null;
   const paid = paidAmount >= amount ? 1 : 0;
   const r = db.prepare('INSERT INTO finance_invoice_installments (invoice_id, label, due_date, amount, paid, paid_amount, status_id) VALUES (?,?,?,?,?,?,?)')
     .run(req.params.id, label, dueDate, amount, paid, paidAmount, statusId || null);
+  maybeAutoSolde(req.params.id);
   res.status(201).json(shapeInstallment(installmentWithStatus(r.lastInsertRowid)));
 });
 
@@ -365,13 +452,18 @@ app.patch('/api/finance/invoices/:id/installments/:installmentId', requireFinanc
   const existing = db.prepare('SELECT * FROM finance_invoice_installments WHERE id=? AND invoice_id=?')
     .get(req.params.installmentId, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Échéance introuvable' });
+  const statusId = resolveStatusId(req.body.statusId);
+  if (statusId === false) return res.status(400).json({ error: 'Statut d\'échéance introuvable' });
   let paidAmount = existing.paid_amount || 0;
   if (req.body.paidAmount !== undefined) {
     paidAmount = Number(req.body.paidAmount);
     if (Number.isNaN(paidAmount) || paidAmount < 0) return res.status(400).json({ error: 'Montant réglé invalide' });
+  } else if (statusId !== undefined && statusId !== null && isStatusReglee(statusId)) {
+    // Valider une échéance en la passant sur un statut "compte comme réglée"
+    // solde automatiquement son montant réglé (demandé) — sans ressaisie,
+    // sauf si paidAmount est aussi envoyé explicitement dans la même requête.
+    paidAmount = existing.amount;
   }
-  const statusId = resolveStatusId(req.body.statusId);
-  if (statusId === false) return res.status(400).json({ error: 'Statut d\'échéance introuvable' });
   // `paid` reste dérivé automatiquement de paid_amount vs amount — on ne le
   // lit plus en entrée (l'ancienne case à cocher a été remplacée par le
   // montant réglé + le statut), mais on le maintient à jour pour tout code
@@ -379,6 +471,7 @@ app.patch('/api/finance/invoices/:id/installments/:installmentId', requireFinanc
   const paid = paidAmount >= existing.amount ? 1 : 0;
   db.prepare('UPDATE finance_invoice_installments SET paid=?, paid_amount=?, status_id=? WHERE id=?')
     .run(paid, paidAmount, statusId === undefined ? existing.status_id : statusId, existing.id);
+  maybeAutoSolde(req.params.id);
   res.json(shapeInstallment(installmentWithStatus(existing.id)));
 });
 
@@ -387,6 +480,9 @@ app.delete('/api/finance/invoices/:id/installments/:installmentId', requireFinan
     .get(req.params.installmentId, req.params.id);
   if (!existing) return res.status(404).json({ error: 'Échéance introuvable' });
   db.prepare('DELETE FROM finance_invoice_installments WHERE id=?').run(existing.id);
+  // Supprimer une échéance peut faire retomber la chaîne à "tout réglé" (ex.
+  // on retire une tranche encore en attente) — on revérifie après coup.
+  maybeAutoSolde(req.params.id);
   res.status(204).end();
 });
 
@@ -402,9 +498,10 @@ app.post('/api/finance/installment-statuses', requireFinance, (req, res) => {
   const label = String(req.body.label || '').trim();
   if (!label) return res.status(400).json({ error: 'Libellé requis' });
   const color = /^#[0-9a-fA-F]{6}$/.test(req.body.color || '') ? req.body.color : '#64748b';
+  const compteRegle = req.body.compteRegle ? 1 : 0;
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) AS m FROM finance_installment_statuses').get().m;
-  const r = db.prepare('INSERT INTO finance_installment_statuses (label, color, sort_order) VALUES (?,?,?)')
-    .run(label, color, maxOrder + 1);
+  const r = db.prepare('INSERT INTO finance_installment_statuses (label, color, sort_order, compte_regle) VALUES (?,?,?,?)')
+    .run(label, color, maxOrder + 1, compteRegle);
   res.status(201).json(db.prepare('SELECT * FROM finance_installment_statuses WHERE id=?').get(r.lastInsertRowid));
 });
 
@@ -417,8 +514,12 @@ app.patch('/api/finance/installment-statuses/:statusId', requireFinance, (req, r
     ? (/^#[0-9a-fA-F]{6}$/.test(req.body.color) ? req.body.color : existing.color)
     : existing.color;
   const sortOrder = req.body.sortOrder !== undefined ? Number(req.body.sortOrder) : existing.sort_order;
-  db.prepare('UPDATE finance_installment_statuses SET label=?, color=?, sort_order=? WHERE id=?')
-    .run(label, color, sortOrder, existing.id);
+  // Case "compte comme réglée" (Paramètres) : c'est elle qui fait avancer la
+  // référence de retard à l'échéance suivante et déclenche le passage auto de
+  // la facture en "Soldée" quand toute la chaîne y est — voir financeRoutes.js.
+  const compteRegle = req.body.compteRegle !== undefined ? (req.body.compteRegle ? 1 : 0) : existing.compte_regle;
+  db.prepare('UPDATE finance_installment_statuses SET label=?, color=?, sort_order=?, compte_regle=? WHERE id=?')
+    .run(label, color, sortOrder, compteRegle, existing.id);
   res.json(db.prepare('SELECT * FROM finance_installment_statuses WHERE id=?').get(existing.id));
 });
 

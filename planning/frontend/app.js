@@ -3121,6 +3121,9 @@ function renderFinanceInstallmentStatusesList(){
     <div class="param-row">
       <input type="color" value="${s.color}" class="param-status-color" onchange="updateFinanceInstallmentStatus(${s.id},{color:this.value})" title="Couleur">
       <input class="form-input" style="flex:1;max-width:220px" value="${s.label}" onchange="updateFinanceInstallmentStatus(${s.id},{label:this.value})">
+      <label style="display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text-dim);white-space:nowrap;cursor:pointer" title="Une échéance (ou l'échéance 1) sur ce statut compte comme réglée : la référence de retard glisse sur la suivante, et une fois toute la chaîne à un statut ainsi coché, la facture bascule automatiquement en « Soldée ».">
+        <input type="checkbox" ${s.compte_regle?'checked':''} onchange="updateFinanceInstallmentStatus(${s.id},{compteRegle:this.checked})"> Compte comme réglée
+      </label>
       <button class="btn-secondary" style="padding:2px 8px" ${i===0?'disabled':''} onclick="moveFinanceInstallmentStatus(${s.id},-1)" title="Monter">▲</button>
       <button class="btn-secondary" style="padding:2px 8px" ${i===list.length-1?'disabled':''} onclick="moveFinanceInstallmentStatus(${s.id},1)" title="Descendre">▼</button>
       <button class="btn-secondary" style="padding:2px 8px" onclick="deleteFinanceInstallmentStatus(${s.id})" title="Supprimer">✕</button>

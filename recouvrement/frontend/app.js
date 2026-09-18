@@ -550,20 +550,26 @@ function financeRetardBarHtml(inv){
   // le montant restant : une facture encaissée peut garder un remaining_amount
   // non nul côté Pennylane, et afficher "Xj de retard" en rouge sur une
   // facture déjà marquée Soldée à côté serait contradictoire.
-  const resolved=inv.internalStatus==='solde'||FINANCE_STATUSES_SOLDEES.includes(inv.status);
+  const resolved=inv.internalStatus==='solde'||inv.allEcheancesReglees||FINANCE_STATUSES_SOLDEES.includes(inv.status);
   if(resolved||(remaining||0)<=0)return '<span style="font-size:11px;color:var(--text-muted)">Soldée</span>';
   if(daysLate==null)return '<span style="font-size:11px;color:var(--text-muted)">—</span>';
+  // Une fois l'échéance 1 validée réglée, la référence de retard glisse sur
+  // l'échéance 2 (puis 3, 4...) — on le précise ici plutôt que de laisser le
+  // nombre de jours changer sans que la date affichée en colonne Échéance
+  // n'ait bougé, ce qui serait déroutant.
+  const echPrefix=(inv.retardEcheanceNum&&inv.retardEcheanceNum>1)?`Éch. ${inv.retardEcheanceNum} — `:'';
   if(daysLate<=0){
     const emission=inv.dateEmission?new Date(`${inv.dateEmission}T00:00:00`):null;
-    const deadline=inv.deadline?new Date(`${inv.deadline}T00:00:00`):null;
+    const refDue=inv.retardEcheanceDue||inv.deadline;
+    const deadline=refDue?new Date(`${refDue}T00:00:00`):null;
     let pct=0;
     if(emission&&deadline&&deadline>emission){
       pct=Math.max(0,Math.min(100,((Date.now()-emission)/(deadline-emission))*100));
     }
-    return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="finance-retard-label">${-daysLate}j avant échéance</div></div>`;
+    return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="finance-retard-label">${echPrefix}${-daysLate}j avant échéance</div></div>`;
   }
   const pct=Math.max(6,Math.min(100,(daysLate/90)*100));
-  return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:#dc2626"></div></div><div class="finance-retard-label" style="color:#dc2626;font-weight:700">${daysLate}j de retard</div></div>`;
+  return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:#dc2626"></div></div><div class="finance-retard-label" style="color:#dc2626;font-weight:700">${echPrefix}${daysLate}j de retard</div></div>`;
 }
 
 // Barre d'onglets = calque du classement Pennylane, chaque onglet testant le
@@ -712,7 +718,7 @@ function renderFinanceInvoices(){
       <td>${inv.contactName||'—'}</td>
       <td>${inv.contactEmail||inv.customerEmail||'—'}</td>
       <td>${inv.contactPhone||inv.customerPhone||'—'}</td>
-      <td><div class="finance-deadline-cell"><input type="date" class="form-input finance-deadline-input" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${inv.id}',{deadline:this.value})" title="${inv.deadlineManual?'Échéance corrigée manuellement — ne sera plus écrasée par la synchro Pennylane':'Échéance Pennylane'}">${inv.deadlineManual?'<span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}</div></td>
+      <td><div class="finance-deadline-cell"><input type="date" class="form-input finance-deadline-input" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${inv.id}',{deadline:this.value})" title="${inv.deadlineManual?'Échéance corrigée manuellement — ne sera plus écrasée par la synchro Pennylane':'Échéance Pennylane'}">${inv.deadlineManual?'<span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}${financeDeadlineDotHtml(inv)}</div></td>
       <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,0)}</td>
       <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,1)}</td>
       <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,2)}</td>
@@ -744,6 +750,18 @@ function financeRowClick(event,invId){
 // Case vide (pas encore de tranche à ce rang) : bouton "+" qui ouvre le
 // popover d'ajout rapide (cf. openFinanceInstallmentQuickAdd) directement
 // depuis le tableau, sans passer par la fiche facture complète.
+// Pastille de statut de l'échéance 1 (= la deadline principale), affichée à
+// côté de la date dans le tableau — même logique que financeInstallmentCellHtml
+// ci-dessous pour 2/3/4, mais toujours visible (l'échéance 1 existe toujours,
+// pas de bouton "+" nécessaire) : ouvre la fiche pour l'éditer, comme les
+// autres pastilles, la modification en direct se fait via la pastille complète
+// dans la fiche détail.
+function financeDeadlineDotHtml(inv){
+  const color=inv.deadlineStatusColor||'var(--text-muted)';
+  const label=inv.deadlineStatusLabel||'Sans statut';
+  const title=`${label} — échéance 1`.replace(/"/g,'&quot;');
+  return `<button type="button" class="finance-installment-dot" style="background:${color}" title="${title}" onclick="openFinanceInvoiceDetail('${inv.id}')"></button>`;
+}
 function financeInstallmentCellHtml(inv,idx){
   const list=inv.installments||[];
   const inst=list[idx];
@@ -799,41 +817,17 @@ async function submitFinanceInstallmentQuickAdd(){
   await refreshFinanceInvoices();
   showToast('Échéance ajoutée ✓');
 }
-// Jours de retard recalculés en LOCAL après une correction d'échéance, pour
-// rafraîchir tri/KPI/barre de retard sans attendre un refetch complet —
-// même formule que joursDeRetard() côté back (router.js).
-function financeJoursDeRetard(deadline){
-  if(!deadline)return null;
-  const d=new Date(`${deadline}T00:00:00`);
-  if(Number.isNaN(d.getTime()))return null;
-  const today=new Date(); today.setHours(0,0,0,0);
-  return Math.round((today-d)/86400000);
-}
 async function patchFinanceInvoice(id,patch){
   try{
     const res=await fetch(`${API}/finance/invoices/${id}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
     if(!res.ok){ const err=await res.json().catch(()=>({})); throw new Error(err.error||'Échec de la mise à jour'); }
-    const updated=await res.json(); // ligne pennylane_invoices brute (snake_case)
-    const idx=financeInvoicesCache.findIndex(i=>i.id===id);
-    if(idx!==-1){
-      const inv=financeInvoicesCache[idx];
-      if(patch.internalStatus!==undefined)inv.internalStatus=updated.internal_status;
-      if(patch.deadline!==undefined){
-        // Ne recalcule QUE ce qui dépend de la date (retard, tri, KPI) — le
-        // montant dû n'est jamais touché par une correction d'échéance. La
-        // barre d'onglets Pennylane (statut brut `status`), elle, reste
-        // volontairement figée sur ce que Pennylane a calculé au dernier
-        // sync : ce n'est pas à nous de la recalculer localement (cf. la
-        // règle "onglets = miroir exact de Pennylane, jamais de logique
-        // maison" posée pour cette barre).
-        inv.deadline=updated.deadline;
-        inv.deadlineManual=!!updated.deadline_manual;
-        inv.daysLate=financeJoursDeRetard(inv.deadline);
-      }
-    }
-    renderFinanceTabs();
-    renderFinanceInvoices();
-    renderFinanceKpis(computeFinanceKpisFromCache());
+    // On repart d'un fetch complet plutôt que de rapiécer le cache local à la
+    // main : depuis la chaîne de validation des échéances (échéance 1 -> 2 ->
+    // 3...), un simple changement de statut ou de date peut faire glisser la
+    // référence de retard, voire faire basculer automatiquement la facture en
+    // "Soldée" côté serveur — autant de choses qu'on ne veut pas recalculer
+    // (et risquer de mal recalculer) séparément côté front.
+    await refreshFinanceInvoices();
     if(financeSelectedInvoiceId===id)openFinanceInvoiceDetail(id);
     showToast('Facture mise à jour');
   }catch(e){ showToast(e.message||"Échec de la mise à jour",'error'); }
@@ -889,7 +883,10 @@ async function openFinanceInvoiceDetail(id){
       </div>
       <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin-bottom:10px">
         <div><div class="form-label">Émission</div>${formatDateFR(inv.dateEmission)}</div>
-        <div><div class="form-label">Échéance${inv.deadlineManual?' <span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}</div><input type="date" class="form-input finance-deadline-input" style="margin-top:2px" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${id}',{deadline:this.value})"></div>
+        <div><div class="form-label">Échéance 1${inv.deadlineManual?' <span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}</div>
+          <input type="date" class="form-input finance-deadline-input" style="margin-top:2px" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${id}',{deadline:this.value})">
+          <div style="margin-top:4px">${financeStatusPillHtml(inv.deadlineStatusId,(statusId)=>patchFinanceInvoice(id,{deadlineStatusId:statusId}))}</div>
+        </div>
         <div><div class="form-label">Montant HT</div>${fmtCA(inv.amountHt)}</div>
         <div><div class="form-label">Montant TTC</div>${fmtCA(inv.amountTtc)}</div>
         <div><div class="form-label">Restant dû HT</div>${fmtCA(inv.remainingAmountHt)}</div>
@@ -1027,20 +1024,16 @@ async function submitFinanceInstallment(id){
   await refreshFinanceInvoices();
   openFinanceInvoiceDetail(id);
 }
-// Édition d'une échéance existante (statut et/ou montant réglé) — répercutée
-// dans le cache local (colonnes du tableau) sans tout recharger depuis le
-// serveur, même principe que patchFinanceInvoice() pour la facture entière.
+// Édition d'une échéance existante (statut et/ou montant réglé).
 async function patchFinanceInstallment(invoiceId,installmentId,patch){
   try{
     const res=await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
     if(!res.ok){ const err=await res.json().catch(()=>({})); throw new Error(err.error||'Échec de la mise à jour'); }
-    const updated=await res.json();
-    const inv=financeInvoicesCache.find(i=>i.id===invoiceId);
-    if(inv&&Array.isArray(inv.installments)){
-      const idx=inv.installments.findIndex(x=>x.id===installmentId);
-      if(idx!==-1)inv.installments[idx]=updated;
-    }
-    renderFinanceInvoices();
+    // Valider une échéance (statut "compte comme réglée") peut faire glisser
+    // la référence de retard sur l'échéance suivante et faire basculer la
+    // facture en "Soldée" côté serveur — un fetch complet évite de recalculer
+    // (et risquer de mal recalculer) cette chaîne à la main côté front.
+    await refreshFinanceInvoices();
     if(financeSelectedInvoiceId===invoiceId)openFinanceInvoiceDetail(invoiceId);
   }catch(e){ showToast(e.message||'Échec de la mise à jour','error'); }
 }
