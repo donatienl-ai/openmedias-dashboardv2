@@ -338,15 +338,44 @@ if (justAddedCompteRegle) {
 try {
   const noStatuses = db.prepare('SELECT COUNT(*) AS n FROM finance_installment_statuses').get().n === 0;
   if (noStatuses) {
+    // "Soldée" est seedée avec compte_regle=1 (seule case cochée par défaut) —
+    // même règle que le rattrapage ci-dessus, mais pour une base neuve où la
+    // colonne existe déjà dès la création de la table.
     const seed = [
-      ['À venir', '#64748b'],
-      ['Relancée', '#d4a017'],
-      ['Partiellement réglée', '#0d9488'],
-      ['Litige', '#dc2626'],
-      ['Soldée', '#16a34a'],
+      ['À venir', '#64748b', 0],
+      ['Relancée', '#d4a017', 0],
+      ['Partiellement réglée', '#0d9488', 0],
+      ['Litige', '#dc2626', 0],
+      ['Soldée', '#16a34a', 1],
     ];
-    const insert = db.prepare('INSERT INTO finance_installment_statuses (label, color, sort_order) VALUES (?,?,?)');
-    seed.forEach(([label, color], i) => insert.run(label, color, i));
+    const insert = db.prepare('INSERT INTO finance_installment_statuses (label, color, sort_order, compte_regle) VALUES (?,?,?,?)');
+    seed.forEach(([label, color, compteRegle], i) => insert.run(label, color, i, compteRegle));
+  }
+} catch(e) {}
+
+// Migration ponctuelle (une seule fois, marqueur dans `config`) : les
+// factures déjà marquées "Soldée" avant l'ajout de la pastille de statut sur
+// l'échéance 1 et sur les échéances 2/3/4 n'ont pas ce statut renseigné —
+// sans ce rattrapage, leurs échéances afficheraient "Sans statut" alors que
+// la facture entière est déjà soldée (relevé par Donatien après la mise en
+// route de la chaîne de validation). Ne touche que les échéances SANS statut
+// du tout, pour ne jamais écraser un choix déjà fait depuis l'appli.
+try {
+  const backfillDone = db.prepare("SELECT 1 FROM config WHERE key='finance_deadline_status_backfill_done'").get();
+  if (!backfillDone) {
+    const soldee = db.prepare('SELECT id FROM finance_installment_statuses WHERE compte_regle=1 ORDER BY sort_order ASC LIMIT 1').get();
+    if (soldee) {
+      const r1 = db.prepare("UPDATE pennylane_invoices SET deadline_status_id=? WHERE internal_status='solde' AND deadline_status_id IS NULL")
+        .run(soldee.id);
+      const r2 = db.prepare(`
+        UPDATE finance_invoice_installments
+        SET status_id=?, paid=1, paid_amount=amount
+        WHERE status_id IS NULL
+          AND invoice_id IN (SELECT id FROM pennylane_invoices WHERE internal_status='solde')
+      `).run(soldee.id);
+      console.log(`[FINANCE] Rattrapage "Soldée" : ${r1.changes} échéance(s) 1 + ${r2.changes} échéance(s) 2/3/4 alignée(s) sur le statut d'échéance.`);
+    }
+    db.prepare("INSERT INTO config (key,value) VALUES ('finance_deadline_status_backfill_done','1')").run();
   }
 } catch(e) {}
 
