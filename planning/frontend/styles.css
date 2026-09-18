@@ -1,18 +1,18 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Sora:wght@600;700;800&display=swap');
 
 :root {
-  --bg: #F1F4F9;
+  --bg: #F4F4F4;
   --surface: #FFFFFF;
-  --surface2: #F3F6FB;
-  --border: #DEE6F0;
-  --border-soft: #E8EEF6;
+  --surface2: #F6F6F6;
+  --border: #E5E5E5;
+  --border-soft: #EDEDED;
   --accent: #3B3BF9;
   --accent-light: #5B5BFB;
   --accent-dim: rgba(59,59,249,0.08);
   --gold: #D97706; --gold-dim: rgba(217,119,6,0.10);
   --red: #DC2626; --red-dim: rgba(220,38,38,0.08);
   --green: #16A34A; --green-dim: rgba(22,163,74,0.08);
-  --text: #101A2E; --text-dim: #50628A; --text-muted: #8C9CB8;
+  --text: #1A1A1A; --text-dim: #626262; --text-muted: #9B9B9B;
   --radius: 18px; --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(16,26,46,0.04), 0 10px 28px rgba(16,26,46,0.06);
   --shadow-lg: 0 24px 64px rgba(16,26,46,0.18);

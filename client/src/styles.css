@@ -287,13 +287,11 @@ body {
 .bg-violet { background: var(--violet); }
 
 /* ===== HERO CA =====
-   Avant : degrade plein 3 tons (om-blue -> om-blue-light -> om-blue-lighter,
-   ce dernier un lavande pale #A8A8FD) couvrant toute la carte - meme defaut
-   que l'ecran de login au 1er tour (une grande zone monochrome-indigo lit
-   comme "tout est violet"). Repasse sur le meme panel neutre que les autres
-   tuiles + une lueur radiale indigo en coin (identique au traitement de
-   .login-wrap) : la carte reste identifiable comme la tuile "vedette" par sa
-   couleur de marque, sans noyer l'ecran. */
+   Etait un degrade plein 3 tons en indigo, puis un fond neutre + une lueur
+   en coin (round 5) - toute trace de couleur de marque a ete retiree de
+   cette carte au round 6 ("stop le violet, stop") : fond, libelle, badges et
+   bouton sont maintenant strictement identiques aux autres tuiles du
+   dashboard, sans aucune exception. */
 .hero-ca {
   /* Plus de lueur/degrade decoratif du tout (suite au retour "plus jamais de
      violet") : fond identique aux autres tuiles, l'indigo de marque ne vit
@@ -303,37 +301,38 @@ body {
   display: flex; flex-direction: column; justify-content: center;
   min-height: 110px;
 }
-.hero-ca .lbl { font-size: 10px; letter-spacing: 2px; color: var(--om-blue-light); text-transform: uppercase; font-weight: 700; }
+.hero-ca .lbl { font-size: 10px; letter-spacing: 2px; color: var(--text-soft); text-transform: uppercase; font-weight: 700; }
 .hero-ca .val { font-family: var(--font-display); font-size: 40px; font-weight: 800; color: var(--text); line-height: 1; margin-top: 8px; letter-spacing: -1px; }
 .hero-ca .sub { font-size: 10px; color: var(--text-soft); margin-top: 6px; }
-/* .objective-summary/.objective-edit/.objective-saved sont partagées avec
-   MonthlyObjectiveDialog.css (popup d'édition, fond clair neutre) — sur le
-   dégradé bleu de cette carte, on les recale sur le même vocabulaire blanc/
-   translucide que .objective-badge et .hero-month juste au-dessus, plutôt
-   que le bouton gris clair + texte sombre hérités du popup. */
+/* .objective-summary/.objective-edit/.objective-saved étaient calés sur du
+   texte blanc translucide, hérité de l'ancien fond dégradé bleu de
+   .hero-ca (retiré au round 5) — illisible sur le panel neutre en thème
+   clair. Recalés sur les tokens de texte/fond standard, comme n'importe
+   quelle autre tuile du dashboard. */
 .hero-ca .objective-summary { margin-top: 12px; }
-.hero-ca .objective-summary > strong { color: rgba(255, 255, 255, 0.92); }
-.hero-ca .objective-summary > small { color: rgba(255, 255, 255, 0.68); }
+.hero-ca .objective-summary > strong { color: var(--text); }
+.hero-ca .objective-summary > small { color: var(--text-soft); }
 .hero-ca .objective-edit {
   display: inline-flex; align-items: center;
   margin-top: 10px; padding: 7px 14px;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: #fff; font-size: 12px; font-weight: 700;
+  color: var(--text); font-size: 12px; font-weight: 700;
   transition: background 0.15s, border-color 0.15s;
 }
-.hero-ca .objective-edit:hover { background: rgba(255, 255, 255, 0.26); border-color: rgba(255, 255, 255, 0.45); }
+.hero-ca .objective-edit:hover { background: var(--border); border-color: var(--text-soft); }
 .hero-ca .objective-edit:active { transform: scale(0.97); }
 .hero-ca .objective-saved {
   display: inline-flex; align-items: center;
   margin-top: 8px; margin-left: 10px;
   padding: 3px 9px;
-  background: rgba(34, 197, 94, 0.25);
+  background: rgba(34, 197, 94, 0.14);
   border-radius: 999px;
-  color: #DCFCE7; font-size: 11px; font-weight: 700;
+  color: #16A34A; font-size: 11px; font-weight: 700;
   animation: fadeIn 0.2s ease;
 }
+[data-theme="dark"] .hero-ca .objective-saved { background: rgba(34, 197, 94, 0.25); color: #4ADE80; }
 
 /* ===== CHART TILE ===== */
 .chart-box { width: 100%; }
@@ -774,14 +773,14 @@ body {
    [data-theme="light"] surcharge les variables.
    ========================================== */
 [data-theme="light"] {
-  --bg: #F1F4F9;
+  --bg: #F4F4F4;
   --panel: #FFFFFF;
-  --panel-2: #F3F6FB;
-  --border: #DEE6F0;
-  --border-soft: #E8EEF6;
-  --text: #101A2E;
-  --text-soft: #50628A;
-  --text-muted: #8C9CB8;
+  --panel-2: #F6F6F6;
+  --border: #E5E5E5;
+  --border-soft: #EDEDED;
+  --text: #1A1A1A;
+  --text-soft: #626262;
+  --text-muted: #9B9B9B;
   /* Accents recalibrés pour la lisibilité sur fond clair */
   --green: #16A34A;
   --bluer2: #0891B2;
@@ -805,12 +804,6 @@ body {
 [data-theme="light"] .login-card { box-shadow: 0 30px 80px rgba(22, 22, 60, 0.18); }
 [data-theme="light"] .modal { box-shadow: 0 40px 100px rgba(22, 22, 60, 0.25); }
 [data-theme="light"] .period-menu { box-shadow: 0 20px 60px rgba(22, 22, 60, 0.16); }
-[data-theme="light"] .kpi.glow-blue {
-  /* Plus de degrade de fond (cf. retour "plus jamais de violet") : la tuile
-     "mise en avant" se distingue par sa bordure coloree seule, pas par un
-     aplat indigo derriere le contenu. */
-  border-color: rgba(59, 59, 249, 0.35);
-}
 [data-theme="light"] .toprank { color: var(--text-soft); }
 [data-theme="light"] .toprow:nth-child(1) .toprank { color: #fff; }
 [data-theme="light"] .mrow:nth-child(1) .mrow-rank { color: #fff; }
@@ -1073,13 +1066,13 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .hero-month {
   display: flex; align-items: center; gap: 6px;
   margin-top: 12px; padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
-  font-size: 12px; font-weight: 700; color: rgba(255, 255, 255, 0.85);
+  border-top: 1px solid var(--border-soft);
+  font-size: 12px; font-weight: 700; color: var(--text-soft);
   font-variant-numeric: tabular-nums;
 }
 .hero-month-dot {
   width: 6px; height: 6px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.6); flex-shrink: 0;
+  background: var(--text-muted); flex-shrink: 0;
 }
 
 /* ===== Badge objectif de CA mensuel (alerte de rythme) ===== */
@@ -1089,12 +1082,14 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   border-radius: 999px; font-size: 11px; font-weight: 800;
   font-variant-numeric: tabular-nums; width: fit-content;
 }
-.objective-badge.ok { background: rgba(34, 197, 94, 0.22); color: #DCFCE7; }
-.objective-badge.warn { background: rgba(245, 158, 11, 0.25); color: #FEF3C7; }
-.objective-badge.danger { background: rgba(239, 68, 68, 0.25); color: #FEE2E2; }
-.objective-badge.muted {
-  background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.7);
-}
+.objective-badge.ok { background: rgba(34, 197, 94, 0.14); color: #16A34A; }
+.objective-badge.warn { background: rgba(245, 158, 11, 0.16); color: #B45309; }
+.objective-badge.danger { background: rgba(239, 68, 68, 0.14); color: #DC2626; }
+.objective-badge.muted { background: var(--panel-2); color: var(--text-muted); }
+[data-theme="dark"] .objective-badge.ok { background: rgba(34, 197, 94, 0.22); color: #4ADE80; }
+[data-theme="dark"] .objective-badge.warn { background: rgba(245, 158, 11, 0.25); color: #FBBF24; }
+[data-theme="dark"] .objective-badge.danger { background: rgba(239, 68, 68, 0.25); color: #F87171; }
+[data-theme="dark"] .objective-badge.muted { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.7); }
 
 /* ===== Badges % d'évolution ===== */
 .kpi-delta {
@@ -1113,11 +1108,15 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   margin-left: 8px;
   font-size: 11px; font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.95);
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--panel-2);
   border-radius: 6px; padding: 1px 6px;
   letter-spacing: 0;
 }
+.hero-delta.up { color: #16A34A; }
+.hero-delta.down { color: #EF4444; }
+.hero-delta.flat { color: var(--text-muted); }
+[data-theme="dark"] .hero-delta.up { color: #4ADE80; }
+[data-theme="dark"] .hero-delta.down { color: #F87171; }
 
 /* ===== Chips (suggestions rapides de destinataires) ===== */
 .adm-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }

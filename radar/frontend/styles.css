@@ -28,9 +28,9 @@
 }
 [data-theme="light"]{
   /* mêmes valeurs que [data-theme="light"] du dashboard et du planning */
-  --bg:#F1F4F9; --panel:#FFFFFF; --panel-2:#F3F6FB;
-  --border:#DEE6F0; --border-soft:#E8EEF6;
-  --text:#101A2E; --text-soft:#50628A; --text-muted:#8C9CB8;
+  --bg:#F4F4F4; --panel:#FFFFFF; --panel-2:#F6F6F6;
+  --border:#E5E5E5; --border-soft:#EDEDED;
+  --text:#1A1A1A; --text-soft:#626262; --text-muted:#9B9B9B;
   --green:#16A34A; --amber:#D97706;
   /* Accent de marque (identite openmedias.fr) recalibre pour fond clair. */
   --om-blue:#3B3BF9; --om-blue-light:#5B5BFB; --om-blue-lighter:#8A8AFC;
