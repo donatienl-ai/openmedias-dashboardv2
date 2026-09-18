@@ -4,9 +4,9 @@
    ========================================== */
 
 :root {
-  --om-blue: #2563EB;
-  --om-blue-light: #3B82F6;
-  --om-blue-lighter: #60A5FA;
+  --om-blue: #6D6DFC;
+  --om-blue-light: #8A8AFC;
+  --om-blue-lighter: #A8A8FD;
   --bg: #050A14;
   --panel: #0B1322;
   --panel-2: #101B30;
@@ -36,14 +36,28 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ===== LOGIN ===== */
+/* ===== LOGIN =====
+   Ecran de connexion : identite de marque fixe (marine + CTA indigo openmedias.fr),
+   qu'importe le theme clair/sombre choisi pour l'espace de travail (persiste en
+   localStorage) - un ecran de 5 secondes n'a pas a suivre la meme regle qu'un
+   espace de travail garde ouvert des heures (cf. audit UX/DA). Les proprietes
+   personnalisees sont redefinies ici : toute regle .login-* qui lit var(--bg),
+   var(--panel), var(--text)... en aval recoit automatiquement ces valeurs. */
 .login-wrap {
+  --bg: #0D0D2B;
+  --panel: #12123A;
+  --border: #2A2A5C;
+  --text: #FFFFFF;
+  --text-soft: #A6A6E8;
+  --text-muted: #7A7AC4;
+  --om-blue: #3B3BF9;
+  --om-blue-light: #8A8AFC;
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(1200px 600px at 50% -10%, rgba(37, 99, 235, 0.3), transparent),
+    radial-gradient(1200px 600px at 50% -10%, rgba(59, 59, 249, 0.35), transparent),
     var(--bg);
   padding: 24px;
 }
@@ -76,7 +90,7 @@ body {
 .login-input::placeholder { color: var(--text-soft); opacity: 1; }
 .login-btn {
   width: 100%; margin-top: 16px; background: var(--om-blue); color: #fff;
-  border: none; border-radius: 12px; padding: 14px; font-size: 15px;
+  border: none; border-radius: 999px; padding: 14px; font-size: 15px;
   font-weight: 700; font-family: var(--font-body); cursor: pointer;
   transition: background 0.2s, transform 0.1s;
 }
@@ -186,7 +200,7 @@ body {
 }
 .maj { font-size: 11px; color: var(--text-muted); }
 .refresh-btn {
-  background: var(--om-blue); color: #fff; border: none; border-radius: 10px;
+  background: var(--om-blue); color: #fff; border: none; border-radius: 999px;
   padding: 10px 18px; font-size: 13px; font-weight: 700; font-family: var(--font-body);
   cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
   transition: background 0.2s, transform 0.1s;
@@ -634,7 +648,7 @@ body {
 .filter-menu::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .period-btn.filter-active {
   border-color: var(--om-blue);
-  background: rgba(37, 99, 235, 0.12);
+  background: rgba(109, 109, 252, 0.12);
 }
 /* ==========================================
    REFONTE DESIGN — Command Center polish
@@ -663,7 +677,7 @@ body {
   display: inline-flex; align-items: center; gap: 8px;
 }
 .controls-group .period-btn.filter-active {
-  border-color: var(--om-blue); background: rgba(37, 99, 235, 0.12);
+  border-color: var(--om-blue); background: rgba(109, 109, 252, 0.12);
 }
 .topbar-divider {
   width: 1px; height: 26px; background: var(--border); margin: 0 12px;
@@ -758,6 +772,10 @@ body {
   --bluer2: #0891B2;
   --violet: #2563EB;
   --amber: #D97706;
+  /* Accent de marque (identité openmedias.fr) recalibré pour fond clair. */
+  --om-blue: #3B3BF9;
+  --om-blue-light: #5B5BFB;
+  --om-blue-lighter: #8A8AFC;
   /* Mêmes valeurs que [data-theme="light"] côté planning. */
   --radius: 18px; --radius-sm: 12px;
   --shadow: 0 1px 2px rgba(16,26,46,0.04), 0 10px 28px rgba(16,26,46,0.06);
@@ -773,8 +791,8 @@ body {
 [data-theme="light"] .modal { box-shadow: 0 40px 100px rgba(22, 22, 60, 0.25); }
 [data-theme="light"] .period-menu { box-shadow: 0 20px 60px rgba(22, 22, 60, 0.16); }
 [data-theme="light"] .kpi.glow-blue {
-  background: linear-gradient(160deg, rgba(37, 99, 235, 0.08), var(--panel) 60%);
-  border-color: rgba(37, 99, 235, 0.25);
+  background: linear-gradient(160deg, rgba(59, 59, 249, 0.08), var(--panel) 60%);
+  border-color: rgba(59, 59, 249, 0.25);
 }
 [data-theme="light"] .toprank { color: var(--text-soft); }
 [data-theme="light"] .toprow:nth-child(1) .toprank { color: #fff; }
@@ -784,7 +802,7 @@ body {
 /* --- Bouton de bascule de thème --- */
 .theme-btn {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: 10px; width: 38px; height: 38px;
+  border-radius: 50%; width: 38px; height: 38px;
   font-size: 16px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   transition: border-color 0.15s, background 0.15s, transform 0.1s;
@@ -868,7 +886,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   border-radius: 7px; padding: 4px 9px; font-size: 11px; font-weight: 700;
   cursor: pointer; font-family: var(--font-body); transition: background 0.15s, color 0.15s;
 }
-.set-team-btn:hover:not(:disabled) { background: rgba(37, 99, 235, 0.12); color: var(--om-blue-light); }
+.set-team-btn:hover:not(:disabled) { background: rgba(109, 109, 252, 0.12); color: var(--om-blue-light); }
 .set-team-btn:disabled { opacity: 0.5; cursor: default; }
 .set-team-icon { padding: 4px 8px; }
 .set-team-danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.12); color: #f87171; }
@@ -897,12 +915,12 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 }
 .set-showall {
   width: 100%; margin-bottom: 12px;
-  background: rgba(37, 99, 235, 0.12); border: 1px solid var(--om-blue);
+  background: rgba(109, 109, 252, 0.12); border: 1px solid var(--om-blue);
   color: var(--om-blue-light); border-radius: 10px; padding: 9px;
   font-size: 12px; font-weight: 700; cursor: pointer; font-family: var(--font-body);
   transition: background 0.15s;
 }
-.set-showall:hover { background: rgba(37, 99, 235, 0.2); }
+.set-showall:hover { background: rgba(109, 109, 252, 0.2); }
 [data-theme="light"] .set-showall { color: var(--om-blue); }
 .set-row {
   display: flex; align-items: center; justify-content: space-between;
@@ -937,7 +955,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 /* ===== Onglet BDC actif + lien Voir tout ===== */
 .bdc-stat.active {
   border-color: var(--om-blue);
-  background: rgba(37, 99, 235, 0.10);
+  background: rgba(109, 109, 252, 0.10);
 }
 .see-all.linky { cursor: pointer; transition: color 0.15s; }
 .see-all.linky:hover { color: var(--om-blue-light); }
@@ -966,7 +984,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--font-body);
   transition: border-color 0.15s, background 0.15s;
 }
-.adm-theme.active { border-color: var(--om-blue); background: rgba(37, 99, 235, 0.10); }
+.adm-theme.active { border-color: var(--om-blue); background: rgba(109, 109, 252, 0.10); }
 .adm-input {
   width: 100%; box-sizing: border-box;
   background: var(--panel-2); border: 1px solid var(--border);
@@ -1093,7 +1111,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
   cursor: pointer; font-family: var(--font-body);
   transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-.adm-chip:hover { border-color: var(--om-blue); color: var(--text); background: rgba(37, 99, 235, 0.06); }
+.adm-chip:hover { border-color: var(--om-blue); color: var(--text); background: rgba(109, 109, 252, 0.06); }
 .adm-chip:active { transform: scale(0.96); }
 
 /* ==========================================
@@ -1104,7 +1122,7 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
 .tv-root {
   position: fixed; inset: 0; z-index: 4000;
   background:
-    radial-gradient(1400px 700px at 50% -15%, rgba(37, 99, 235, 0.10), transparent),
+    radial-gradient(1400px 700px at 50% -15%, rgba(59, 59, 249, 0.10), transparent),
     var(--bg);
   color: var(--text);
   padding: clamp(18px, 3vh, 40px) clamp(24px, 4vw, 64px);

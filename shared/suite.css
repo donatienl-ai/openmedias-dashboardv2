@@ -2,8 +2,8 @@
 :root {
   --font-display: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --suite-blue: #2563EB;
-  --suite-focus: #3B82F6;
+  --suite-blue: #3B3BF9;
+  --suite-focus: #5B5BFB;
 }
 .app-switch {
   display: inline-flex; align-items: center; gap: 2px;

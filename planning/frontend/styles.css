@@ -6,9 +6,9 @@
   --surface2: #F3F6FB;
   --border: #DEE6F0;
   --border-soft: #E8EEF6;
-  --accent: #2563EB;
-  --accent-light: #3B82F6;
-  --accent-dim: rgba(37,99,235,0.08);
+  --accent: #3B3BF9;
+  --accent-light: #5B5BFB;
+  --accent-dim: rgba(59,59,249,0.08);
   --gold: #D97706; --gold-dim: rgba(217,119,6,0.10);
   --red: #DC2626; --red-dim: rgba(220,38,38,0.08);
   --green: #16A34A; --green-dim: rgba(22,163,74,0.08);
@@ -27,7 +27,7 @@
 }
 [data-theme="dark"] {
   --bg: #050A14; --surface: #0B1322; --surface2: #101B30; --border: #1B2A45; --border-soft: #16223A;
-  --accent: #3B82F6; --accent-light: #60A5FA; --accent-dim: rgba(59,130,246,0.14);
+  --accent: #6D6DFC; --accent-light: #8A8AFC; --accent-dim: rgba(109,109,252,0.14);
   --text: #FFFFFF; --text-dim: #8295B5; --text-muted: #54678A;
   --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.3);
   --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
@@ -39,7 +39,15 @@
 body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
 
 /* ── PIN ─────────────────────────────────────── */
-#pin-screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 100; }
+/* Ecran PIN : identite de marque fixe (marine + CTA indigo openmedias.fr),
+   independante du theme clair/sombre choisi pour l'espace de travail - ecran
+   de quelques secondes, pas un espace de travail (cf. audit UX/DA). */
+#pin-screen {
+  --bg: #0D0D2B; --surface: #12123A; --surface2: #1A1A4A; --border: #2A2A5C;
+  --text: #FFFFFF; --text-dim: #A6A6E8; --text-muted: #7A7AC4;
+  --accent: #6D6DFC; --accent-light: #8A8AFC; --accent-dim: rgba(109,109,252,0.20);
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 100;
+}
 .pin-card { background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 52px 44px; width: 380px; text-align: center; box-shadow: var(--shadow-lg); }
 .pin-logo { font-family: 'Sora', sans-serif; font-weight: 800; font-size: 24px; margin-bottom: 6px; letter-spacing: -0.5px; }
 .pin-logo span { color: var(--accent); }
@@ -196,7 +204,7 @@ header {
 .month-nav button { background: none; border: none; color: var(--text-dim); width: 30px; height: 30px; border-radius: 9px; cursor: pointer; font-size: 15px; transition: all 0.12s; display: flex; align-items: center; justify-content: center; }
 .month-nav button:hover { background: var(--surface); color: var(--accent); }
 .month-label { font-size: 13px; font-weight: 700; min-width: 118px; text-align: center; color: var(--text); font-variant-numeric: tabular-nums; }
-.btn-primary { background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
+.btn-primary { background: var(--accent); color: #fff; border: none; border-radius: 999px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
 .btn-primary:hover { background: var(--accent-light); }
 .btn-primary:active { transform: scale(0.97); }
 .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: 'Inter', sans-serif; }
@@ -205,7 +213,7 @@ header {
 .btn-danger:hover { background: rgba(220,38,38,0.16); }
 .btn-hard-delete { background: none; color: var(--text-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); width: 36px; height: 36px; padding: 0; font-size: 14px; cursor: pointer; font-family: 'Inter', sans-serif; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
 .btn-hard-delete:hover { color: var(--red); border-color: rgba(220,38,38,0.3); background: var(--red-dim); }
-.btn-icon { background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.btn-icon { background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 38px; height: 38px; border-radius: 50%; cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
 .btn-icon:hover { border-color: var(--accent-light); background: var(--surface2); }
 .btn-icon:active { transform: scale(0.94); }
 
@@ -274,7 +282,7 @@ header {
 .a-programmer-card .adc-media { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
 .a-programmer-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px 0; }
 .cal-day.drag-over { outline: 2px dashed #ff9900; outline-offset: -2px; background: #ff990011; }
-.a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(37,99,235,0.08); }
+.a-programmer-panel.drag-over-panel { outline: 2px dashed var(--accent); outline-offset: -3px; background: rgba(59,59,249,0.08); }
 
 /* Boîte à idées (rétroplanning réseaux sociaux) — même contenu que le panneau
    "À programmer" (cartes glissables), mais en popover ancré sous un bouton de
@@ -331,7 +339,7 @@ header {
 }
 .idc-channel-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .idea-box-add-row-wrap { margin-top: 10px; }
-.social-cal-day.drag-over-idea { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(37,99,235,0.08); }
+.social-cal-day.drag-over-idea { outline: 2px dashed var(--accent); outline-offset: -2px; background: rgba(59,59,249,0.08); }
 .media-tab { padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface); color: var(--text-dim); cursor: pointer; transition: all 0.15s; box-shadow: var(--shadow); }
 .media-tab:hover { color: var(--text); border-color: var(--text-muted); }
 .media-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(79,110,247,0.3); }

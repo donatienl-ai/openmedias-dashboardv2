@@ -2123,26 +2123,27 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           </div>
           <div className="topbar-divider" />
           <div className="status-cluster">
-            <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace">
+            <button className="theme-btn" onClick={() => setShowTv(true)} title="Mode TV — projection openspace" aria-label="Mode TV — projection openspace">
               📺
             </button>
             <button
               className={`theme-btn ${editMode ? 'active' : ''}`}
               onClick={() => setEditMode((v) => !v)}
               title={editMode ? 'Terminer la réorganisation' : 'Réorganiser les blocs du dashboard (glisser-déposer)'}
+              aria-label={editMode ? 'Terminer la réorganisation' : 'Réorganiser les blocs du dashboard'}
             >
               {editMode ? '✅' : '✏️'}
             </button>
             {isRestrictedCommercial && (
-              <button className="theme-btn" onClick={() => setShowMaSemaine(true)} title="Ma semaine">
+              <button className="theme-btn" onClick={() => setShowMaSemaine(true)} title="Ma semaine" aria-label="Ma semaine">
                 📅
               </button>
             )}
-            <button className="theme-btn" onClick={exportCsv} title="Exporter cette vue en CSV (Excel/Sheets)">
+            <button className="theme-btn" onClick={exportCsv} title="Exporter cette vue en CSV (Excel/Sheets)" aria-label="Exporter cette vue en CSV">
               📥
             </button>
             {isAdmin && (
-              <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres">
+              <button className="theme-btn" onClick={() => setShowSettings(true)} title="Paramètres" aria-label="Paramètres">
                 ⚙️
               </button>
             )}
@@ -2154,11 +2155,11 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
                  style emoji sans reproduire le bug de rendu de ✉️ (à surveiller
                  quand même : si un souci de rendu réapparaît sur un
                  OS/navigateur donné, revenir au SVG ci-dessus en commentaire). */
-              <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail">
+              <button className="theme-btn" onClick={() => setShowEmail(true)} title="Envoyer cette vue par mail" aria-label="Envoyer cette vue par mail">
                 📧
               </button>
             )}
-            <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'}>
+            <button className="theme-btn" onClick={onToggleTheme} title={theme === 'dark' ? 'Mode clair' : 'Mode sombre'} aria-label={theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             {emailMsg && <span className="maj">{emailMsg}</span>}
