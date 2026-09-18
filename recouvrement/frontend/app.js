@@ -343,6 +343,20 @@ const FINANCE_HORS_RECOUVREMENT=['draft','credit_note','cancelled','partially_ca
 // seulement l'exclusion d'encours) — mêmes valeurs que PENNYLANE_STATUSES_SOLDEES
 // côté pennylane.js, qui pilote déjà l'alignement de internalStatus='solde'.
 const FINANCE_STATUSES_SOLDEES=['paid','cancelled','partially_cancelled','credit_note'];
+// Petit repère visuel sur le Montant TTC quand le reste-dû Pennylane est non
+// nul MAIS que la facture est déjà exclue de l'encours par son statut brut
+// (typiquement `paid` — cf. commentaire ci-dessus) : sans ça, le montant
+// affiché en colonne donne l'impression d'être compté dans les KPI/la barre
+// de répartition alors qu'il ne l'est jamais, ce qui n'est pas visible tant
+// qu'on ne compare pas au total (source de confusion remontée par Donatien
+// sur le donut/la barre "répartition par statut").
+function financeExclusEncoursBadge(inv){
+  if(!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status))return '';
+  const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+  if(!(remaining>0))return '';
+  const label=PENNYLANE_STATUS_LABEL[inv.status]||inv.status;
+  return `<span class="finance-hors-encours-badge" title="Reste-dû Pennylane non nul, mais statut « ${label} » — cette facture n'est jamais comptée dans l'encours ni dans la répartition par statut">ⓘ</span>`;
+}
 // Statuts internes déjà "pris en charge" autrement qu'en relance active (même
 // exclusion que côté back et que le digest mail quotidien) — un litige en
 // cours ou une promesse de paiement obtenue n'attend pas une relance du jour.
@@ -704,7 +718,7 @@ function renderFinanceInvoices(){
       <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,2)}</td>
       <td>${financeRetardBarHtml(inv)}</td>
       <td>${fmtCA(inv.remainingAmountHt!=null?inv.remainingAmountHt:inv.amountHt)}</td>
-      <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}</td>
+      <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}${financeExclusEncoursBadge(inv)}</td>
       <td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select></td>
     </tr>`).join('')}</tbody>
   </table>`;

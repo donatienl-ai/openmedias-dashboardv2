@@ -752,6 +752,7 @@ td { padding: 10px 14px; font-size: 13px; }
 .finance-deadline-cell { display: flex; align-items: center; gap: 5px; }
 .finance-deadline-input { font-size: 12px !important; padding: 5px 6px !important; width: 122px; }
 .finance-deadline-manual-dot { font-size: 11px; color: var(--gold); flex-shrink: 0; }
+.finance-hors-encours-badge { display: inline-flex; margin-left: 4px; font-size: 10px; color: var(--text-muted); cursor: help; vertical-align: 1px; }
 .finance-retard-wrap { min-width: 92px; }
 .finance-retard-bar { height: 6px; border-radius: 4px; background: var(--surface2); overflow: hidden; }
 .finance-retard-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
