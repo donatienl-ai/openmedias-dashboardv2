@@ -334,7 +334,7 @@ def parse_html_page(cfg, url, html, seen):
         href = urljoin(base, a["href"]).split("?")[0].split("#")[0]
         if not _matches_filter(href, cfg.get("path_filter")):
             continue
-        if _is_noise(href, cfg):
+        if _is_noise(href, cfg) or (cfg.get("url_must_match") and not re.search(cfg["url_must_match"], href)):
             continue
         if href.rstrip("/") in index_urls:
             continue
