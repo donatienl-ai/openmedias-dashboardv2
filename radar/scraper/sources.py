@@ -112,7 +112,7 @@ SOURCES = [
     dict(source="Nous", media="Le Figaro", emission="L'entreprise sportive de la semaine",
          kind="html",
          url="https://www.lefigaro.fr/sports/dossier/l-entreprise-sportive-de-la-semaine",
-         path_filter="/sports/", url_must_match=r"-\d{8}$",
+         path_filter="/sports/", url_must_match=r"-\d{8}$|/l-entreprise-sportive-de-la-semaine/.+-\d+$",
          paginate=True, page_pattern="query", exclude=NOISE),
 
     # Page quasi figée depuis 2023 côté CNEWS (6 liens, "corner partenaires") —
