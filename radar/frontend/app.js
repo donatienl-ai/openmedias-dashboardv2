@@ -272,7 +272,7 @@ function frDate(iso){
 
 function cardNous({r,score,kw,sectorMatch}){
   const thumb = r.thumb
-    ? `<img loading="lazy" src="${esc(r.thumb)}" alt="" onerror="this.parentNode.innerHTML='<div class=ph>'+${JSON.stringify(esc('OpenMedias'))}+'</div>'">`
+    ? `<img loading="lazy" src="${esc(r.thumb)}" alt="" onerror="this.parentNode.innerHTML='<div class=ph>'+'${esc('OpenMedias')}'+'</div>'">`
     : `<div class="ph">${esc(r.media)}</div>`;
   const scoreHtml = score==null ? "" :
     `<div class="score" style="color:${scoreColor(score)}"><b>${score}</b><span>/100</span></div>`;
