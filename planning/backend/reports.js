@@ -366,7 +366,7 @@ function setupReports(db) {
 
     const dest = db.prepare(
       "SELECT email FROM commercial_users WHERE role IN ('finance','admin') AND actif=1"
-    ).all().map((r) => r.email).filter(Boolean);
+    ).all().map((r) => r.email).filter(Boolean).filter((e) => e !== 'paul@openmedias.fr');
 
     if (!enRetard.length) {
       console.log('[RELANCES] aucune facture en retard à relancer aujourd\'hui — pas d\'envoi');
