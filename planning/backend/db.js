@@ -406,7 +406,8 @@ const SOUS_MEDIAS_SPECIALISES = {
 "Industrie Pharma": ["Article digital"],
 "Emballages Magazine": ["Article digital"],
 "Le Moniteur des Artisans": ["Article digital"],
-"Le Moniteur Matériels": ["Article digital"]
+"Le Moniteur Matériels": ["Article digital"],
+"Batinfo": ["Article digital"]
 };
 const SOUS_MEDIAS_LIST = Object.keys(SOUS_MEDIAS_SPECIALISES);
 
