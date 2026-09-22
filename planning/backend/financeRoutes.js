@@ -393,17 +393,22 @@ const r = db.prepare('INSERT INTO finance_invoice_comments (invoice_id, auteur, 
 res.status(201).json(db.prepare('SELECT * FROM finance_invoice_comments WHERE id=?').get(r.lastInsertRowid));
 });
 
-// TODO (point 4.b du prompt de dev, encore bloqué le 09/2026 faute des 5
-// emails exacts) : restreindre l'ajout ET ajouter la modification des
-// commentaires à 5 personnes nommées (Thomas Durand, Lola Durand, Lina El
-// Haddaoui, Fatima, Arianne). Une fois les emails fournis :
-// 1) ajouter un middleware requireFinanceCommentEditor (chaîné après
-// requireFinance) qui vérifie req.commercial.email contre la liste ;
-// 2) l'appliquer sur la route POST ci-dessus (aujourd'hui ouverte à tout
-// compte finance/admin) ;
-// 3) créer app.patch('/api/finance/invoices/:id/comments/:commentId', ...)
-// avec le même middleware (route inexistante à ce jour).
-// La lecture (GET) doit rester ouverte à tout compte finance/admin.
+// Modification d'un commentaire existant (point 4.b du prompt de dev,
+// finalement ouvert à TOUT compte finance/admin plutôt que restreint à des
+// personnes nommées — décision Lina 09/2026, cf. statut-implementation-
+// recouvrement.md). Mêmes droits que l'ajout (requireFinance) : pas de
+// vérification d'auteur, n'importe quel compte finance/admin peut corriger
+// n'importe quel commentaire.
+app.patch('/api/finance/invoices/:id/comments/:commentId', requireFinance, (req, res) => {
+const existing = db.prepare('SELECT * FROM finance_invoice_comments WHERE id=? AND invoice_id=?')
+.get(req.params.commentId, req.params.id);
+if (!existing) return res.status(404).json({ error: 'Commentaire introuvable' });
+const comment = String(req.body.comment || '').trim();
+if (!comment) return res.status(400).json({ error: 'Commentaire vide' });
+db.prepare("UPDATE finance_invoice_comments SET comment=?, updated_at=datetime('now') WHERE id=?")
+.run(comment, req.params.commentId);
+res.json(db.prepare('SELECT * FROM finance_invoice_comments WHERE id=?').get(req.params.commentId));
+});
 
 // Échéances de paiement personnalisées (Pennylane n'expose qu'une seule
 // deadline — `installments` y est encore en alpha et toujours null — donc ces

@@ -258,6 +258,11 @@ comment TEXT NOT NULL,
 created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_finance_comments_invoice ON finance_invoice_comments(invoice_id);
+-- Migration : un commentaire peut désormais être modifié après coup (ouvert
+-- à tout compte finance/admin, pas restreint — décision Lina 09/2026) ;
+-- updated_at reste NULL tant que le commentaire n'a jamais été modifié, ce
+-- qui permet d'afficher "modifié" uniquement quand c'est vraiment le cas.
+try { db.exec('ALTER TABLE finance_invoice_comments ADD COLUMN updated_at TEXT'); } catch(e) {}
 
 -- Échéances de paiement propres à l'outil (Pennylane ne renvoie qu'une
 -- seule deadline par facture — le champ "installments" de son API est en
