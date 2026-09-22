@@ -9,7 +9,7 @@
 // Auth : token API simple (Pennylane > Paramètres > Connectivité >
 // Développeurs), pas OAuth2 — un seul token pour une seule société, pas
 // besoin du flux d'autorisation complet. Variable attendue :
-//   PENNYLANE_API_TOKEN
+// PENNYLANE_API_TOKEN
 //
 // Rate limit : la doc publique Pennylane (v2) annonce 25 requêtes / 5
 // secondes TOUS endpoints confondus (pas de palier plus strict documenté
@@ -27,29 +27,29 @@
 const API_BASE = 'https://app.pennylane.com/api/external/v2';
 
 function apiToken() {
-  const t = process.env.PENNYLANE_API_TOKEN;
-  if (!t) throw new Error('Pennylane non configuré (variable PENNYLANE_API_TOKEN manquante)');
-  return t;
+const t = process.env.PENNYLANE_API_TOKEN;
+if (!t) throw new Error('Pennylane non configuré (variable PENNYLANE_API_TOKEN manquante)');
+return t;
 }
 
 // Un seul point d'appel API, avec gestion du 429 par attente + nouvelle
 // tentative (respecte l'en-tête retry-after plutôt que de deviner un délai).
 async function pennylaneFetch(pathAndQuery, attempt = 1) {
-  const res = await fetch(`${API_BASE}${pathAndQuery}`, {
-    headers: {
-      Authorization: `Bearer ${apiToken()}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  if (res.status === 429) {
-    if (attempt > 5) throw new Error('Pennylane : limite de débit dépassée de façon persistante (429 répétés)');
-    const retryAfter = Number(res.headers.get('retry-after')) || 2;
-    await new Promise((r) => setTimeout(r, retryAfter * 1000));
-    return pennylaneFetch(pathAndQuery, attempt + 1);
-  }
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Pennylane API (${res.status}) sur ${pathAndQuery} : ${JSON.stringify(json)}`);
-  return json;
+const res = await fetch(`${API_BASE}${pathAndQuery}`, {
+headers: {
+Authorization: `Bearer ${apiToken()}`,
+'Content-Type': 'application/json',
+},
+});
+if (res.status === 429) {
+if (attempt > 5) throw new Error('Pennylane : limite de débit dépassée de façon persistante (429 répétés)');
+const retryAfter = Number(res.headers.get('retry-after')) || 2;
+await new Promise((r) => setTimeout(r, retryAfter * 1000));
+return pennylaneFetch(pathAndQuery, attempt + 1);
+}
+const json = await res.json().catch(() => ({}));
+if (!res.ok) throw new Error(`Pennylane API (${res.status}) sur ${pathAndQuery} : ${JSON.stringify(json)}`);
+return json;
 }
 
 // Récupère toutes les pages d'un endpoint (pagination par curseur — cf. doc
@@ -73,19 +73,19 @@ async function pennylaneFetch(pathAndQuery, attempt = 1) {
 // de 100). On garde un repli sur `meta.next_cursor` par prudence si jamais
 // un endpoint futur l'utilise, mais `next_cursor` racine est prioritaire.
 async function getAllPaginated(endpoint, filter) {
-  const items = [];
-  let cursor = null;
-  for (;;) {
-    const params = new URLSearchParams({ limit: '100' });
-    if (cursor) params.set('cursor', cursor);
-    if (filter) params.set('filter', JSON.stringify(filter));
-    const json = await pennylaneFetch(`/${endpoint}?${params.toString()}`);
-    const batch = Array.isArray(json) ? json : (json.items || []);
-    items.push(...batch);
-    cursor = json.next_cursor ?? (json.meta && json.meta.next_cursor) ?? null;
-    if (!cursor || !batch.length) break;
-  }
-  return items;
+const items = [];
+let cursor = null;
+for (;;) {
+const params = new URLSearchParams({ limit: '100' });
+if (cursor) params.set('cursor', cursor);
+if (filter) params.set('filter', JSON.stringify(filter));
+const json = await pennylaneFetch(`/${endpoint}?${params.toString()}`);
+const batch = Array.isArray(json) ? json : (json.items || []);
+items.push(...batch);
+cursor = json.next_cursor ?? (json.meta && json.meta.next_cursor) ?? null;
+if (!cursor || !batch.length) break;
+}
+return items;
 }
 
 // Le `status` documenté par Pennylane inclut déjà 'draft'/'credit_note' comme
@@ -93,15 +93,15 @@ async function getAllPaginated(endpoint, filter) {
 // mais on ne parie pas dessus : si jamais `status` manque, on retombe sur les
 // booléens dédiés `draft`/`credit_note` qui eux sont garantis par la doc.
 function computedStatus(invoice) {
-  if (invoice.status) return invoice.status;
-  if (invoice.draft) return 'draft';
-  if (invoice.credit_note) return 'credit_note';
-  return null;
+if (invoice.status) return invoice.status;
+if (invoice.draft) return 'draft';
+if (invoice.credit_note) return 'credit_note';
+return null;
 }
 
 function customerIdOf(invoice) {
-  const id = (invoice.customer && invoice.customer.id) ?? invoice.customer_id ?? null;
-  return id != null ? String(id) : null;
+const id = (invoice.customer && invoice.customer.id) ?? invoice.customer_id ?? null;
+return id != null ? String(id) : null;
 }
 
 // Champs confirmés sur le schéma réel d'une facture Pennylane (v2) :
@@ -112,14 +112,14 @@ function customerIdOf(invoice) {
 // ci-dessous ne servent qu'à encaisser une valeur manquante/nulle, pas un nom
 // de champ différent.
 function amountsOf(invoice) {
-  const ttc = Number(invoice.amount) || 0;
-  const tax = Number(invoice.tax) || 0;
-  return {
-    ht: Number((ttc - tax).toFixed(2)),
-    ttc,
-    remainingHt: Number(invoice.remaining_amount_without_tax) || 0,
-    remainingTtc: Number(invoice.remaining_amount_with_tax) || 0,
-  };
+const ttc = Number(invoice.amount) || 0;
+const tax = Number(invoice.tax) || 0;
+return {
+ht: Number((ttc - tax).toFixed(2)),
+ttc,
+remainingHt: Number(invoice.remaining_amount_without_tax) || 0,
+remainingTtc: Number(invoice.remaining_amount_with_tax) || 0,
+};
 }
 
 // Le contact (nom/mail/tel d'une VRAIE personne, pas juste la société) n'est
@@ -129,22 +129,36 @@ function amountsOf(invoice) {
 // distingue pas de contact "principal" dans son modèle, donc c'est la
 // meilleure approximation disponible sans configuration supplémentaire.
 async function fetchPrimaryContact(contactsUrl) {
-  if (!contactsUrl) return null;
-  try {
-    const path = contactsUrl.replace(API_BASE, '');
-    const json = await pennylaneFetch(path);
-    const list = Array.isArray(json) ? json : (json.items || []);
-    const c = list[0];
-    if (!c) return null;
-    return {
-      name: c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
-      email: c.email || (Array.isArray(c.emails) ? c.emails[0] : '') || '',
-      phone: c.phone || c.phone_number || '',
-    };
-  } catch (e) {
-    console.warn(`[PENNYLANE] contact introuvable sur ${contactsUrl} :`, e.message);
-    return null;
-  }
+if (!contactsUrl) return null;
+try {
+const path = contactsUrl.replace(API_BASE, '');
+const json = await pennylaneFetch(path);
+const list = Array.isArray(json) ? json : (json.items || []);
+const c = list[0];
+if (!c) return null;
+return {
+name: c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
+email: c.email || (Array.isArray(c.emails) ? c.emails[0] : '') || '',
+phone: c.phone || c.phone_number || '',
+};
+} catch (e) {
+console.warn(`[PENNYLANE] contact introuvable sur ${contactsUrl} :`, e.message);
+return null;
+}
+}
+
+// Statut par défaut de l'échéance 1 (deadline_status_id) pour une facture
+// nouvellement synchronisée (09/2026) : "Sans statut" (NULL) a été retiré
+// comme état possible côté recouvrement, remplacé par "Douteux" — voir
+// financeRoutes.js, defaultInstallmentStatusId() (même logique, dupliquée
+// ici faute de dépendance directe entre les deux fichiers). Calculé une
+// seule fois par appel de syncFinance (pas une fois par facture) : avant,
+// deadline_status_id était totalement absent du INSERT, donc toute nouvelle
+// facture démarrait à NULL = "Sans statut" — c'était la cause la plus
+// fréquente du problème remonté par Lina.
+function defaultDeadlineStatusId(db) {
+const row = db.prepare("SELECT id FROM finance_installment_statuses WHERE label='Douteux' ORDER BY sort_order ASC LIMIT 1").get();
+return row ? row.id : null;
 }
 
 // Synchro COMPLÈTE (pas incrémentale) à chaque appel, SANS filtre de date :
@@ -159,130 +173,143 @@ async function fetchPrimaryContact(contactsUrl) {
 // NB : un appel /contacts par client s'ajoute à chaque synchro (voir
 // fetchPrimaryContact) — plus lent, mais c'est le seul moyen d'obtenir un
 // nom/mail/tel de contact réel plutôt que la seule société.
+//
+// NB (09/2026) : depuis financeRoutes.js, GET /api/finance/invoices filtre
+// désormais l'AFFICHAGE sur date_emission >= 2025-01-01 (demande Lina, perf)
+// — volontairement PAS ici, pour les mêmes raisons que ci-dessus : la
+// synchro doit rester complète, seule la vue quotidienne réduit le volume.
 async function syncFinance(db) {
-  const invoices = await getAllPaginated('customer_invoices');
-  const customers = await getAllPaginated('customers');
+const invoices = await getAllPaginated('customer_invoices');
+const customers = await getAllPaginated('customers');
 
-  if (process.env.PENNYLANE_DEBUG_RAW === '1') {
-    if (invoices[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de facture brute :', JSON.stringify(invoices[0], null, 2));
-    if (customers[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de client brut :', JSON.stringify(customers[0], null, 2));
-  }
+if (process.env.PENNYLANE_DEBUG_RAW === '1') {
+if (invoices[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de facture brute :', JSON.stringify(invoices[0], null, 2));
+if (customers[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de client brut :', JSON.stringify(customers[0], null, 2));
+}
 
-  // Ne va chercher les contacts QUE pour les clients qui ont au moins une
-  // facture encore due dans ce sync (inutile de multiplier les appels API
-  // pour des clients soldés depuis longtemps qui n'apparaîtront nulle part
-  // dans l'outil de recouvrement).
-  const dueCustomerIds = new Set(
-    invoices
-      .filter((inv) => !inv.draft && !inv.credit_note && (Number(inv.remaining_amount_with_tax) || 0) > 0)
-      .map((inv) => customerIdOf(inv))
-      .filter(Boolean)
-  );
-  const contactsById = new Map();
-  for (const c of customers) {
-    if (!dueCustomerIds.has(String(c.id))) continue;
-    const contact = await fetchPrimaryContact(c.contacts && c.contacts.url);
-    if (contact) contactsById.set(String(c.id), contact);
-    if (process.env.PENNYLANE_DEBUG_RAW === '1' && contact) {
-      console.log(`[PENNYLANE_DEBUG_RAW] contact client ${c.id} :`, JSON.stringify(contact));
-    }
-  }
+// Ne va chercher les contacts QUE pour les clients qui ont au moins une
+// facture encore due dans ce sync (inutile de multiplier les appels API
+// pour des clients soldés depuis longtemps qui n'apparaîtront nulle part
+// dans l'outil de recouvrement).
+const dueCustomerIds = new Set(
+invoices
+.filter((inv) => !inv.draft && !inv.credit_note && (Number(inv.remaining_amount_with_tax) || 0) > 0)
+.map((inv) => customerIdOf(inv))
+.filter(Boolean)
+);
+const contactsById = new Map();
+for (const c of customers) {
+if (!dueCustomerIds.has(String(c.id))) continue;
+const contact = await fetchPrimaryContact(c.contacts && c.contacts.url);
+if (contact) contactsById.set(String(c.id), contact);
+if (process.env.PENNYLANE_DEBUG_RAW === '1' && contact) {
+console.log(`[PENNYLANE_DEBUG_RAW] contact client ${c.id} :`, JSON.stringify(contact));
+}
+}
 
-  const upsertCustomer = db.prepare(`
-    INSERT INTO pennylane_customers (id, name, email, phone, contact_name, contact_email, contact_phone, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(id) DO UPDATE SET
-      name=excluded.name, email=excluded.email, phone=excluded.phone,
-      contact_name=excluded.contact_name, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
-      synced_at=excluded.synced_at
-  `);
-  // Alignement du statut interne (notre suivi de relance : a_relancer /
-  // en_cours / litige / promesse_paiement / solde) sur le statut BRUT
-  // Pennylane, à chaque synchro : dès qu'une facture est encaissée, annulée
-  // (totalement ou partiellement) ou devient un avoir côté Pennylane, elle
-  // n'a plus rien à "relancer" — on la bascule donc automatiquement sur
-  // `solde` plutôt que de laisser une facture payée traîner indéfiniment sur
-  // la valeur par défaut `a_relancer` tant que personne ne l'a triée à la
-  // main. On ne touche PAS aux autres statuts (upcoming/late/partially_paid/
-  // draft/incomplete/archived) : une facture encore due garde le statut
-  // interne déjà choisi manuellement (litige/promesse_paiement/en_cours...),
-  // ce recalcul ne l'écrase jamais tant qu'elle n'est pas définitivement
-  // soldée/annulée.
-  const PENNYLANE_STATUSES_SOLDEES = ['paid', 'cancelled', 'partially_cancelled', 'credit_note'];
-  const soldeesSqlList = PENNYLANE_STATUSES_SOLDEES.map((s) => `'${s}'`).join(',');
+const upsertCustomer = db.prepare(`
+INSERT INTO pennylane_customers (id, name, email, phone, contact_name, contact_email, contact_phone, synced_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(id) DO UPDATE SET
+name=excluded.name, email=excluded.email, phone=excluded.phone,
+contact_name=excluded.contact_name, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
+synced_at=excluded.synced_at
+`);
+// Alignement du statut interne (notre suivi de relance : a_relancer /
+// en_cours / litige / promesse_paiement / solde) sur le statut BRUT
+// Pennylane, à chaque synchro : dès qu'une facture est encaissée, annulée
+// (totalement ou partiellement) ou devient un avoir côté Pennylane, elle
+// n'a plus rien à "relancer" — on la bascule donc automatiquement sur
+// `solde` plutôt que de laisser une facture payée traîner indéfiniment sur
+// la valeur par défaut `a_relancer` tant que personne ne l'a triée à la
+// main. On ne touche PAS aux autres statuts (upcoming/late/partially_paid/
+// draft/incomplete/archived) : une facture encore due garde le statut
+// interne déjà choisi manuellement (litige/promesse_paiement/en_cours...),
+// ce recalcul ne l'écrase jamais tant qu'elle n'est pas définitivement
+// soldée/annulée.
+const PENNYLANE_STATUSES_SOLDEES = ['paid', 'cancelled', 'partially_cancelled', 'credit_note'];
+const soldeesSqlList = PENNYLANE_STATUSES_SOLDEES.map((s) => `'${s}'`).join(',');
 
-  const upsertInvoice = db.prepare(`
-    INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, amount_ht, remaining_amount, remaining_amount_ht, status, internal_status, synced_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    ON CONFLICT(id) DO UPDATE SET
-      invoice_number=excluded.invoice_number, customer_id=excluded.customer_id,
-      date_emission=excluded.date_emission,
-      -- Une échéance corrigée à la main dans l'appli (deadline_manual=1, ex.
-      -- délai négocié avec le client) n'est PLUS écrasée par la valeur
-      -- Pennylane au sync suivant — elle ne redevient alignée sur Pennylane
-      -- que si quelqu'un la modifie à nouveau depuis l'appli (ou remet
-      -- deadline_manual à 0 en base). Voir PATCH /api/finance/invoices/:id.
-      deadline = CASE WHEN pennylane_invoices.deadline_manual=1 THEN pennylane_invoices.deadline ELSE excluded.deadline END,
-      amount=excluded.amount, amount_ht=excluded.amount_ht,
-      remaining_amount=excluded.remaining_amount, remaining_amount_ht=excluded.remaining_amount_ht,
-      status=excluded.status,
-      internal_status = CASE WHEN excluded.status IN (${soldeesSqlList})
-        THEN 'solde' ELSE pennylane_invoices.internal_status END,
-      synced_at=excluded.synced_at
-  `);
+const defaultStatusId = defaultDeadlineStatusId(db);
 
-  const runAll = db.transaction(() => {
-    for (const c of customers) {
-      const contact = contactsById.get(String(c.id));
-      upsertCustomer.run(
-        String(c.id),
-        c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
-        (Array.isArray(c.emails) ? c.emails[0] : c.email) || '',
-        c.phone || c.phone_number || '',
-        contact ? contact.name : null,
-        contact ? contact.email : null,
-        contact ? contact.phone : null
-      );
-    }
-    for (const inv of invoices) {
-      // Brouillons/avoirs/annulées sont enregistrés avec leur statut Pennylane
-      // d'origine (jamais sautés) : /api/finance/invoices renvoie tout (le
-      // front filtre lui-même par onglet, calqué sur ces statuts bruts), et
-      // /api/finance/kpis reste lui borné aux factures encore dues pour le
-      // calcul d'encours (voir router.js).
-      const a = amountsOf(inv);
-      const status = computedStatus(inv);
-      upsertInvoice.run(
-        String(inv.id),
-        inv.invoice_number || null,
-        customerIdOf(inv),
-        inv.date || null,
-        inv.deadline || null,
-        a.ttc,
-        a.ht,
-        a.remainingTtc,
-        a.remainingHt,
-        status,
-        PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer'
-      );
-    }
-  });
-  runAll();
+const upsertInvoice = db.prepare(`
+INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, amount_ht, remaining_amount, remaining_amount_ht, status, internal_status, deadline_status_id, synced_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(id) DO UPDATE SET
+invoice_number=excluded.invoice_number, customer_id=excluded.customer_id,
+date_emission=excluded.date_emission,
+-- Une échéance corrigée à la main dans l'appli (deadline_manual=1, ex.
+-- délai négocié avec le client) n'est PLUS écrasée par la valeur
+-- Pennylane au sync suivant — elle ne redevient alignée sur Pennylane
+-- que si quelqu'un la modifie à nouveau depuis l'appli (ou remet
+-- deadline_manual à 0 en base). Voir PATCH /api/finance/invoices/:id.
+deadline = CASE WHEN pennylane_invoices.deadline_manual=1 THEN pennylane_invoices.deadline ELSE excluded.deadline END,
+amount=excluded.amount, amount_ht=excluded.amount_ht,
+remaining_amount=excluded.remaining_amount, remaining_amount_ht=excluded.remaining_amount_ht,
+status=excluded.status,
+internal_status = CASE WHEN excluded.status IN (${soldeesSqlList})
+THEN 'solde' ELSE pennylane_invoices.internal_status END,
+synced_at=excluded.synced_at
+-- deadline_status_id volontairement ABSENT de ce SET : ne doit jamais être
+-- écrasé au sync suivant une fois qu'une facture existe déjà en base, que
+-- son statut d'échéance 1 ait été choisi à la main ou soit resté sur le
+-- défaut "Douteux" posé à sa création — seul le INSERT initial (ci-dessus,
+-- colonne deadline_status_id / valeur defaultStatusId) le renseigne.
+`);
 
-  return {
-    invoicesSynced: invoices.length,
-    customersSynced: customers.length,
-    syncedAt: new Date().toISOString(),
-  };
+const runAll = db.transaction(() => {
+for (const c of customers) {
+const contact = contactsById.get(String(c.id));
+upsertCustomer.run(
+String(c.id),
+c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
+(Array.isArray(c.emails) ? c.emails[0] : c.email) || '',
+c.phone || c.phone_number || '',
+contact ? contact.name : null,
+contact ? contact.email : null,
+contact ? contact.phone : null
+);
+}
+for (const inv of invoices) {
+// Brouillons/avoirs/annulées sont enregistrés avec leur statut Pennylane
+// d'origine (jamais sautés) : /api/finance/invoices renvoie tout (le
+// front filtre lui-même par onglet, calqué sur ces statuts bruts), et
+// /api/finance/kpis reste lui borné aux factures encore dues pour le
+// calcul d'encours (voir router.js).
+const a = amountsOf(inv);
+const status = computedStatus(inv);
+upsertInvoice.run(
+String(inv.id),
+inv.invoice_number || null,
+customerIdOf(inv),
+inv.date || null,
+inv.deadline || null,
+a.ttc,
+a.ht,
+a.remainingTtc,
+a.remainingHt,
+status,
+PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer',
+defaultStatusId
+);
+}
+});
+runAll();
+
+return {
+invoicesSynced: invoices.length,
+customersSynced: customers.length,
+syncedAt: new Date().toISOString(),
+};
 }
 
 // Un lien PDF public (`public_file_url`) est bien renvoyé par Pennylane, mais
 // n'est valable que 30 minutes — on ne le met donc JAMAIS en cache, on le
 // redemande à la demande (clic sur "Voir le PDF" côté app) via cet appel.
 async function getInvoicePdfUrl(id) {
-  const json = await pennylaneFetch(`/customer_invoices/${encodeURIComponent(id)}`);
-  if (!json.public_file_url) throw new Error("Pennylane n'a renvoyé aucun PDF pour cette facture");
-  return { url: json.public_file_url, filename: json.filename || null };
+const json = await pennylaneFetch(`/customer_invoices/${encodeURIComponent(id)}`);
+if (!json.public_file_url) throw new Error("Pennylane n'a renvoyé aucun PDF pour cette facture");
+return { url: json.public_file_url, filename: json.filename || null };
 }
 
 module.exports = { syncFinance, getInvoicePdfUrl, getAllPaginated, pennylaneFetch };
