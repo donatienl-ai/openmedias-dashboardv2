@@ -54,7 +54,7 @@ email TEXT UNIQUE NOT NULL,
 password_hash TEXT NOT NULL,
 nom TEXT NOT NULL,
 sf_user_id TEXT,
-equipe_edito_id INTEGER REFERENCES equipes_edito(id) ON DELETE SET NULL,
+equipe_edito_id INTEGER,
 actif INTEGER DEFAULT 1,
 created_at TEXT DEFAULT (datetime('now'))
 );
@@ -171,7 +171,7 @@ created_at TEXT DEFAULT (datetime('now'))
 // (React, client/src/App.js) par un compte admin.
 db.exec(`
 CREATE TABLE IF NOT EXISTS commercial_objectives (
-commercial_id INTEGER PRIMARY KEY REFERENCES commercial_users(id) ON DELETE CASCADE,
+commercial_id INTEGER PRIMARY KEY,
 monthly_amount REAL NOT NULL DEFAULT 0,
 updated_at TEXT DEFAULT (datetime('now'))
 );
