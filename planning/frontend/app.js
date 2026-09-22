@@ -3,7 +3,7 @@ const API = 'api'; // relatif : fonctionne servi à la racine ou derrière un re
 // certaines combinaisons OS/police — ex: Chrome/Windows — et rend une case
 // vide). Un SVG s'affiche à l'identique partout.
 const ICON_MAIL = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;display:inline-block"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>';
-let role=null, myName=null, isCLevel=false, isAccountAdmin=false, currentMedia='TIME', currentDate=new Date();
+let role=null, myName=null, isCLevel=false, isAccountAdmin=false, canSeeBudget=false, currentMedia='TIME', currentDate=new Date();
 let emissions=[], slotMap=[], joursBlockes=[], meta={};
 let pinBuffer='', searchQuery='', bdcFilterActive=false;
 let commercialId = localStorage.getItem('commercialId') || null;
@@ -26,6 +26,12 @@ function planningRoleFor(accountRole){
 // le dashboard) — évite de dupliquer cette logique 4 fois de façon divergente.
 function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal, accountRole}){
   role=r; myName=nom||null; isCLevel=!!clevel; isAccountAdmin=(accountRole==='admin');
+// Visibilité Montant/Upsell (diffusions) : ouverte à l'admin, au pôle com
+// (accountRole==='communication') et à la finance — même accès que Lola
+// (compte admin) demandé pour toute son équipe, sans faire de chacun un
+// compte admin (qui donnerait aussi Paramètres/Reporting/etc). Décision
+// Lina 09/2026, cf. statut-implementation-recouvrement.md.
+canSeeBudget=(isAccountAdmin||accountRole==='communication'||accountRole==='finance');
   if(commercialIdVal){
     commercialId=commercialIdVal; commercialNom=commercialNomVal||'';
     localStorage.setItem('commercialId',commercialId); localStorage.setItem('commercialNom',commercialNom);
@@ -1890,8 +1896,8 @@ function applyListFilters(){
     <div class="stat-pill"><div class="stat-pill-val" style="color:var(--bdc-text)">${filtered.filter(e=>e.statut==='bdc_attente').length}</div><div class="stat-pill-lbl">BDC en attente</div></div>
     <div class="stat-pill"><div class="stat-pill-val" style="color:var(--gold)">${filtered.filter(e=>e.statut==='a_assigner').length}</div><div class="stat-pill-lbl">À assigner</div></div>
     <div class="stat-pill"><div class="stat-pill-val" style="color:var(--green)">${filtered.filter(e=>e.statut==='confirme').length}</div><div class="stat-pill-lbl">Confirmées</div></div>
-    ${caDiffusion&&isAccountAdmin?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--accent)">${fmtCA(caDiffusion)}</div><div class="stat-pill-lbl">CA diffusion</div></div>`:''}
-    ${caUpsell&&isAccountAdmin?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--gold)">${fmtCA(caUpsell)}</div><div class="stat-pill-lbl">CA upsell</div></div>`:''}
+    ${caDiffusion&&canSeeBudget?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--accent)">${fmtCA(caDiffusion)}</div><div class="stat-pill-lbl">CA diffusion</div></div>`:''}
+    ${caUpsell&&canSeeBudget?`<div class="stat-pill"><div class="stat-pill-val" style="color:var(--gold)">${fmtCA(caUpsell)}</div><div class="stat-pill-lbl">CA upsell</div></div>`:''}
     ${filtered.length!==listAllCache.length?`<span class="list-filter-reset" onclick="resetListFilters()">✕ Réinitialiser les filtres (${listAllCache.length} au total)</span>`:''}
   `;
 }
@@ -1919,8 +1925,8 @@ function renderListRows(all){
       <td data-label="Secteur" style="color:var(--text-dim);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.secteur||'—'}</td>
       <td data-label="Commercial" style="color:var(--text-dim)">${e.commercial&&e.commercial!=='/'?e.commercial:'—'}</td>
       <td data-label="Resp. édito">${e.resp_edit||'<span style="color:var(--bdc-text);font-weight:500">À assigner</span>'}</td>
-      ${isAccountAdmin?`<td data-label="CA diffusion">${e.montant?'<strong style="color:var(--accent)">'+fmtCA(e.montant)+'</strong>':'—'}</td>`:''}
-      ${isAccountAdmin?`<td data-label="CA upsell">${e.upsell?'<strong style="color:var(--gold)">'+fmtCA(e.upsell)+'</strong>':'—'}</td>`:''}
+      ${canSeeBudget?`<td data-label="CA diffusion">${e.montant?'<strong style="color:var(--accent)">'+fmtCA(e.montant)+'</strong>':'—'}</td>`:''}
+      ${canSeeBudget?`<td data-label="CA upsell">${e.upsell?'<strong style="color:var(--gold)">'+fmtCA(e.upsell)+'</strong>':'—'}</td>`:''}
       <td data-label="Statut">${statutBadge(e.statut)}</td>
     </tr>`;
   }).join('');
@@ -2056,7 +2062,7 @@ async function openEmission(id){
   document.getElementById('modal-body').innerHTML=`
     ${isBdc?'<div class="info-banner bdc">⏳ BDC en attente — diffusion réservée, contrat non signé</div>':''}
     ${isDecale?`<div class="info-banner warning">⟳ Date décalée — originale : ${formatDateFR(e.date_diffusion_originale)}</div>`:''}
-    ${isAccountAdmin&&(e.montant||e.upsell)?`<div class="info-banner neutral">💰 <strong style="color:var(--accent)">${fmtCA((e.montant||0)+(e.upsell||0))}</strong>${e.upsell?' <span style="color:var(--text-muted);font-size:11px">(dont '+fmtCA(e.upsell)+' upsell)</span>':''}</div>`:''}
+    ${canSeeBudget&&(e.montant||e.upsell)?`<div class="info-banner neutral">💰 <strong style="color:var(--accent)">${fmtCA((e.montant||0)+(e.upsell||0))}</strong>${e.upsell?' <span style="color:var(--text-muted);font-size:11px">(dont '+fmtCA(e.upsell)+' upsell)</span>':''}</div>`:''}
     <div class="form-row">
       <div class="form-group"><label class="form-label">Entreprise</label><input class="form-input" id="edit-entreprise" value="${e.entreprise}" ${!isEdit?'disabled':''}></div>
       <div class="form-group"><label class="form-label">Commercial</label><input class="form-input" id="edit-commercial" value="${e.commercial||''}" ${!isEdit?'disabled':''}></div>
@@ -2078,7 +2084,7 @@ async function openEmission(id){
         </select>
       </div>
     </div>
-    ${isAccountAdmin?`<div class="form-row">
+    ${canSeeBudget?`<div class="form-row">
       <div class="form-group"><label class="form-label">Montant (€)</label><input class="form-input" type="number" id="edit-montant" value="${e.montant||''}"></div>
       <div class="form-group"><label class="form-label">Upsell (€)</label><input class="form-input" type="number" id="edit-upsell" value="${e.upsell||''}" placeholder="0"></div>
     </div>`:''}
@@ -2678,7 +2684,7 @@ function openAddModal(date='',force=false){
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Secteur</label><input class="form-input" id="add-secteur" placeholder="Ex: Santé, Finance…"></div>
-      ${isAccountAdmin?'<div class="form-group"><label class="form-label">Montant (€)</label><input class="form-input" type="number" id="add-montant" placeholder="0"></div>':''}
+      ${canSeeBudget?'<div class="form-group"><label class="form-label">Montant (€)</label><input class="form-input" type="number" id="add-montant" placeholder="0"></div>':''}
     </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">Statut</label>
