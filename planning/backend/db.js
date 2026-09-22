@@ -187,7 +187,7 @@ try { db.exec('ALTER TABLE sales_teams ADD COLUMN manager_id INTEGER'); } catch(
 // la config existante — table vide = jamais seedée.
 try {
 const seeded = db.prepare('SELECT COUNT(*) as n FROM sales_teams').get();
-if (seeded.n === 0) {
+if (seeded && seeded.n === 0) {
 const seedTeams = db.prepare('INSERT INTO sales_teams (id,label) VALUES (?,?)');
 seedTeams.run('lisa', 'Équipe Lisa');
 seedTeams.run('quentin', 'Équipe Quentin');
@@ -341,7 +341,8 @@ try { db.prepare("UPDATE finance_installment_statuses SET compte_regle=1 WHERE l
 // vide (première mise en route de la fonctionnalité) — l'équipe est ensuite
 // libre de les renommer/recolorer/réordonner/supprimer depuis Paramètres.
 try {
-const noStatuses = db.prepare('SELECT COUNT(*) AS n FROM finance_installment_statuses').get().n === 0;
+const statusCount = db.prepare('SELECT COUNT(*) AS n FROM finance_installment_statuses').get();
+const noStatuses = statusCount ? statusCount.n === 0 : false;
 if (noStatuses) {
 // "Soldée" est seedée avec compte_regle=1 (seule case cochée par défaut) —
 // même règle que le rattrapage ci-dessus, mais pour une base neuve où la
@@ -536,4 +537,5 @@ const SOUS_MEDIAS_SPECIALISES = {
 };
 const SOUS_MEDIAS_LIST = Object.keys(SOUS_MEDIAS_SPECIALISES);
 
+module.exports = { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES, FINANCE_INTERNAL_STATUSES };
 module.exports = { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES, FINANCE_INTERNAL_STATUSES };
