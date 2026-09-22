@@ -11,142 +11,143 @@
 <body>
 
 <div id="pin-screen">
-  <div class="pin-card" id="pin-card-commercial">
-    <div class="pin-logo">💶 <span>Recouvrement</span></div>
-    <div class="pin-sub">OpenMedias — Connexion</div>
-    <div style="text-align:left;margin-top:24px">
-      <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" id="commercial-email" autocomplete="username" onkeydown="if(event.key==='Enter')commercialLoginSubmit()"></div>
-      <div class="form-group" style="margin-top:12px"><label class="form-label">Mot de passe</label><input class="form-input" type="password" id="commercial-password" autocomplete="current-password" onkeydown="if(event.key==='Enter')commercialLoginSubmit()"></div>
-    </div>
-    <button class="btn-primary" style="width:100%;margin-top:18px" onclick="commercialLoginSubmit()">Connexion</button>
-    <div class="pin-error" id="commercial-login-error"></div>
-    <div class="login-switch" style="text-align:right">
-      <a href="#" onclick="showForgotPassword(event)">Mot de passe oublié ?</a>
-    </div>
-  </div>
+<div class="pin-card" id="pin-card-commercial">
+<div class="pin-logo">💶 <span>Recouvrement</span></div>
+<div class="pin-sub">OpenMedias — Connexion</div>
+<div style="text-align:left;margin-top:24px">
+<div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" id="commercial-email" autocomplete="username" onkeydown="if(event.key==='Enter')commercialLoginSubmit()"></div>
+<div class="form-group" style="margin-top:12px"><label class="form-label">Mot de passe</label><input class="form-input" type="password" id="commercial-password" autocomplete="current-password" onkeydown="if(event.key==='Enter')commercialLoginSubmit()"></div>
+</div>
+<button class="btn-primary" style="width:100%;margin-top:18px" onclick="commercialLoginSubmit()">Connexion</button>
+<div class="pin-error" id="commercial-login-error"></div>
+<div class="login-switch" style="text-align:right">
+<a href="#" onclick="showForgotPassword(event)">Mot de passe oublié ?</a>
+</div>
+</div>
 
-  <!-- Mot de passe oublié : même flow que le planning (email -> lien de
-       réinitialisation via /api/auth/forgot-password, réponse générique
-       qu'un compte existe ou non). -->
-  <div class="pin-card" id="pin-card-forgot" style="display:none">
-    <div class="pin-logo">💶 <span>Recouvrement</span></div>
-    <div class="pin-sub">Mot de passe oublié</div>
-    <div style="text-align:left;margin-top:24px">
-      <div class="form-group"><label class="form-label">Email du compte</label><input class="form-input" type="email" id="forgot-email" autocomplete="username" onkeydown="if(event.key==='Enter')forgotPasswordSubmit()"></div>
-    </div>
-    <button class="btn-primary" style="width:100%;margin-top:18px" onclick="forgotPasswordSubmit()">Envoyer le lien</button>
-    <div class="pin-error" id="forgot-error"></div>
-    <div class="info-banner neutral" id="forgot-success" style="display:none;margin-top:14px;text-align:left"></div>
-    <div class="login-switch"><a href="#" onclick="hideForgotPassword(event)">← Retour à la connexion</a></div>
-  </div>
+<!-- Mot de passe oublié : même flow que le planning (email -> lien de
+réinitialisation via /api/auth/forgot-password, réponse générique
+qu'un compte existe ou non). -->
+<div class="pin-card" id="pin-card-forgot" style="display:none">
+<div class="pin-logo">💶 <span>Recouvrement</span></div>
+<div class="pin-sub">Mot de passe oublié</div>
+<div style="text-align:left;margin-top:24px">
+<div class="form-group"><label class="form-label">Email du compte</label><input class="form-input" type="email" id="forgot-email" autocomplete="username" onkeydown="if(event.key==='Enter')forgotPasswordSubmit()"></div>
+</div>
+<button class="btn-primary" style="width:100%;margin-top:18px" onclick="forgotPasswordSubmit()">Envoyer le lien</button>
+<div class="pin-error" id="forgot-error"></div>
+<div class="info-banner neutral" id="forgot-success" style="display:none;margin-top:14px;text-align:left"></div>
+<div class="login-switch"><a href="#" onclick="hideForgotPassword(event)">← Retour à la connexion</a></div>
+</div>
 
-  <!-- Compte valide mais pas finance/admin : ce compte a une autre page
-       d'accueil (dashboard ou planning) — on ne le laisse pas s'installer ici. -->
-  <div class="pin-card" id="pin-card-refused" style="display:none">
-    <div class="pin-logo">💶 <span>Recouvrement</span></div>
-    <div class="pin-sub" id="refused-message">Ce compte n'a pas accès au recouvrement.</div>
-    <button class="btn-secondary" style="width:100%;margin-top:18px" onclick="logout()">Retour à la connexion</button>
-  </div>
+<!-- Compte valide mais pas finance/admin : ce compte a une autre page
+d'accueil (dashboard ou planning) — on ne le laisse pas s'installer ici. -->
+<div class="pin-card" id="pin-card-refused" style="display:none">
+<div class="pin-logo">💶 <span>Recouvrement</span></div>
+<div class="pin-sub" id="refused-message">Ce compte n'a pas accès au recouvrement.</div>
+<button class="btn-secondary" style="width:100%;margin-top:18px" onclick="logout()">Retour à la connexion</button>
+</div>
 </div>
 <script>
-  // Anti-flash : même logique que /planning et le dashboard React — si une
-  // session existe déjà (commercialId en localStorage), on masque l'écran de
-  // connexion tout de suite (avant peinture) plutôt que d'attendre l'aller-
-  // retour réseau de /api/auth/me, qui le referait de toute façon disparaître.
-  if(localStorage.getItem('commercialId')){
-    document.getElementById('pin-screen').style.display='none';
-  }
+// Anti-flash : même logique que /planning et le dashboard React — si une
+// session existe déjà (commercialId en localStorage), on masque l'écran de
+// connexion tout de suite (avant peinture) plutôt que d'attendre l'aller-
+// retour réseau de /api/auth/me, qui le referait de toute façon disparaître.
+if(localStorage.getItem('commercialId')){
+document.getElementById('pin-screen').style.display='none';
+}
 </script>
 
 <div id="app">
-  <header>
-    <!-- Mêmes 3 destinations que partout ailleurs (Dashboard/Planning/Radar),
-         plus l'onglet courant en "actif" — Recouvrement est un gros onglet au
-         même niveau que les autres, pas nested dans le planning. -->
-    <div class="app-switch" role="navigation" aria-label="Outils OpenMedias">
-      <button class="app-switch-btn" onclick="window.location.href='/'" id="app-tab-dashboard">📊 Dashboard</button>
-      <button class="app-switch-btn" onclick="window.location.href='/planning'" id="app-tab-planning">📅 Planning</button>
-      <button class="app-switch-btn" onclick="window.location.href='/radar'" id="app-tab-radar">📡 Radar</button>
-      <button class="app-switch-btn active" id="app-tab-recouvrement">💶 Recouvrement</button>
-    </div>
-    <div class="header-sep"></div>
-    <div class="header-brand">
-      <div class="header-mark"></div>
-      <div class="header-text">
-        <div class="header-eyebrow">OpenMedias</div>
-        <div class="header-logo">Recouvrement</div>
-      </div>
-    </div>
-    <div class="header-sep"></div>
-    <div class="role-badge" id="role-badge"></div>
-    <div class="header-right" id="header-right" style="margin-left:auto">
-      <button class="btn-icon" onclick="toggleTheme()" id="theme-btn" title="Thème" aria-label="Changer de thème">☀️</button>
-      <button class="btn-icon" onclick="logout()" id="logout-btn" title="Déconnexion" aria-label="Déconnexion">🚪</button>
-    </div>
-  </header>
+<header>
+<!-- Mêmes 3 destinations que partout ailleurs (Dashboard/Planning/Radar),
+plus l'onglet courant en "actif" — Recouvrement est un gros onglet au
+même niveau que les autres, pas nested dans le planning. -->
+<div class="app-switch" role="navigation" aria-label="Outils OpenMedias">
+<button class="app-switch-btn" onclick="window.location.href='/'" id="app-tab-dashboard">📊 Dashboard</button>
+<button class="app-switch-btn" onclick="window.location.href='/planning'" id="app-tab-planning">📅 Planning</button>
+<button class="app-switch-btn" onclick="window.location.href='/radar'" id="app-tab-radar">📡 Radar</button>
+<button class="app-switch-btn active" id="app-tab-recouvrement">💶 Recouvrement</button>
+</div>
+<div class="header-sep"></div>
+<div class="header-brand">
+<div class="header-mark"></div>
+<div class="header-text">
+<div class="header-eyebrow">OpenMedias</div>
+<div class="header-logo">Recouvrement</div>
+</div>
+</div>
+<div class="header-sep"></div>
+<div class="role-badge" id="role-badge"></div>
+<div class="header-right" id="header-right" style="margin-left:auto">
+<button class="btn-icon" onclick="toggleTheme()" id="theme-btn" title="Thème" aria-label="Changer de thème">☀️</button>
+<button class="btn-icon" onclick="logout()" id="logout-btn" title="Déconnexion" aria-label="Déconnexion">🚪</button>
+</div>
+</header>
 
-  <div class="view active" id="view-finance">
-    <div class="report-header">
-      <h2 style="font-size:16px;font-weight:700">💶 Recouvrement</h2>
-      <div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span id="finance-last-sync" style="font-size:11px;color:var(--text-muted)"></span>
-        <button type="button" class="finance-sync-detail-toggle" id="finance-sync-detail-toggle" onclick="toggleFinanceSyncOverview()">Détail de la synchro</button>
-        <button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()">↻ Synchroniser Pennylane</button>
-      </div>
-    </div>
-    <!-- Aperçu de la synchro (tous statuts Pennylane confondus, pas
-         seulement les factures dues) : repère de cohérence face au propre
-         tableau de bord Pennylane ("Toutes X" / Brouillon / Encaissée /
-         Annulée / Avoir…) pour vérifier que la synchro a bien tout ramené —
-         cf. renderFinanceSyncOverview(). Replié par défaut (derrière le lien
-         "Détail de la synchro" ci-dessus) : les mêmes compteurs sont déjà
-         portés par la barre d'onglets juste en dessous, l'afficher en
-         permanence faisait doublon (relevé dans l'audit UX). -->
-    <div id="finance-sync-overview" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
+<div class="view active" id="view-finance">
+<div class="report-header">
+<h2 style="font-size:16px;font-weight:700">💶 Recouvrement</h2>
+<div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<span id="finance-last-sync" style="font-size:11px;color:var(--text-muted)"></span>
+<button type="button" class="finance-sync-detail-toggle" id="finance-sync-detail-toggle" onclick="toggleFinanceSyncOverview()">Détail de la synchro</button>
+<button class="btn-secondary" onclick="exportFinanceCsv()">⬇ Export CSV</button>
+<button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()">↻ Synchroniser Pennylane</button>
+</div>
+</div>
+<!-- Aperçu de la synchro (tous statuts Pennylane confondus, pas
+seulement les factures dues) : repère de cohérence face au propre
+tableau de bord Pennylane ("Toutes X" / Brouillon / Encaissée /
+Annulée / Avoir…) pour vérifier que la synchro a bien tout ramené —
+cf. renderFinanceSyncOverview(). Replié par défaut (derrière le lien
+"Détail de la synchro" ci-dessus) : les mêmes compteurs sont déjà
+portés par la barre d'onglets juste en dessous, l'afficher en
+permanence faisait doublon (relevé dans l'audit UX). -->
+<div id="finance-sync-overview" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:14px"></div>
 
-    <!-- Vue d'ensemble et Factures sont fusionnées en une seule vue (KPI +
-         répartition + période/onglets/tableau, tout sur la même page) — plus
-         de sous-navigation ni de vue "Litiges" à part (cf. app.js). -->
-    <div class="report-grid" id="finance-kpis"></div>
+<!-- Vue d'ensemble et Factures sont fusionnées en une seule vue (KPI +
+répartition + période/onglets/tableau, tout sur la même page) — plus
+de sous-navigation ni de vue "Litiges" à part (cf. app.js). -->
+<div class="report-grid" id="finance-kpis"></div>
 
-    <!-- Filtre de période : calendrier personnalisable (Du/Au) sur la date
-         d'ÉCHÉANCE — restreint à la fois les onglets, le tableau et les KPI
-         ci-dessous. Cf. financeMatchesPeriod() / computeFinanceKpisFromCache(). -->
-    <div class="finance-period-bar">
-      <span class="finance-period-tag">Période</span>
-      <label class="finance-period-field">Du <input type="date" id="finance-period-from" onchange="setFinancePeriodFrom(this.value)"></label>
-      <label class="finance-period-field">Au <input type="date" id="finance-period-to" onchange="setFinancePeriodTo(this.value)"></label>
-      <button type="button" class="finance-period-reset" id="finance-period-reset" onclick="resetFinancePeriod()" style="display:none">Réinitialiser</button>
-    </div>
-    <!-- Barre de classement façon Pennylane (Toutes/À venir/En retard/…,
-         chacun avec son compteur, multi-sélectionnable) — cf.
-         renderFinanceTabs(). La recherche est fusionnée dans la même ligne
-         (au lieu d'une carte à part) pour réduire l'empilement de blocs
-         avant le tableau. -->
-    <div class="finance-tabs-row">
-      <div class="finance-tabs" id="finance-tabs"></div>
-      <!-- Tri "priorité" (montant × retard) — répond à "qu'est-ce que je
-           traite en premier", que le tri colonne par colonne ne couvre pas.
-           Bouton à part plutôt qu'un 4e en-tête cliquable : ce n'est pas une
-           colonne du tableau, c'est un mode de tri transversal. -->
-      <button type="button" class="finance-priority-btn" id="finance-priority-btn" onclick="setFinanceSort('priority')" title="Trier par urgence réelle : montant restant dû × jours de retard">⚡ Priorité<span id="finance-priority-arrow"></span></button>
-      <div class="finance-search-inline">
-        <input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
-      </div>
-    </div>
-    <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
-  </div>
+<!-- Filtre de période : calendrier personnalisable (Du/Au) sur la date
+d'ÉCHÉANCE — restreint à la fois les onglets, le tableau et les KPI
+ci-dessous. Cf. financeMatchesPeriod() / computeFinanceKpisFromCache(). -->
+<div class="finance-period-bar">
+<span class="finance-period-tag">Période</span>
+<label class="finance-period-field">Du <input type="date" id="finance-period-from" onchange="setFinancePeriodFrom(this.value)"></label>
+<label class="finance-period-field">Au <input type="date" id="finance-period-to" onchange="setFinancePeriodTo(this.value)"></label>
+<button type="button" class="finance-period-reset" id="finance-period-reset" onclick="resetFinancePeriod()" style="display:none">Réinitialiser</button>
+</div>
+<!-- Barre de classement façon Pennylane (Toutes/À venir/En retard/…,
+chacun avec son compteur, multi-sélectionnable) — cf.
+renderFinanceTabs(). La recherche est fusionnée dans la même ligne
+(au lieu d'une carte à part) pour réduire l'empilement de blocs
+avant le tableau. -->
+<div class="finance-tabs-row">
+<div class="finance-tabs" id="finance-tabs"></div>
+<!-- Tri "priorité" (montant × retard) — répond à "qu'est-ce que je
+traite en premier", que le tri colonne par colonne ne couvre pas.
+Bouton à part plutôt qu'un 4e en-tête cliquable : ce n'est pas une
+colonne du tableau, c'est un mode de tri transversal. -->
+<button type="button" class="finance-priority-btn" id="finance-priority-btn" onclick="setFinanceSort('priority')" title="Trier par urgence réelle : montant restant dû × jours de retard">⚡ Priorité<span id="finance-priority-arrow"></span></button>
+<div class="finance-search-inline">
+<input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
+</div>
+</div>
+<div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
+</div>
 </div>
 
 <div class="modal-overlay" id="modal-overlay" style="display:none" onclick="closeModal(event)">
-  <div class="modal" onclick="event.stopPropagation()">
-    <div class="modal-header">
-      <div class="modal-title" id="modal-title"></div>
-      <button class="modal-close" onclick="closeModal()">×</button>
-    </div>
-    <div class="modal-body" id="modal-body"></div>
-    <div class="modal-footer" id="modal-footer"></div>
-  </div>
+<div class="modal" onclick="event.stopPropagation()">
+<div class="modal-header">
+<div class="modal-title" id="modal-title"></div>
+<button class="modal-close" onclick="closeModal()">×</button>
+</div>
+<div class="modal-body" id="modal-body"></div>
+<div class="modal-footer" id="modal-footer"></div>
+</div>
 </div>
 
 <script src="app.js"></script>
