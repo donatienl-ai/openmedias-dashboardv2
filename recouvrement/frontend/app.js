@@ -223,6 +223,7 @@ const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',li
 const FINANCE_CANAL_LABEL={email:'📧 Email',telephone:'📞 Téléphone',courrier:'✉️ Courrier',sms:'💬 SMS',autre:'Autre'};
 let financeInvoicesCache=[];
 let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
+let financeCommentsCache=[]; // commentaires de la facture ouverte dans le modal (pour l'édition inline, cf. financeCommentsListHtml)
 let financeNewInstallmentStatusId=null; // statut choisi dans le formulaire "nouvelle échéance" de la fiche
 // Filtre actif de la barre d'onglets (façon Pennylane : Toutes/À venir/En
 // retard/Encaissée/…) — remplace l'ancien select de statut + case "en retard
@@ -942,6 +943,7 @@ const [comments,installments]=await Promise.all([
 fetch(`${API}/finance/invoices/${id}/comments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]),
 fetch(`${API}/finance/invoices/${id}/installments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]),
 ]);
+financeCommentsCache=comments;
 const statutOptionsHtml=(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
 // État du formulaire "nouvelle échéance" (pastille de statut, cf. plus
 // haut) — remis au premier statut de la liste à chaque ouverture de fiche.
@@ -973,7 +975,7 @@ ${financeClientSnapshotHtml(inv)}
 <input class="form-input" id="finance-comment-input" placeholder="Ajouter un commentaire…">
 <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceComment('${id}')">+ Ajouter</button>
 </div>
-<div id="finance-comments-list">${financeCommentsListHtml(comments)}</div>
+<div id="finance-comments-list">${financeCommentsListHtml(id,comments)}</div>
 </div>
 <div class="finance-detail-section">
 <div class="form-label">Échéances de paiement <span style="font-weight:400;color:var(--text-muted)">(l'échéance 1 est la 1ère ligne ci-dessous, éditable comme les autres)</span></div>
@@ -1014,13 +1016,62 @@ ${nbLitige?`<span style="color:#dc2626"><strong>${nbLitige}</strong> en litige</
 // le bug de décalage horaire signalé par Lina (un commentaire posté à 14h32
 // heure de Paris s'affichait "12:32" faute d'indicateur de fuseau sur le
 // timestamp SQLite).
-function financeCommentsListHtml(comments){
+// Modification des commentaires (09/2026, demande Lina) : ouverte à tout
+// compte finance/admin, sans restriction de personnes — cf. le bouton
+// "Modifier" ci-dessous et PATCH /api/finance/invoices/:id/comments/:commentId
+// côté serveur. Le texte brut est repris depuis financeCommentsCache (jamais
+// ré-injecté depuis le HTML déjà échappé) pour ne pas avoir à gérer l'échappement
+// des guillemets/apostrophes dans un attribut HTML.
+function financeCommentsListHtml(invoiceId,comments){
 if(!comments.length)return '<div class="idea-box-empty">Aucun commentaire pour l’instant</div>';
-return comments.map(c=>`
-<div class="finance-relance-entry">
+return comments.map(c=>financeCommentRowHtml(invoiceId,c)).join('');
+}
+function financeCommentRowHtml(invoiceId,c){
+const modifie=c.updated_at?' · <em>modifié</em>':'';
+return `<div class="finance-relance-entry" id="finance-comment-${c.id}">
 <div>${(c.comment||'').replace(/</g,'&lt;')}</div>
-<div class="finance-relance-meta">${c.auteur||'—'} · ${(parseSqliteUtc(c.created_at)||new Date(c.created_at)).toLocaleString('fr-FR')}</div>
-</div>`).join('');
+<div class="finance-relance-meta" style="display:flex;align-items:center;gap:8px">
+<span>${c.auteur||'—'} · ${(parseSqliteUtc(c.created_at)||new Date(c.created_at)).toLocaleString('fr-FR')}${modifie}</span>
+<button type="button" class="btn-secondary" style="margin-left:auto;font-size:11px;padding:3px 8px" onclick="startEditFinanceComment('${invoiceId}',${c.id})">Modifier</button>
+</div>
+</div>`;
+}
+function financeCommentRowEditHtml(invoiceId,c){
+return `<div class="finance-relance-entry" id="finance-comment-${c.id}">
+<div style="display:flex;gap:8px;align-items:flex-start">
+<input class="form-input" id="finance-comment-edit-input-${c.id}" style="flex:1">
+<button class="btn-primary" style="white-space:nowrap" onclick="saveFinanceComment('${invoiceId}',${c.id})">Enregistrer</button>
+<button class="btn-secondary" style="white-space:nowrap" onclick="cancelEditFinanceComment('${invoiceId}',${c.id})">Annuler</button>
+</div>
+</div>`;
+}
+function startEditFinanceComment(invoiceId,commentId){
+const el=document.getElementById(`finance-comment-${commentId}`);
+const c=financeCommentsCache.find(x=>x.id===commentId);
+if(!el||!c)return;
+el.outerHTML=financeCommentRowEditHtml(invoiceId,c);
+const input=document.getElementById(`finance-comment-edit-input-${commentId}`);
+input.value=c.comment||''; // valeur posée en JS (pas dans l'attribut HTML) pour éviter tout souci d'échappement
+input.focus();
+}
+function cancelEditFinanceComment(invoiceId,commentId){
+const el=document.getElementById(`finance-comment-${commentId}`);
+const c=financeCommentsCache.find(x=>x.id===commentId);
+if(!el||!c)return;
+el.outerHTML=financeCommentRowHtml(invoiceId,c);
+}
+async function saveFinanceComment(invoiceId,commentId){
+const input=document.getElementById(`finance-comment-edit-input-${commentId}`);
+const comment=input.value.trim();
+if(!comment)return;
+try{
+const r=await fetch(`${API}/finance/invoices/${invoiceId}/comments/${commentId}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify({comment})});
+const updated=await r.json();
+if(!r.ok)throw new Error(updated.error||'Impossible de modifier le commentaire');
+const idx=financeCommentsCache.findIndex(x=>x.id===commentId);
+if(idx>=0)financeCommentsCache[idx]=updated;
+document.getElementById(`finance-comment-${commentId}`).outerHTML=financeCommentRowHtml(invoiceId,updated);
+}catch(e){ showToast(e.message||'Impossible de modifier le commentaire','error'); }
 }
 // Liste fusionnée des échéances (09/2026, demande Lina, confirmée) : la 1ère
 // ligne est désormais l'échéance 1 (= inv.deadline/inv.deadlineStatusId,
@@ -1083,7 +1134,8 @@ if(!comment)return;
 await fetch(`${API}/finance/invoices/${id}/comments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({comment})});
 input.value='';
 const comments=await fetch(`${API}/finance/invoices/${id}/comments`,{headers:financeHeaders()}).then(r=>r.json()).catch(()=>[]);
-document.getElementById('finance-comments-list').innerHTML=financeCommentsListHtml(comments);
+financeCommentsCache=comments;
+document.getElementById('finance-comments-list').innerHTML=financeCommentsListHtml(id,comments);
 }
 async function submitFinanceInstallment(id){
 const label=document.getElementById('finance-installment-label').value.trim();
