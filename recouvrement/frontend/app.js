@@ -978,7 +978,7 @@ ${financeClientSnapshotHtml(inv)}
 <div id="finance-comments-list">${financeCommentsListHtml(id,comments)}</div>
 </div>
 <div class="finance-detail-section">
-<div class="form-label">Échéances de paiement <span style="font-weight:400;color:var(--text-muted)">(l'échéance 1 est la 1ère ligne ci-dessous, éditable comme les autres)</span></div>
+<div class="form-label">Échéances de paiement</div>
 <div style="display:flex;gap:8px;margin:6px 0 8px;flex-wrap:wrap">
 <input class="form-input" id="finance-installment-label" placeholder="Libellé (optionnel)…" style="max-width:150px">
 <input class="form-input" id="finance-installment-date" type="date">
