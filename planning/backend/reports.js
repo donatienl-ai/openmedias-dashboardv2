@@ -344,6 +344,15 @@ function setupReports(db) {
     return Math.round((today - d) / 86400000);
   }
 
+  // Statuts Pennylane NATIFS hors recouvrement (mêmes valeurs que
+  // PENNYLANE_HORS_RECOUVREMENT dans financeRoutes.js) : un brouillon, un
+  // avoir, une annulation, ou une facture déjà "paid" (qui peut garder un
+  // remaining_amount non nul par bug Pennylane, cf. financeRoutes.js) ne
+  // doivent pas déclencher de relance. Dupliqué ici plutôt qu'importé car
+  // reports.js et financeRoutes.js sont deux modules séparés sans export
+  // commun pour cette constante — à garder synchronisée si la liste change.
+  const REPORTS_PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete', 'paid'];
+
   function reportRelancesQuotidien({ force = false } = {}) {
     const fmt = (d) => d.toISOString().slice(0, 10);
     const today = fmt(new Date());
@@ -351,6 +360,13 @@ function setupReports(db) {
       console.log(`[RELANCES] ${today} déjà envoyé — doublon ignoré`);
       return;
     }
+    // Alignée le 23/09/2026 (demande Lina) sur les mêmes exclusions que le
+    // dashboard Recouvrement : les factures émises avant le 01/01/2025 sont
+    // abandonnées (décision d'équipe, cf. statut-implementation-recouvrement.md)
+    // et ne doivent donc plus jamais réapparaître dans ce mail non plus ; et
+    // les statuts Pennylane hors recouvrement (notamment "paid", qui peut
+    // garder un remaining_amount résiduel par bug Pennylane) sont exclus pour
+    // ne pas relancer un client qui a déjà payé.
     const rows = db.prepare(`
       SELECT i.*, c.name AS customer_name, c.contact_name AS contact_name,
              c.contact_email AS contact_email, c.contact_phone AS contact_phone
@@ -358,7 +374,9 @@ function setupReports(db) {
       LEFT JOIN pennylane_customers c ON c.id = i.customer_id
       WHERE i.remaining_amount > 0
         AND i.internal_status NOT IN ('litige', 'promesse_paiement', 'solde')
-    `).all();
+        AND i.date_emission >= '2025-01-01'
+        AND (i.status IS NULL OR i.status NOT IN (${REPORTS_PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',')}))
+    `).all(...REPORTS_PENNYLANE_HORS_RECOUVREMENT);
     const enRetard = rows
       .map((r) => ({ ...r, daysLate: joursDeRetardRelance(r.deadline) }))
       .filter((r) => (r.daysLate || 0) > 0)
