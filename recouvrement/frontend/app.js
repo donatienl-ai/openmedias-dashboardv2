@@ -218,8 +218,8 @@ await loadFinance();
 // parle plus à l'équipe compta) : c'est un renommage d'AFFICHAGE pur, la clé
 // technique en_cours ne change pas (base de données, API, filtres, mail
 // quotidien) — voir planning/backend/db.js, FINANCE_INTERNAL_STATUSES.
-const FINANCE_STATUS_LABEL={a_relancer:'À relancer',en_cours:'Relancé',litige:'Litige',promesse_paiement:'Promesse de paiement',solde:'Soldée'};
-const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',litige:'#dc2626',promesse_paiement:'#0d9488',solde:'var(--green)'};
+const FINANCE_STATUS_LABEL={a_relancer:'À relancer',en_cours:'Relancé',douteux:'Douteux',litige:'Litige',promesse_paiement:'Promesse de paiement',solde:'Soldée'};
+const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',douteux:'#f97316',litige:'#dc2626',promesse_paiement:'#0d9488',solde:'var(--green)'};
 const FINANCE_CANAL_LABEL={email:'📧 Email',telephone:'📞 Téléphone',courrier:'✉️ Courrier',sms:'💬 SMS',autre:'Autre'};
 let financeInvoicesCache=[];
 let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
@@ -330,6 +330,22 @@ renderFinanceSyncOverview(kpis);
 renderFinanceKpis(computeFinanceKpisFromCache());
 renderFinanceTabs();
 renderFinanceInvoices();
+}
+// Rafraîchit UNE SEULE facture après une édition qui ne concerne qu'elle
+// (changement de statut, ajout/édition/suppression d'échéance) — évite de
+// refetch les ~2000 factures + recalculer les KPI backend à chaque clic
+// (cf. audit perf 09/2026, "trop trop long" à l'enregistrement). Un vrai
+// syncFinance() (potentiellement des centaines de lignes touchées) continue
+// lui d'utiliser refreshFinanceInvoices() ci-dessus.
+async function refreshOneFinanceInvoice(id){
+const r=await fetch(`${API}/finance/invoices/${id}`,{headers:financeHeaders()});
+if(!r.ok)return;
+const updated=await r.json();
+const idx=financeInvoicesCache.findIndex(i=>i.id===updated.id);
+if(idx>=0)financeInvoicesCache[idx]=updated; else financeInvoicesCache.push(updated);
+renderFinanceTabs();
+renderFinanceInvoices();
+renderFinanceKpis(computeFinanceKpisFromCache());
 }
 // Statuts Pennylane exclus de l'encours de recouvrement (mêmes exclusions que
 // /api/finance/kpis côté back : un brouillon, un avoir, une annulation... ne
@@ -450,7 +466,7 @@ periodJours:periodDays,
 // bien été ramenés par la synchro, pas de les filtrer.
 const PENNYLANE_STATUS_LABEL={
 draft:'Brouillon', incomplete:'Incomplète', cancelled:'Annulée', partially_cancelled:'Partiellement annulée',
-paid:'Encaissée', partially_paid:'Partiellement encaissée', upcoming:'Douteux', late:'En retard',
+paid:'Encaissée', partially_paid:'Partiellement encaissée', upcoming:'À venir', late:'En retard',
 credit_note:'Avoir', archived:'Archivée', proforma:'Proforma', shipping_order:'Bon de livraison',
 purchasing_order:'Bon de commande', estimate_pending:'Devis en attente', estimate_accepted:'Devis accepté',
 estimate_invoiced:'Devis facturé', estimate_denied:'Devis refusé', inconnu:'Sans statut',
@@ -610,6 +626,7 @@ const FINANCE_TAB_COLOR={
 all: {bg:'var(--accent-dim)', fg:'var(--accent)'},
 upcoming: {bg:'var(--accent-dim)', fg:'var(--accent)'},
 late: {bg:'var(--red-dim)', fg:'#dc2626'},
+douteux_manuel: {bg:'rgba(249,115,22,0.14)', fg:'#f97316'},
 paid: {bg:'var(--green-dim)', fg:'var(--green)'},
 partially_paid: {bg:'rgba(13,148,136,0.12)', fg:'#0d9488'},
 cancelled: {bg:'var(--surface2)', fg:'var(--text-dim)'},
@@ -627,6 +644,13 @@ const FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE=['litige','promesse_paiement','so
 // chip, et comme brique de financeMatchesFilters ci-dessous).
 function financeMatchesFilterKey(inv,key){
 if(key==='all')return true;
+// Onglet "Douteux" manuel (nouveau, 09/2026) : PAS un statut brut Pennylane
+// (contrairement aux autres onglets ci-dessous) — filtre sur le champ
+// internalStatus, coché à la main par l'équipe, distinct du statut Pennylane
+// "upcoming" (qui reste "À venir" dans PENNYLANE_STATUS_LABEL) et distinct
+// aussi du statut "Douteux" des échéances (finance_installment_statuses,
+// autre système, non lié).
+if(key==='douteux_manuel')return inv.internalStatus==='douteux';
 const statuses=PENNYLANE_TAB_STATUSES[key];
 if(!statuses||!statuses.includes(inv.status))return false;
 if((key==='upcoming'||key==='late')&&FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE.includes(inv.internalStatus))return false;
@@ -665,6 +689,7 @@ const counts={all:list.length};
 for(const key of Object.keys(PENNYLANE_TAB_STATUSES)){
 counts[key]=list.filter((i)=>financeMatchesFilterKey(i,key)).length;
 }
+counts.douteux_manuel=list.filter((i)=>financeMatchesFilterKey(i,'douteux_manuel')).length;
 const chip=(key,label,title)=>{
 const active=financeActiveFilters.has(key);
 const c=FINANCE_TAB_COLOR[key]||FINANCE_TAB_COLOR.all;
@@ -674,8 +699,9 @@ return `<button type="button" class="finance-tab ${active?'active':''}"${style} 
 };
 wrap.innerHTML=`
 ${chip('all','Toutes')}
-${chip('upcoming','Douteux')}
+${chip('upcoming','À venir')}
 ${chip('late','En retard')}
+${chip('douteux_manuel','Douteux')}
 ${chip('paid','Encaissée')}
 ${chip('partially_paid','Part. encaissée','Partiellement encaissée')}
 ${chip('cancelled','Annulée')}
@@ -845,20 +871,19 @@ const r=await fetch(`${API}/finance/invoices/${invoiceId}/installments`,{method:
 const d=await r.json();
 if(!r.ok){ showToast(d.error||'Échec de l’ajout','error'); return; }
 closeFinanceInstallmentQuickAdd();
-await refreshFinanceInvoices();
+await refreshOneFinanceInvoice(invoiceId);
 showToast('Échéance ajoutée ✓');
 }
 async function patchFinanceInvoice(id,patch){
 try{
 const res=await fetch(`${API}/finance/invoices/${id}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
 if(!res.ok){ const err=await res.json().catch(()=>({})); throw new Error(err.error||'Échec de la mise à jour'); }
-// On repart d'un fetch complet plutôt que de rapiécer le cache local à la
-// main : depuis la chaîne de validation des échéances (échéance 1 -> 2 ->
-// 3...), un simple changement de statut ou de date peut faire glisser la
-// référence de retard, voire faire basculer automatiquement la facture en
-// "Soldée" côté serveur — autant de choses qu'on ne veut pas recalculer
-// (et risquer de mal recalculer) séparément côté front.
-await refreshFinanceInvoices();
+// Un simple changement de statut ou de date peut faire glisser la référence
+// de retard côté serveur (chaîne de validation des échéances), mais ça reste
+// scopé à CETTE facture : plus besoin de refetch les ~2000 factures pour ça,
+// GET /finance/invoices/:id (09/2026, perf) renvoie l'état recalculé serveur
+// pour cette seule ligne.
+await refreshOneFinanceInvoice(id);
 if(financeSelectedInvoiceId===id)openFinanceInvoiceDetail(id);
 showToast('Facture mise à jour');
 }catch(e){ showToast(e.message||"Échec de la mise à jour",'error'); }
@@ -1148,9 +1173,10 @@ if(!r.ok){ showToast(d.error||'Échec de l’ajout','error'); return; }
 document.getElementById('finance-installment-label').value='';
 document.getElementById('finance-installment-date').value='';
 document.getElementById('finance-installment-amount').value='';
-// Recharge aussi le cache des factures : la nouvelle échéance doit remonter
-// dans les colonnes Éch. 2/3/4 du tableau derrière le modal.
-await refreshFinanceInvoices();
+// Recharge la facture (perf 09/2026, cf. refreshOneFinanceInvoice) : la
+// nouvelle échéance doit remonter dans les colonnes Éch. 2/3/4 du tableau
+// derrière le modal.
+await refreshOneFinanceInvoice(id);
 openFinanceInvoiceDetail(id);
 }
 // Édition d'une échéance existante (statut et/ou montant réglé).
@@ -1158,17 +1184,18 @@ async function patchFinanceInstallment(invoiceId,installmentId,patch){
 try{
 const res=await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'PATCH',headers:financeHeaders(true),body:JSON.stringify(patch)});
 if(!res.ok){ const err=await res.json().catch(()=>({})); throw new Error(err.error||'Échec de la mise à jour'); }
-// Valider une échéance (statut "compte comme réglée") peut faire glisser
-// la référence de retard sur l'échéance suivante et faire basculer la
-// facture en "Soldée" côté serveur — un fetch complet évite de recalculer
-// (et risquer de mal recalculer) cette chaîne à la main côté front.
-await refreshFinanceInvoices();
+// Valider une échéance (statut "compte comme réglée") peut faire glisser la
+// référence de retard sur l'échéance suivante et faire basculer la facture
+// en "Soldée" côté serveur — le nouveau GET /finance/invoices/:id (perf
+// 09/2026) renvoie déjà cet état recalculé pour cette seule facture, plus
+// besoin d'un fetch complet des ~2000 factures.
+await refreshOneFinanceInvoice(invoiceId);
 if(financeSelectedInvoiceId===invoiceId)openFinanceInvoiceDetail(invoiceId);
 }catch(e){ showToast(e.message||'Échec de la mise à jour','error'); }
 }
 async function deleteFinanceInstallment(invoiceId,installmentId){
 await fetch(`${API}/finance/invoices/${invoiceId}/installments/${installmentId}`,{method:'DELETE',headers:financeHeaders()});
-await refreshFinanceInvoices();
+await refreshOneFinanceInvoice(invoiceId);
 openFinanceInvoiceDetail(invoiceId);
 }
 
