@@ -31,7 +31,7 @@ function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal
 // (compte admin) demandé pour toute son équipe, sans faire de chacun un
 // compte admin (qui donnerait aussi Paramètres/Reporting/etc). Décision
 // Lina 09/2026, cf. statut-implementation-recouvrement.md.
-canSeeBudget=(isAccountAdmin||accountRole==='communication'||accountRole==='finance');
+canSeeBudget=(isAccountAdmin||accountRole==='communication'||accountRole==='finance'||accountRole==='edito');
   if(commercialIdVal){
     commercialId=commercialIdVal; commercialNom=commercialNomVal||'';
     localStorage.setItem('commercialId',commercialId); localStorage.setItem('commercialNom',commercialNom);
