@@ -179,8 +179,15 @@ return row ? row.id : null;
 // — volontairement PAS ici, pour les mêmes raisons que ci-dessus : la
 // synchro doit rester complète, seule la vue quotidienne réduit le volume.
 async function syncFinance(db) {
-const invoices = await getAllPaginated('customer_invoices');
-const customers = await getAllPaginated('customers');
+// Perf 09/2026 (demande Lina) : ces deux récupérations paginées sont
+// indépendantes l'une de l'autre (aucune ne dépend du résultat de l'autre) —
+// on les lance donc en parallèle plutôt qu'en série. getAllPaginated est une
+// fonction pure (accumule dans un tableau local, ne partage aucun état entre
+// deux appels), donc aucun risque de mélange entre les deux flux.
+const [invoices, customers] = await Promise.all([
+getAllPaginated('customer_invoices'),
+getAllPaginated('customers'),
+]);
 
 if (process.env.PENNYLANE_DEBUG_RAW === '1') {
 if (invoices[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de facture brute :', JSON.stringify(invoices[0], null, 2));
