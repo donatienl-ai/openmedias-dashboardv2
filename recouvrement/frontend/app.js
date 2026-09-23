@@ -450,7 +450,7 @@ periodJours:periodDays,
 // bien été ramenés par la synchro, pas de les filtrer.
 const PENNYLANE_STATUS_LABEL={
 draft:'Brouillon', incomplete:'Incomplète', cancelled:'Annulée', partially_cancelled:'Partiellement annulée',
-paid:'Encaissée', partially_paid:'Partiellement encaissée', upcoming:'À venir', late:'En retard',
+paid:'Encaissée', partially_paid:'Partiellement encaissée', upcoming:'Douteux', late:'En retard',
 credit_note:'Avoir', archived:'Archivée', proforma:'Proforma', shipping_order:'Bon de livraison',
 purchasing_order:'Bon de commande', estimate_pending:'Devis en attente', estimate_accepted:'Devis accepté',
 estimate_invoiced:'Devis facturé', estimate_denied:'Devis refusé', inconnu:'Sans statut',
@@ -674,7 +674,7 @@ return `<button type="button" class="finance-tab ${active?'active':''}"${style} 
 };
 wrap.innerHTML=`
 ${chip('all','Toutes')}
-${chip('upcoming','À venir')}
+${chip('upcoming','Douteux')}
 ${chip('late','En retard')}
 ${chip('paid','Encaissée')}
 ${chip('partially_paid','Part. encaissée','Partiellement encaissée')}
@@ -740,7 +740,7 @@ return 0;
 }
 const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
 wrap.innerHTML=`<table>
-<thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Éch. 1${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th>Montant HT</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
+<thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Éch. 1${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
 <tbody>${list.map(inv=>`<tr class="finance-invoice-row" onclick="financeRowClick(event,'${inv.id}')">
 <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeEmissionDateHtml(inv)}</td>
 <td>${inv.customerName||'—'}</td>
@@ -752,7 +752,6 @@ wrap.innerHTML=`<table>
 <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,1)}</td>
 <td class="finance-installment-cell">${financeInstallmentCellHtml(inv,2)}</td>
 <td>${financeRetardBarHtml(inv)}</td>
-<td>${fmtCA(inv.remainingAmountHt!=null?inv.remainingAmountHt:inv.amountHt)}</td>
 <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}${financeExclusEncoursBadge(inv)}</td>
 <td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select></td>
 </tr>`).join('')}</tbody>
@@ -888,7 +887,7 @@ function csvField(v){ return `"${String(v==null?'':v).replace(/"/g,'""')}"`; }
 function exportFinanceCsv(){
 const list=currentFilteredFinanceInvoices();
 if(!list.length){ showToast('Rien à exporter avec les filtres actuels','error'); return; }
-const header=['Facture','Entreprise','Nom Prénom','Mail','Téléphone','Éch. 1','Éch. 2','Éch. 3','Éch. 4','Retard (j)','Montant HT','Montant TTC','Statut'];
+const header=['Facture','Entreprise','Nom Prénom','Mail','Téléphone','Éch. 1','Éch. 2','Éch. 3','Éch. 4','Retard (j)','Montant TTC','Statut'];
 const echDate=(inv,idx)=>{ const i=(inv.installments||[])[idx]; return i?formatDateFR(i.dueDate):''; };
 const lines=[header.map(csvField).join(';')];
 for(const inv of list){
@@ -903,7 +902,6 @@ csvField(echDate(inv,0)),
 csvField(echDate(inv,1)),
 csvField(echDate(inv,2)),
 inv.daysLate!=null?inv.daysLate:'',
-String(inv.remainingAmountHt!=null?inv.remainingAmountHt:(inv.amountHt||0)).replace('.',','),
 String(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0)).replace('.',','),
 csvField(FINANCE_STATUS_LABEL[inv.internalStatus]||inv.internalStatus||''),
 ].join(';'));
