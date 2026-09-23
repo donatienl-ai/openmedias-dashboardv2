@@ -197,14 +197,39 @@ invoices
 .map((inv) => customerIdOf(inv))
 .filter(Boolean)
 );
+// Perf 09/2026 (demande Lina) : au lieu d'un appel Pennylane séquentiel par
+// client dû (potentiellement 150-300+ clients, donc l'essentiel du temps de
+// synchro), on les regroupe par lots de CONTACT_BATCH_SIZE en parallèle —
+// grande marge sous le quota Pennylane documenté (25 requêtes/5s, cf. en-tête
+// de fichier). Promise.allSettled (pas Promise.all) + le try/catch englobant :
+// si un appel ou un lot échoue, la synchro continue quand même avec les
+// contacts déjà récupérés plutôt que de tout faire échouer. Cette étape ne
+// fait QUE lire l'API et remplir contactsById en mémoire — aucune écriture en
+// base ici (voir runAll plus bas) : au pire un échec donne un contact manquant
+// pour ce sync, jamais une donnée fausse. Combiné avec le COALESCE sur
+// contact_name/email/phone dans upsertCustomer ci-dessous (même demande,
+// "0 risque de suppression") : un contact manquant cette fois-ci N'EFFACE
+// PLUS la valeur déjà en base d'un sync précédent réussi.
+const CONTACT_BATCH_SIZE = 10;
 const contactsById = new Map();
-for (const c of customers) {
-if (!dueCustomerIds.has(String(c.id))) continue;
-const contact = await fetchPrimaryContact(c.contacts && c.contacts.url);
+const dueCustomers = customers.filter((c) => dueCustomerIds.has(String(c.id)));
+try {
+for (let i = 0; i < dueCustomers.length; i += CONTACT_BATCH_SIZE) {
+const batch = dueCustomers.slice(i, i + CONTACT_BATCH_SIZE);
+const results = await Promise.allSettled(
+batch.map((c) => fetchPrimaryContact(c.contacts && c.contacts.url))
+);
+results.forEach((result, idx) => {
+const c = batch[idx];
+const contact = result.status === 'fulfilled' ? result.value : null;
 if (contact) contactsById.set(String(c.id), contact);
 if (process.env.PENNYLANE_DEBUG_RAW === '1' && contact) {
 console.log(`[PENNYLANE_DEBUG_RAW] contact client ${c.id} :`, JSON.stringify(contact));
 }
+});
+}
+} catch (e) {
+console.warn('[PENNYLANE] récupération des contacts clients interrompue, synchro poursuivie sans les contacts manquants :', e.message);
 }
 
 const upsertCustomer = db.prepare(`
@@ -212,7 +237,17 @@ INSERT INTO pennylane_customers (id, name, email, phone, contact_name, contact_e
 VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
 ON CONFLICT(id) DO UPDATE SET
 name=excluded.name, email=excluded.email, phone=excluded.phone,
-contact_name=excluded.contact_name, contact_email=excluded.contact_email, contact_phone=excluded.contact_phone,
+-- COALESCE (09/2026, demande Lina "0 risque de suppression") : si ce
+-- sync-ci n'a pas pu récupérer le contact d'un client (échec réseau, lot de
+-- contacts parallélisés interrompu...), on GARDE le contact déjà en base
+-- plutôt que de l'écraser par NULL. Avant ce fix, un simple échec ponctuel
+-- de récupération effaçait un contact valide enregistré lors d'un sync
+-- précédent. Contrepartie acceptée : si un contact est un jour réellement
+-- supprimé côté Pennylane (cas très rare), l'ancienne valeur reste affichée
+-- jusqu'à ce qu'un contact différent soit resynchronisé avec succès.
+contact_name=COALESCE(excluded.contact_name, pennylane_customers.contact_name),
+contact_email=COALESCE(excluded.contact_email, pennylane_customers.contact_email),
+contact_phone=COALESCE(excluded.contact_phone, pennylane_customers.contact_phone),
 synced_at=excluded.synced_at
 `);
 // Alignement du statut interne (notre suivi de relance : a_relancer /
