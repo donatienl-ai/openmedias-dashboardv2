@@ -114,6 +114,58 @@ const HORS_RECOUVREMENT_PLACEHOLDERS = PENNYLANE_HORS_RECOUVREMENT.map(() => '?'
 // une très vieille facture encore due aujourd'hui sort de cette vue
 // quotidienne (donc aussi des compteurs d'onglets, qui ne collent plus à
 // 100% avec Pennylane dans ce cas rare) — voir le prompt de dev, point 6.
+// Mise en forme d'une ligne facture (jointures SQL -> objet exposé au front)
+// — extraite en fonction nommée le 23/09/2026 (demande Lina, perf) pour être
+// réutilisée par la route détail ci-dessous (GET /api/finance/invoices/:id) :
+// après l'édition d'UNE SEULE facture, le front n'a plus besoin de refaire un
+// fetch complet de toutes les factures + KPI juste pour rafraîchir cette
+// ligne-là (cf. patchFinanceInvoice côté recouvrement/frontend/app.js).
+function shapeInvoiceRow(r, installments) {
+// Référence de retard : la 1ère échéance (1, puis 2/3/4...) pas encore à
+// un statut "compte comme réglée" — remplace le calcul figé sur la seule
+// deadline principale, pour que valider l'échéance 1 fasse glisser le
+// repère de retard sur l'échéance 2, etc.
+const echRef = computeEcheanceReference(buildEcheanceChain(r, installments));
+return {
+id: r.id,
+invoiceNumber: r.invoice_number,
+customerId: r.customer_id,
+customerName: r.customer_name || '',
+customerEmail: r.customer_email || '',
+customerPhone: r.customer_phone || '',
+contactName: r.contact_name || '',
+contactEmail: r.contact_email || '',
+contactPhone: r.contact_phone || '',
+dateEmission: r.date_emission,
+deadline: r.deadline,
+deadlineManual: !!r.deadline_manual,
+// Statut de l'échéance 1, même pastille personnalisable que 2/3/4.
+deadlineStatusId: r.deadline_status_id,
+deadlineStatusLabel: r.deadline_status_label || null,
+deadlineStatusColor: r.deadline_status_color || null,
+amountHt: r.amount_ht,
+amountTtc: r.amount,
+remainingAmountHt: r.remaining_amount_ht,
+remainingAmountTtc: r.remaining_amount,
+// Alias conservés pour compat avec un ancien code éventuel côté front.
+amount: r.amount,
+remainingAmount: r.remaining_amount,
+status: r.status,
+internalStatus: r.internal_status,
+daysLate: joursDeRetard(echRef.due),
+// Numéro de l'échéance actuellement de référence pour le retard (1 par
+// défaut) — sert le front à afficher "Éch. 2 — 5j de retard" plutôt
+// qu'un nombre de jours qui change sans que la date affichée en Éch. 1
+// n'ait bougé.
+retardEcheanceNum: echRef.num,
+retardEcheanceDue: echRef.due,
+allEcheancesReglees: echRef.allReglees,
+lastRelanceAt: r.last_relance_at || null,
+// Échéances 2, 3, 4... (triées par date) — l'échéance 1 reste `deadline`
+// ci-dessus, éditable directement, comme avant cette fonctionnalité.
+installments,
+};
+}
 app.get('/api/finance/invoices', requireFinance, (req, res) => {
 const rows = db.prepare(`
 SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
@@ -162,53 +214,7 @@ statusColor: row.status_color || null,
 }
 const { statut, q, retard_only } = req.query;
 const qLower = q ? String(q).trim().toLowerCase() : '';
-let list = rows.map((r) => {
-const installments = installmentsByInvoice[r.id] || [];
-// Référence de retard : la 1ère échéance (1, puis 2/3/4...) pas encore à
-// un statut "compte comme réglée" — remplace le calcul figé sur la seule
-// deadline principale, pour que valider l'échéance 1 fasse glisser le
-// repère de retard sur l'échéance 2, etc.
-const echRef = computeEcheanceReference(buildEcheanceChain(r, installments));
-return {
-id: r.id,
-invoiceNumber: r.invoice_number,
-customerId: r.customer_id,
-customerName: r.customer_name || '',
-customerEmail: r.customer_email || '',
-customerPhone: r.customer_phone || '',
-contactName: r.contact_name || '',
-contactEmail: r.contact_email || '',
-contactPhone: r.contact_phone || '',
-dateEmission: r.date_emission,
-deadline: r.deadline,
-deadlineManual: !!r.deadline_manual,
-// Statut de l'échéance 1, même pastille personnalisable que 2/3/4.
-deadlineStatusId: r.deadline_status_id,
-deadlineStatusLabel: r.deadline_status_label || null,
-deadlineStatusColor: r.deadline_status_color || null,
-amountHt: r.amount_ht,
-amountTtc: r.amount,
-remainingAmountHt: r.remaining_amount_ht,
-remainingAmountTtc: r.remaining_amount,
-// Alias conservés pour compat avec un ancien code éventuel côté front.
-amount: r.amount,
-remainingAmount: r.remaining_amount,
-status: r.status,
-internalStatus: r.internal_status,
-daysLate: joursDeRetard(echRef.due),
-// Numéro de l'échéance actuellement de référence pour le retard (1 par
-// défaut) — sert le front à afficher "Éch. 2 — 5j de retard" plutôt
-// qu'un nombre de jours qui change sans que la date affichée en Éch. 1
-// n'ait bougé.
-retardEcheanceNum: echRef.num,
-retardEcheanceDue: echRef.due,
-allEcheancesReglees: echRef.allReglees,
-lastRelanceAt: r.last_relance_at || null,
-// Échéances 2, 3, 4... (triées par date) — l'échéance 1 reste `deadline`
-// ci-dessus, éditable directement, comme avant cette fonctionnalité.
-installments,
-};
-});
+let list = rows.map((r) => shapeInvoiceRow(r, installmentsByInvoice[r.id] || []));
 if (statut) list = list.filter((r) => r.internalStatus === statut);
 if (retard_only === '1') list = list.filter((r) => (r.daysLate || 0) > 0);
 if (qLower) {
@@ -218,6 +224,50 @@ list = list.filter(
 }
 list.sort((a, b) => (b.daysLate ?? -9999) - (a.daysLate ?? -9999));
 res.json(list);
+});
+
+// Une seule facture, déjà mise en forme comme dans la liste ci-dessus
+// (mêmes champs, y compris installments) — ajoutée le 23/09/2026 (demande
+// Lina, perf) pour que le front puisse rafraîchir UNE ligne après un edit
+// (statut, échéance, commentaire, échéance de paiement...) sans refaire un
+// fetch complet de toutes les factures + KPI à chaque fois (cf.
+// patchFinanceInvoice côté recouvrement/frontend/app.js — c'était `trop
+// trop long` d'après Lina).
+app.get('/api/finance/invoices/:id', requireFinance, (req, res) => {
+const r = db.prepare(`
+SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
+c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone,
+lr.last_relance_at AS last_relance_at,
+ds.label AS deadline_status_label, ds.color AS deadline_status_color
+FROM pennylane_invoices i
+LEFT JOIN pennylane_customers c ON c.id = i.customer_id
+LEFT JOIN (
+SELECT invoice_id, MAX(created_at) AS last_relance_at
+FROM finance_relances
+GROUP BY invoice_id
+) lr ON lr.invoice_id = i.id
+LEFT JOIN finance_installment_statuses ds ON ds.id = i.deadline_status_id
+WHERE i.id = ?
+`).get(req.params.id);
+if (!r) return res.status(404).json({ error: 'Facture introuvable' });
+const instRows = db.prepare(`
+SELECT fi.*, s.label AS status_label, s.color AS status_color
+FROM finance_invoice_installments fi
+LEFT JOIN finance_installment_statuses s ON s.id = fi.status_id
+WHERE fi.invoice_id = ? ORDER BY fi.due_date ASC
+`).all(r.id);
+const installments = instRows.map((row) => ({
+id: row.id,
+label: row.label,
+dueDate: row.due_date,
+amount: row.amount,
+paidAmount: row.paid_amount || 0,
+solde: Math.max(0, (row.amount || 0) - (row.paid_amount || 0)),
+statusId: row.status_id,
+statusLabel: row.status_label || null,
+statusColor: row.status_color || null,
+}));
+res.json(shapeInvoiceRow(r, installments));
 });
 
 // KPI de recouvrement : encours total, montant/nombre en retard, taux de
