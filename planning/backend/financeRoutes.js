@@ -233,9 +233,15 @@ res.json(list);
 const FINANCE_STATUTS_NON_ACTIONABLES = ['litige', 'promesse_paiement', 'solde'];
 
 app.get('/api/finance/kpis', requireFinance, (req, res) => {
+// Même borne que /api/finance/invoices (cf. plus haut) : les factures ÉMISES
+// avant le 01/01/2025 sortent aussi des KPI de recouvrement (encours, retard,
+// DSO, aging, répartition par statut) — pas seulement de la liste affichée.
+// Décision Lina 09/2026 : « vraiment on retire ce qu'il y a avant », cf.
+// statut-implementation-recouvrement.md.
 const unpaid = db.prepare(`
 SELECT remaining_amount, deadline, internal_status FROM pennylane_invoices
 WHERE remaining_amount > 0 AND (status IS NULL OR status NOT IN (${HORS_RECOUVREMENT_PLACEHOLDERS}))
+AND date_emission >= '2025-01-01'
 `).all(...PENNYLANE_HORS_RECOUVREMENT);
 let totalEncours = 0;
 let montantEnRetard = 0;
