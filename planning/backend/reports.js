@@ -413,7 +413,52 @@ function setupReports(db) {
         <td style="padding:6px 8px;text-align:right">${fmtMoney(r.remaining_amount)}</td>
       </tr>`;
     }
-    html += `</table>${empreinteHtml(enRetard.length + ' facture(s)')}`;
+    html += `</table>`;
+
+    // Section informative séparée — factures en litige (demande Lina 24/09/2026).
+    // Volontairement SANS effet sur enRetard/dest/le déclenchement de l'envoi
+    // ci-dessus : ces factures restent exclues de la vraie liste de relance
+    // (même exclusion qu'avant, i.internal_status NOT IN ('litige', ...)) —
+    // on les ajoute seulement en lecture, à la fin du même mail, pour que
+    // l'équipe garde un œil dessus sans déclencher de relance automatique.
+    // Confirmé par Lina : "Section informative séparée", pas une relance.
+    const litiges = db.prepare(`
+      SELECT i.*, c.name AS customer_name, c.contact_name AS contact_name,
+             c.contact_email AS contact_email, c.contact_phone AS contact_phone
+      FROM pennylane_invoices i
+      LEFT JOIN pennylane_customers c ON c.id = i.customer_id
+      WHERE i.internal_status = 'litige'
+        AND i.remaining_amount > 0
+        AND i.date_emission >= '2025-01-01'
+        AND (i.status IS NULL OR i.status NOT IN (${REPORTS_PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',')}))
+      ORDER BY i.remaining_amount DESC
+    `).all(...REPORTS_PENNYLANE_HORS_RECOUVREMENT);
+
+    if (litiges.length) {
+      const totalLitige = litiges.reduce((s, r) => s + (r.remaining_amount || 0), 0);
+      html += `<h2 style="margin-top:24px">⚖️ En litige — suivi à part (${litiges.length} facture(s), ${fmtMoney(totalLitige)})</h2>
+        <p>Informatif uniquement — ces factures ne sont <strong>pas</strong> relancées automatiquement, elles restent en suivi manuel.</p>
+        <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px">
+          <tr style="background:#1a1a2e;color:#fff">
+            <th style="padding:8px;text-align:left">Facture</th>
+            <th style="padding:8px;text-align:left">Client</th>
+            <th style="padding:8px;text-align:left">Contact</th>
+            <th style="padding:8px;text-align:right">Montant dû</th>
+          </tr>`;
+      for (const r of litiges) {
+        const contact = r.contact_name || r.customer_name || '';
+        const contactDetail = [r.contact_email, r.contact_phone].filter(Boolean).join(' · ');
+        html += `<tr style="border-bottom:1px solid #eee">
+          <td style="padding:6px 8px">${r.invoice_number || r.id}</td>
+          <td style="padding:6px 8px">${r.customer_name || ''}</td>
+          <td style="padding:6px 8px">${contact}${contactDetail ? `<br><span style="color:#888;font-size:11px">${contactDetail}</span>` : ''}</td>
+          <td style="padding:6px 8px;text-align:right">${fmtMoney(r.remaining_amount)}</td>
+        </tr>`;
+      }
+      html += `</table>`;
+    }
+
+    html += empreinteHtml(enRetard.length + ' facture(s)' + (litiges.length ? ` + ${litiges.length} litige(s)` : ''));
     sendMailOnly(`💶 Relances du jour — ${enRetard.length} facture(s) en retard (${fmtMoney(totalDu)})`, html, dest);
   }
 
