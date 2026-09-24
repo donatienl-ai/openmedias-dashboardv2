@@ -152,13 +152,71 @@ return null;
 // comme état possible côté recouvrement, remplacé par "Douteux" — voir
 // financeRoutes.js, defaultInstallmentStatusId() (même logique, dupliquée
 // ici faute de dépendance directe entre les deux fichiers). Calculé une
-// seule fois par appel de syncFinance (pas une fois par facture) : avant,
-// deadline_status_id était totalement absent du INSERT, donc toute nouvelle
-// facture démarrait à NULL = "Sans statut" — c'était la cause la plus
-// fréquente du problème remonté par Lina.
+// seule fois par appel de syncFinance/syncInvoiceChanges (pas une fois par
+// facture) : avant, deadline_status_id était totalement absent du INSERT,
+// donc toute nouvelle facture démarrait à NULL = "Sans statut" — c'était la
+// cause la plus fréquente du problème remonté par Lina.
 function defaultDeadlineStatusId(db) {
 const row = db.prepare("SELECT id FROM finance_installment_statuses WHERE label='Douteux' ORDER BY sort_order ASC LIMIT 1").get();
 return row ? row.id : null;
+}
+
+// Statuts Pennylane BRUTS qui veulent dire "il n'y a plus rien à relancer" —
+// partagé par syncFinance (relecture complète) ET syncInvoiceChanges (check
+// rapide, voir plus bas) : une seule liste, jamais deux copies qui pourraient
+// diverger silencieusement (cf. le même souci documenté dans reports.js pour
+// REPORTS_PENNYLANE_HORS_RECOUVREMENT).
+const PENNYLANE_STATUSES_SOLDEES = ['paid', 'cancelled', 'partially_cancelled', 'credit_note'];
+
+// Prepared statement partagé (client) — mêmes protections dans les deux sens
+// d'appel (synchro complète ET check rapide) : COALESCE (09/2026, demande
+// Lina "0 risque de suppression") — si l'appel en cours n'a pas pu récupérer
+// le contact d'un client (échec réseau, lot interrompu...), on GARDE le
+// contact déjà en base plutôt que de l'écraser par NULL. Avant ce fix, un
+// simple échec ponctuel de récupération effaçait un contact valide enregistré
+// lors d'un sync précédent. Contrepartie acceptée : si un contact est un jour
+// réellement supprimé côté Pennylane (cas très rare), l'ancienne valeur reste
+// affichée jusqu'à ce qu'un contact différent soit resynchronisé avec succès.
+function buildUpsertCustomer(db) {
+return db.prepare(`
+INSERT INTO pennylane_customers (id, name, email, phone, contact_name, contact_email, contact_phone, synced_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(id) DO UPDATE SET
+name=excluded.name, email=excluded.email, phone=excluded.phone,
+contact_name=COALESCE(excluded.contact_name, pennylane_customers.contact_name),
+contact_email=COALESCE(excluded.contact_email, pennylane_customers.contact_email),
+contact_phone=COALESCE(excluded.contact_phone, pennylane_customers.contact_phone),
+synced_at=excluded.synced_at
+`);
+}
+
+// Prepared statement partagé (facture) — même logique d'alignement du statut
+// interne sur le statut BRUT Pennylane dans les deux sens d'appel : dès
+// qu'une facture est encaissée/annulée/devient un avoir côté Pennylane
+// (PENNYLANE_STATUSES_SOLDEES), on la bascule automatiquement sur `solde`.
+// On ne touche PAS aux autres statuts internes déjà choisis à la main
+// (litige/promesse_paiement/en_cours...), ce recalcul ne les écrase jamais
+// tant que la facture n'est pas définitivement soldée/annulée. Une échéance
+// corrigée à la main (deadline_manual=1) n'est jamais réécrasée non plus.
+// deadline_status_id volontairement ABSENT du SET : seul le INSERT initial
+// le renseigne, jamais réécrasé ensuite (choisi à la main ou resté sur le
+// défaut "Douteux").
+function buildUpsertInvoice(db) {
+const soldeesSqlList = PENNYLANE_STATUSES_SOLDEES.map((s) => `'${s}'`).join(',');
+return db.prepare(`
+INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, amount_ht, remaining_amount, remaining_amount_ht, status, internal_status, deadline_status_id, synced_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+ON CONFLICT(id) DO UPDATE SET
+invoice_number=excluded.invoice_number, customer_id=excluded.customer_id,
+date_emission=excluded.date_emission,
+deadline = CASE WHEN pennylane_invoices.deadline_manual=1 THEN pennylane_invoices.deadline ELSE excluded.deadline END,
+amount=excluded.amount, amount_ht=excluded.amount_ht,
+remaining_amount=excluded.remaining_amount, remaining_amount_ht=excluded.remaining_amount_ht,
+status=excluded.status,
+internal_status = CASE WHEN excluded.status IN (${soldeesSqlList})
+THEN 'solde' ELSE pennylane_invoices.internal_status END,
+synced_at=excluded.synced_at
+`);
 }
 
 // Synchro COMPLÈTE (pas incrémentale) à chaque appel, SANS filtre de date :
@@ -167,9 +225,7 @@ return row ? row.id : null;
 // essayé puis abandonné : une facture qui sort du champ du filtre n'est
 // plus jamais rafraîchie, donc sa copie locale se fige et part en décalage
 // avec Pennylane (ex. facture marquée payée là-bas, encore "en retard" ici)
-// — un import plat évite structurellement ce genre d'incohérence. Pas
-// d'incrémental via /customer_invoices/changes non plus (ne garde que 4
-// semaines d'historique, insuffisant pour un premier chargement complet).
+// — un import plat évite structurellement ce genre d'incohérence.
 // NB : un appel /contacts par client s'ajoute à chaque synchro (voir
 // fetchPrimaryContact) — plus lent, mais c'est le seul moyen d'obtenir un
 // nom/mail/tel de contact réel plutôt que la seule société.
@@ -178,6 +234,14 @@ return row ? row.id : null;
 // désormais l'AFFICHAGE sur date_emission >= 2025-01-01 (demande Lina, perf)
 // — volontairement PAS ici, pour les mêmes raisons que ci-dessus : la
 // synchro doit rester complète, seule la vue quotidienne réduit le volume.
+//
+// NB (09/2026, deuxième volet perf) : cette synchro complète reste lente
+// (plusieurs minutes) mais n'est plus l'outil du quotidien — elle sert
+// désormais de filet de sécurité, déclenché automatiquement toutes les 2
+// semaines le dimanche (voir router.js) pendant que syncInvoiceChanges
+// (plus bas) couvre le quotidien en quelques secondes. Le bouton manuel
+// "Synchroniser Pennylane" continue d'appeler syncFinance directement, en
+// filet de secours manuel si jamais l'automatisation du dimanche échoue.
 async function syncFinance(db) {
 // Perf 09/2026 (demande Lina) : ces deux récupérations paginées sont
 // indépendantes l'une de l'autre (aucune ne dépend du résultat de l'autre) —
@@ -214,7 +278,7 @@ invoices
 // fait QUE lire l'API et remplir contactsById en mémoire — aucune écriture en
 // base ici (voir runAll plus bas) : au pire un échec donne un contact manquant
 // pour ce sync, jamais une donnée fausse. Combiné avec le COALESCE sur
-// contact_name/email/phone dans upsertCustomer ci-dessous (même demande,
+// contact_name/email/phone dans buildUpsertCustomer ci-dessus (même demande,
 // "0 risque de suppression") : un contact manquant cette fois-ci N'EFFACE
 // PLUS la valeur déjà en base d'un sync précédent réussi.
 const CONTACT_BATCH_SIZE = 10;
@@ -239,65 +303,9 @@ console.log(`[PENNYLANE_DEBUG_RAW] contact client ${c.id} :`, JSON.stringify(con
 console.warn('[PENNYLANE] récupération des contacts clients interrompue, synchro poursuivie sans les contacts manquants :', e.message);
 }
 
-const upsertCustomer = db.prepare(`
-INSERT INTO pennylane_customers (id, name, email, phone, contact_name, contact_email, contact_phone, synced_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-ON CONFLICT(id) DO UPDATE SET
-name=excluded.name, email=excluded.email, phone=excluded.phone,
--- COALESCE (09/2026, demande Lina "0 risque de suppression") : si ce
--- sync-ci n'a pas pu récupérer le contact d'un client (échec réseau, lot de
--- contacts parallélisés interrompu...), on GARDE le contact déjà en base
--- plutôt que de l'écraser par NULL. Avant ce fix, un simple échec ponctuel
--- de récupération effaçait un contact valide enregistré lors d'un sync
--- précédent. Contrepartie acceptée : si un contact est un jour réellement
--- supprimé côté Pennylane (cas très rare), l'ancienne valeur reste affichée
--- jusqu'à ce qu'un contact différent soit resynchronisé avec succès.
-contact_name=COALESCE(excluded.contact_name, pennylane_customers.contact_name),
-contact_email=COALESCE(excluded.contact_email, pennylane_customers.contact_email),
-contact_phone=COALESCE(excluded.contact_phone, pennylane_customers.contact_phone),
-synced_at=excluded.synced_at
-`);
-// Alignement du statut interne (notre suivi de relance : a_relancer /
-// en_cours / litige / promesse_paiement / solde) sur le statut BRUT
-// Pennylane, à chaque synchro : dès qu'une facture est encaissée, annulée
-// (totalement ou partiellement) ou devient un avoir côté Pennylane, elle
-// n'a plus rien à "relancer" — on la bascule donc automatiquement sur
-// `solde` plutôt que de laisser une facture payée traîner indéfiniment sur
-// la valeur par défaut `a_relancer` tant que personne ne l'a triée à la
-// main. On ne touche PAS aux autres statuts (upcoming/late/partially_paid/
-// draft/incomplete/archived) : une facture encore due garde le statut
-// interne déjà choisi manuellement (litige/promesse_paiement/en_cours...),
-// ce recalcul ne l'écrase jamais tant qu'elle n'est pas définitivement
-// soldée/annulée.
-const PENNYLANE_STATUSES_SOLDEES = ['paid', 'cancelled', 'partially_cancelled', 'credit_note'];
-const soldeesSqlList = PENNYLANE_STATUSES_SOLDEES.map((s) => `'${s}'`).join(',');
-
+const upsertCustomer = buildUpsertCustomer(db);
+const upsertInvoice = buildUpsertInvoice(db);
 const defaultStatusId = defaultDeadlineStatusId(db);
-
-const upsertInvoice = db.prepare(`
-INSERT INTO pennylane_invoices (id, invoice_number, customer_id, date_emission, deadline, amount, amount_ht, remaining_amount, remaining_amount_ht, status, internal_status, deadline_status_id, synced_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-ON CONFLICT(id) DO UPDATE SET
-invoice_number=excluded.invoice_number, customer_id=excluded.customer_id,
-date_emission=excluded.date_emission,
--- Une échéance corrigée à la main dans l'appli (deadline_manual=1, ex.
--- délai négocié avec le client) n'est PLUS écrasée par la valeur
--- Pennylane au sync suivant — elle ne redevient alignée sur Pennylane
--- que si quelqu'un la modifie à nouveau depuis l'appli (ou remet
--- deadline_manual à 0 en base). Voir PATCH /api/finance/invoices/:id.
-deadline = CASE WHEN pennylane_invoices.deadline_manual=1 THEN pennylane_invoices.deadline ELSE excluded.deadline END,
-amount=excluded.amount, amount_ht=excluded.amount_ht,
-remaining_amount=excluded.remaining_amount, remaining_amount_ht=excluded.remaining_amount_ht,
-status=excluded.status,
-internal_status = CASE WHEN excluded.status IN (${soldeesSqlList})
-THEN 'solde' ELSE pennylane_invoices.internal_status END,
-synced_at=excluded.synced_at
--- deadline_status_id volontairement ABSENT de ce SET : ne doit jamais être
--- écrasé au sync suivant une fois qu'une facture existe déjà en base, que
--- son statut d'échéance 1 ait été choisi à la main ou soit resté sur le
--- défaut "Douteux" posé à sa création — seul le INSERT initial (ci-dessus,
--- colonne deadline_status_id / valeur defaultStatusId) le renseigne.
-`);
 
 const runAll = db.transaction(() => {
 for (const c of customers) {
@@ -335,6 +343,20 @@ PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer',
 defaultStatusId
 );
 }
+// Horodatage de la dernière synchro COMPLÈTE réussie (manuelle OU
+// automatique, peu importe qui l'a déclenchée) — sert uniquement de repère
+// au job planifié du dimanche (voir router.js) pour savoir s'il doit
+// vraiment tourner ou si une synchro complète (même manuelle) a déjà eu
+// lieu récemment. Pure bookkeeping : ne change rien à quelles données sont
+// lues ni comment (Règle absolue N°2 du prompt de demande synchro).
+// Format ISO (avec T/Z) stocké directement en JS plutôt que via datetime('now')
+// SQLite (qui produit "YYYY-MM-DD HH:MM:SS" sans timezone) — évite le même
+// piège de parsing déjà rencontré et documenté ailleurs dans ce projet
+// (cf. financeCommentsListHtml, correctif UTC sur created_at).
+db.prepare(`
+INSERT INTO config (key,value) VALUES ('pennylane_last_full_sync_at', ?)
+ON CONFLICT(key) DO UPDATE SET value=excluded.value
+`).run(new Date().toISOString());
 });
 runAll();
 
@@ -343,6 +365,167 @@ invoicesSynced: invoices.length,
 customersSynced: customers.length,
 syncedAt: new Date().toISOString(),
 };
+}
+
+// ── SUIVI RAPIDE DES CHANGEMENTS (check ~20s, complète syncFinance) ─────────
+// Contrairement à syncFinance (relecture complète, TOUTES les factures), ce
+// mécanisme n'interroge que ce qui a CHANGÉ depuis le dernier appel réussi,
+// via le changelog dédié de Pennylane. Objectif (demande Lina) : qu'une
+// facture tout juste entrée/réglée sur Pennylane apparaisse sur le dashboard
+// en quelques secondes, sans attendre la prochaine synchro complète
+// (programmée toutes les ~2 semaines, voir router.js).
+//
+// Endpoint vérifié sur la doc officielle Pennylane (09/2026) :
+// GET /changelogs/customer_invoices. Important : il NE renvoie PAS la
+// facture elle-même, seulement { id, operation: insert|update|delete,
+// processed_at, updated_at, created_at } — il faut donc, pour chaque id
+// renvoyé, aller rechercher la facture à jour via GET /customer_invoices/:id
+// (même endpoint que getInvoicePdfUrl plus bas) avant de pouvoir
+// l'enregistrer en base.
+//
+// Pagination : `cursor` (reprend exactement après le dernier appel) OU
+// `start_date` (repart d'une date, ex. tout premier démarrage) — jamais les
+// deux ensemble (l'API renvoie une erreur 400 sinon). Le curseur est
+// mémorisé dans la table générique `config` plutôt que dans une nouvelle
+// table dédiée, pour rester cohérent avec le reste de la base (voir
+// reports.js, claimReportOnce, même table).
+//
+// Limite documentée par Pennylane : le changelog ne garde que 4 semaines
+// d'historique — un curseur trop ancien renvoie une 422. Si ça arrive (ex.
+// ce job est resté arrêté très longtemps), on ne devine rien : on
+// réinitialise sur "maintenant" et on compte sur la synchro complète de
+// secours (voir router.js) pour rattraper l'écart, plutôt que de risquer un
+// import partiel ou faux (Règle absolue N°1, prompt de demande synchro).
+//
+// Suppression (operation='delete') : ignorée volontairement, comme partout
+// ailleurs dans ce fichier — ce module n'efface jamais une ligne locale,
+// quoi qu'il arrive côté Pennylane.
+//
+// Un seul appel = une seule page (jusqu'à 100 changements). S'il y a plus
+// d'une page en attente (ex. après une longue coupure), les ticks suivants
+// (toutes les ~20s, voir router.js) rattrapent le reste automatiquement,
+// page par page — pas besoin de tout drainer en un seul appel.
+const PENNYLANE_SYNC_CURSOR_KEY = 'pennylane_changes_cursor';
+
+function getStoredCursor(db) {
+const row = db.prepare('SELECT value FROM config WHERE key=?').get(PENNYLANE_SYNC_CURSOR_KEY);
+return row && row.value ? row.value : null;
+}
+
+function storeCursor(db, cursor) {
+db.prepare(`
+INSERT INTO config (key,value) VALUES (?,?)
+ON CONFLICT(key) DO UPDATE SET value=excluded.value
+`).run(PENNYLANE_SYNC_CURSOR_KEY, cursor || '');
+}
+
+async function fetchChangesPage({ cursor, startDate }) {
+const params = new URLSearchParams({ limit: '100' });
+if (cursor) params.set('cursor', cursor);
+else if (startDate) params.set('start_date', startDate);
+return pennylaneFetch(`/changelogs/customer_invoices?${params.toString()}`);
+}
+
+// Un seul "tick" — à appeler toutes les ~20 secondes par le job planifié
+// (voir router.js). Ne relit JAMAIS l'ensemble des factures.
+async function syncInvoiceChanges(db) {
+const cursor = getStoredCursor(db);
+const startDate = cursor ? null : new Date().toISOString(); // premier démarrage : pas de rattrapage d'historique ici, la synchro complète s'en charge
+
+let page;
+try {
+page = await fetchChangesPage({ cursor, startDate });
+} catch (e) {
+if (String(e.message).includes('(422)')) {
+console.warn('[PENNYLANE][CHANGES] curseur expiré/invalide, réinitialisé sur "maintenant" — la synchro complète programmée rattrapera l\'écart :', e.message);
+storeCursor(db, '');
+return { checked: 0, applied: 0, reset: true };
+}
+throw e;
+}
+
+const items = Array.isArray(page.items) ? page.items : [];
+const changedIds = [...new Set(items.filter((it) => it.operation !== 'delete').map((it) => String(it.id)))];
+
+if (changedIds.length === 0) {
+// Rien de neuf, mais on avance quand même le curseur si Pennylane en a
+// renvoyé un nouveau (page vide ou uniquement des 'delete' ignorés).
+if (page.next_cursor) storeCursor(db, page.next_cursor);
+return { checked: items.length, applied: 0 };
+}
+
+// Phase 1 (async) : récupérer l'état à jour de chaque facture changée, et
+// le client s'il n'est pas encore connu localement (cas rare : client tout
+// juste créé entre deux synchros complètes). Rien n'est écrit en base ici,
+// comme dans syncFinance — en cas d'échec en cours de route, ce tick est
+// abandonné SANS avancer le curseur : le prochain passage (~20s plus tard)
+// repartira du même point de départ et retentera, aucune perte possible.
+const fetchedInvoices = [];
+const fetchedCustomers = [];
+try {
+for (const id of changedIds) {
+const inv = await pennylaneFetch(`/customer_invoices/${encodeURIComponent(id)}`);
+fetchedInvoices.push(inv);
+const custId = customerIdOf(inv);
+if (custId && !db.prepare('SELECT 1 FROM pennylane_customers WHERE id=?').get(custId)) {
+try {
+const c = await pennylaneFetch(`/customers/${encodeURIComponent(custId)}`);
+fetchedCustomers.push(c);
+} catch (e) {
+// Best-effort : la facture sera quand même enregistrée (customer_id
+// pointera vers un client pas encore en base — rare, se corrigera
+// tout seul à la prochaine synchro complète ou au prochain tick où
+// ce client réapparaît).
+console.warn(`[PENNYLANE][CHANGES] client ${custId} introuvable pour la facture ${id} :`, e.message);
+}
+}
+}
+} catch (e) {
+console.warn('[PENNYLANE][CHANGES] échec en cours de récupération, tick abandonné — retentera au prochain passage avec le même point de départ :', e.message);
+return { checked: items.length, applied: 0, error: e.message };
+}
+
+// Phase 2 (sync, transaction atomique) : écriture des factures/clients +
+// avancement du curseur DANS LA MÊME transaction — si l'écriture échoue
+// pour une raison quelconque, le curseur n'avance pas non plus, donc rien
+// n'est perdu (comportement identique à syncFinance : tout ou rien).
+const upsertCustomer = buildUpsertCustomer(db);
+const upsertInvoice = buildUpsertInvoice(db);
+const defaultStatusId = defaultDeadlineStatusId(db);
+
+const runAll = db.transaction(() => {
+for (const c of fetchedCustomers) {
+upsertCustomer.run(
+String(c.id),
+c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
+(Array.isArray(c.emails) ? c.emails[0] : c.email) || '',
+c.phone || c.phone_number || '',
+null, null, null
+);
+}
+for (const inv of fetchedInvoices) {
+const a = amountsOf(inv);
+const status = computedStatus(inv);
+upsertInvoice.run(
+String(inv.id),
+inv.invoice_number || null,
+customerIdOf(inv),
+inv.date || null,
+inv.deadline || null,
+a.ttc,
+a.ht,
+a.remainingTtc,
+a.remainingHt,
+status,
+PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer',
+defaultStatusId
+);
+}
+storeCursor(db, page.next_cursor || cursor || '');
+});
+runAll();
+
+return { checked: items.length, applied: fetchedInvoices.length };
 }
 
 // Un lien PDF public (`public_file_url`) est bien renvoyé par Pennylane, mais
@@ -354,4 +537,4 @@ if (!json.public_file_url) throw new Error("Pennylane n'a renvoyé aucun PDF pou
 return { url: json.public_file_url, filename: json.filename || null };
 }
 
-module.exports = { syncFinance, getInvoicePdfUrl, getAllPaginated, pennylaneFetch };
+module.exports = { syncFinance, syncInvoiceChanges, getInvoicePdfUrl, getAllPaginated, pennylaneFetch };
