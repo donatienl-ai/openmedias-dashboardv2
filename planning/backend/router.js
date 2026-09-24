@@ -1647,6 +1647,63 @@ app.delete('/api/admin/commerciaux/:id', requireEdit, (req, res) => {
 // ── REPORTING AUTOMATIQUE ───────────────────────────────────────────────────
 const reports = setupReports(db);
 
+// ── SYNCHRONISATION PENNYLANE AUTOMATIQUE (recouvrement) ───────────────────
+// Voir le projet Claude "OpenMedias Dashboard", doc
+// claude/prompt-dev-synchro-recouvrement.md, pour le détail des décisions
+// (demande Lina 09/2026, "0 risque de suppression", check quasi instantané
+// sans toucher à quelles factures/clients sont lus). Deux mécanismes
+// complémentaires :
+// (1) check rapide ~20s — ne relit JAMAIS l'ensemble des factures, voir
+//     pennylane.js/syncInvoiceChanges (changelog Pennylane, curseur mémorisé
+//     dans la table config) ;
+// (2) synchro complète de secours — tous les dimanches à 3h, SEULEMENT si
+//     la dernière synchro complète (manuelle OU automatique) date de plus
+//     de 13 jours (marge sous la limite de 4 semaines d'historique du
+//     changelog Pennylane) — voir pennylane.js/syncFinance, marqueur
+//     'pennylane_last_full_sync_at'. Un échec un dimanche se retente donc
+//     automatiquement le dimanche suivant (le marqueur n'a pas bougé).
+//     Alerte email à Lina en cas d'échec.
+// Le bouton manuel "Synchroniser Pennylane" (POST /api/finance/sync, voir
+// financeRoutes.js) reste INCHANGÉ — il continue d'appeler syncFinance
+// directement, et sert désormais de filet de secours manuel si jamais
+// l'automatisation du dimanche est en panne.
+if (!process.env.PENNYLANE_API_TOKEN) {
+  console.warn('⚠️ PENNYLANE_API_TOKEN absent — check rapide et synchro complète automatique de recouvrement désactivés (le bouton manuel restera aussi en erreur tant que la variable n\'est pas configurée)');
+} else {
+  let pennylaneChangesRunning = false;
+  setInterval(() => {
+    if (pennylaneChangesRunning) return; // ne jamais chevaucher deux ticks si un appel précédent traîne
+    pennylaneChangesRunning = true;
+    pennylane.syncInvoiceChanges(db)
+      .catch((e) => console.error('[PENNYLANE][CHANGES] tick en échec :', e.message))
+      .finally(() => { pennylaneChangesRunning = false; });
+  }, 20 * 1000);
+
+  cronBdc.schedule('0 3 * * 0', async () => {
+    const row = db.prepare("SELECT value FROM config WHERE key='pennylane_last_full_sync_at'").get();
+    const lastAt = row ? new Date(row.value) : null;
+    const daysSince = lastAt && !Number.isNaN(lastAt.getTime()) ? (Date.now() - lastAt.getTime()) / 86400000 : Infinity;
+    if (daysSince < 13) {
+      console.log(`[PENNYLANE][SYNC COMPLET AUTO] sautée — dernière synchro complète il y a ${daysSince.toFixed(1)} j (<13)`);
+      return;
+    }
+    try {
+      const result = await pennylane.syncFinance(db);
+      console.log(`[PENNYLANE][SYNC COMPLET AUTO] OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s)`);
+    } catch (e) {
+      console.error('[PENNYLANE][SYNC COMPLET AUTO] échec :', e.message);
+      reports.sendMailOnly(
+        '⚠️ Échec de la synchro Pennylane automatique',
+        `<p>La synchro complète automatique de recouvrement (dimanche) a échoué :</p><pre>${e.message}</pre><p>Le bouton manuel "Synchroniser Pennylane" reste disponible en attendant. Elle sera retentée automatiquement dimanche prochain. Si ça se reproduit plusieurs dimanches de suite, le check rapide risque d'approcher la limite des 4 semaines d'historique côté Pennylane.</p>`,
+        ['lina.e@openmedias.fr']
+      );
+    }
+  }, { timezone: 'Europe/Paris' });
+
+  console.log('🔄 Synchro Pennylane automatique configurée (check ~20s + synchro complète dimanche si >13j)');
+}
+
+
 // Déclenchement manuel pour test (protégé par le secret SF OU par le rôle édito depuis l'app)
 // POST /api/admin/test-report  body: { "type": "mensuel" | "hebdo" | "apercu" | "kickoff" | "aprogrammer" | "clevel" | "relances" }
 app.post('/api/admin/test-report', (req, res) => {
