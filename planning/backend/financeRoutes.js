@@ -280,7 +280,12 @@ res.json(shapeInvoiceRow(r, installments));
 // une relance du jour) — même exclusion que le digest mail quotidien
 // (reports.js/reportRelancesQuotidien), pour que le chiffre affiché ici colle
 // à ce qui part réellement dans le mail du matin.
-const FINANCE_STATUTS_NON_ACTIONABLES = ['litige', 'promesse_paiement', 'solde'];
+// 'douteux' ajouté le 24/09/2026 (demande Lina, "sois logique") : une facture
+// classée "Douteux" est, comme litige/promesse/soldée, déjà suivie autrement
+// qu'en relance active — elle ne doit plus compter dans "À relancer
+// aujourd'hui" une fois classée, même si (Pennylane et le calcul de retard
+// brut) elle reste en retard.
+const FINANCE_STATUTS_NON_ACTIONABLES = ['litige', 'promesse_paiement', 'solde', 'douteux'];
 
 app.get('/api/finance/kpis', requireFinance, (req, res) => {
 // Même borne que /api/finance/invoices (cf. plus haut) : les factures ÉMISES
