@@ -454,6 +454,23 @@ res.status(500).json({ error: e.message });
 }
 });
 
+// TEMPORAIRE (suite) — meme diagnostic, route dediee et fixe (pas de chemin
+// libre) pour inspecter la forme reelle de la reponse du sous-endpoint
+// Pennylane /customers/:id/contacts (c'est justement ce sous-endpoint que
+// fetchPrimaryContact() interroge, cf. pennylane.js) : la colonne Nom Prenom
+// est vide pour 100% des factures alors que le mecanisme existe, donc
+// l'hypothese de forme de reponse est peut-etre fausse a ce niveau precis.
+// Lecture seule, un seul endpoint Pennylane fixe possible. A retirer avec
+// l'autre route de diagnostic une fois termine.
+app.get('/api/finance/debug/pennylane-customer/:id/contacts', requireFinance, async (req, res) => {
+try {
+const raw = await pennylane.pennylaneFetch(`/customers/${encodeURIComponent(req.params.id)}/contacts`);
+res.json(raw);
+} catch (e) {
+res.status(500).json({ error: e.message });
+}
+});
+
 // Commentaires libres sur une facture (distincts de l'historique de relances :
 // une note interne, pas une action de relance envoyée au client).
 app.get('/api/finance/invoices/:id/comments', requireFinance, (req, res) => {
