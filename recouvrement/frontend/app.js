@@ -1056,6 +1056,7 @@ return `<div class="finance-relance-entry" id="finance-comment-${c.id}">
 <div class="finance-relance-meta" style="display:flex;align-items:center;gap:8px">
 <span>${c.auteur||'—'} · ${(parseSqliteUtc(c.created_at)||new Date(c.created_at)).toLocaleString('fr-FR')}${modifie}</span>
 <button type="button" class="btn-secondary" style="margin-left:auto;font-size:11px;padding:3px 8px" onclick="startEditFinanceComment('${invoiceId}',${c.id})">Modifier</button>
+<button type="button" class="btn-secondary" style="font-size:11px;padding:3px 8px" onclick="deleteFinanceComment('${invoiceId}',${c.id})">Supprimer</button>
 </div>
 </div>`;
 }
@@ -1095,6 +1096,22 @@ const idx=financeCommentsCache.findIndex(x=>x.id===commentId);
 if(idx>=0)financeCommentsCache[idx]=updated;
 document.getElementById(`finance-comment-${commentId}`).outerHTML=financeCommentRowHtml(invoiceId,updated);
 }catch(e){ showToast(e.message||'Impossible de modifier le commentaire','error'); }
+}
+// Suppression d'un commentaire (demande Lina 24/09/2026, bouton "Supprimer" à
+// côté de "Modifier" — cf. financeCommentRowHtml). Même modèle que les autres
+// suppressions de l'outil (échéances, cf. deleteFinanceInstallment) : pas de
+// popup de confirmation, cohérent avec le reste de l'app.
+async function deleteFinanceComment(invoiceId,commentId){
+try{
+const r=await fetch(`${API}/finance/invoices/${invoiceId}/comments/${commentId}`,{method:'DELETE',headers:financeHeaders()});
+if(!r.ok&&r.status!==204){
+const d=await r.json().catch(()=>({}));
+throw new Error(d.error||'Impossible de supprimer le commentaire');
+}
+const idx=financeCommentsCache.findIndex(x=>x.id===commentId);
+if(idx>=0)financeCommentsCache.splice(idx,1);
+document.getElementById('finance-comments-list').innerHTML=financeCommentsListHtml(invoiceId,financeCommentsCache);
+}catch(e){ showToast(e.message||'Impossible de supprimer le commentaire','error'); }
 }
 // Liste fusionnée des échéances (09/2026, demande Lina, confirmée) : la 1ère
 // ligne est désormais l'échéance 1 (= inv.deadline/inv.deadlineStatusId,
