@@ -383,74 +383,125 @@ syncedAt: new Date().toISOString(),
 // (même endpoint que getInvoicePdfUrl plus bas) avant de pouvoir
 // l'enregistrer en base.
 //
-// Pagination : `cursor` (reprend exactement après le dernier appel) OU
-// `start_date` (repart d'une date, ex. tout premier démarrage) — jamais les
-// deux ensemble (l'API renvoie une erreur 400 sinon). Le curseur est
-// mémorisé dans la table générique `config` plutôt que dans une nouvelle
-// table dédiée, pour rester cohérent avec le reste de la base (voir
-// reports.js, claimReportOnce, même table).
+// CORRECTIF 24/09/2026 (bug identifié le jour même par Lina : les factures
+// du matin ne remontaient pas sur le dashboard). Cause : la première version
+// mémorisait `next_cursor` comme point de reprise, mais la doc Pennylane le
+// précise explicitement — « next_cursor... null when you've reached the
+// end » et « cursors are temporary and should not be stored for long-term
+// use ». Or `next_cursor` est justement `null` à chaque tick où rien n'a
+// changé, c'est-à-dire quasiment tout le temps vu le volume quotidien : le
+// point de reprise n'était donc jamais mémorisé, et CHAQUE tick repartait de
+// « maintenant » — ratant systématiquement et définitivement tout ce qui
+// s'était passé dans les 20 secondes précédentes. Le check tournait bien
+// toutes les 20s, mais ne rattrapait jamais rien.
+//
+// Corrigé en suivant la méthode officiellement recommandée par Pennylane
+// (doc « Tracking Data Changes ») : mémoriser le `processed_at` du dernier
+// changement traité et le redonner en `start_date` au tick suivant — jamais
+// de `cursor` d'un tick à l'autre (uniquement `start_date`). Tant qu'un tick
+// ne voit rien de neuf, le point de départ mémorisé NE BOUGE PAS (on retente
+// exactement le même point de départ au tick suivant, comme demandé par la
+// doc) ; il n'avance que lorsqu'un tick a effectivement traité au moins un
+// changement ET entièrement vidé la page reçue (`has_more: false`). Un point
+// de départ est mémorisé IMMÉDIATEMENT au tout premier démarrage (avant même
+// le premier appel), pour ne jamais dériver vers « maintenant » à chaque
+// tick suivant comme le faisait l'ancienne version.
+//
+// Pagination : `cursor` (reprend exactement après le dernier appel, valable
+// UNIQUEMENT pour vider plusieurs pages d'un même burst, jamais stocké d'un
+// tick à l'autre) OU `start_date` (repart d'une date — c'est notre seul
+// point de reprise persistant) — jamais les deux ensemble (l'API renvoie une
+// erreur 400 sinon). Le point de départ est mémorisé dans la table générique
+// `config` plutôt que dans une nouvelle table dédiée, pour rester cohérent
+// avec le reste de la base (voir reports.js, claimReportOnce, même table).
 //
 // Limite documentée par Pennylane : le changelog ne garde que 4 semaines
-// d'historique — un curseur trop ancien renvoie une 422. Si ça arrive (ex.
-// ce job est resté arrêté très longtemps), on ne devine rien : on
-// réinitialise sur "maintenant" et on compte sur la synchro complète de
-// secours (voir router.js) pour rattraper l'écart, plutôt que de risquer un
-// import partiel ou faux (Règle absolue N°1, prompt de demande synchro).
+// d'historique — une requête portant sur une date trop ancienne renvoie une
+// erreur (422). Si ça arrive (ex. ce job est resté arrêté très longtemps),
+// on ne devine rien : on réinitialise sur "maintenant" et on compte sur la
+// synchro complète de secours (voir router.js) pour rattraper l'écart,
+// plutôt que de risquer un import partiel ou faux (Règle absolue N°1,
+// prompt de demande synchro).
 //
 // Suppression (operation='delete') : ignorée volontairement, comme partout
 // ailleurs dans ce fichier — ce module n'efface jamais une ligne locale,
 // quoi qu'il arrive côté Pennylane.
 //
-// Un seul appel = une seule page (jusqu'à 100 changements). S'il y a plus
-// d'une page en attente (ex. après une longue coupure), les ticks suivants
-// (toutes les ~20s, voir router.js) rattrapent le reste automatiquement,
-// page par page — pas besoin de tout drainer en un seul appel.
-const PENNYLANE_SYNC_CURSOR_KEY = 'pennylane_changes_cursor';
+// Un seul appel = une seule page (jusqu'à 1000 changements, le maximum
+// autorisé par Pennylane — largement au-dessus du volume quotidien réel de
+// l'entreprise, pour éviter en pratique le cas `has_more: true`). S'il y a
+// malgré tout plus d'une page en attente (ex. après une très longue
+// coupure), le point de départ n'avance pas tant que la page n'est pas
+// entièrement vidée — les ticks suivants (toutes les ~20s) retentent avec le
+// même point de départ jusqu'à rattraper tout le retard, sans jamais sauter
+// un changement (au prix, dans ce cas rare, de retraiter parfois deux fois
+// le même changement déjà vu — sans risque, un upsert est idempotent).
+const PENNYLANE_SYNC_CHECKPOINT_KEY = 'pennylane_changes_start_date';
 
-function getStoredCursor(db) {
-const row = db.prepare('SELECT value FROM config WHERE key=?').get(PENNYLANE_SYNC_CURSOR_KEY);
+function getStoredCheckpoint(db) {
+const row = db.prepare('SELECT value FROM config WHERE key=?').get(PENNYLANE_SYNC_CHECKPOINT_KEY);
 return row && row.value ? row.value : null;
 }
 
-function storeCursor(db, cursor) {
+function storeCheckpoint(db, isoDate) {
 db.prepare(`
 INSERT INTO config (key,value) VALUES (?,?)
 ON CONFLICT(key) DO UPDATE SET value=excluded.value
-`).run(PENNYLANE_SYNC_CURSOR_KEY, cursor || '');
+`).run(PENNYLANE_SYNC_CHECKPOINT_KEY, isoDate);
 }
 
-async function fetchChangesPage({ cursor, startDate }) {
-const params = new URLSearchParams({ limit: '100' });
-if (cursor) params.set('cursor', cursor);
-else if (startDate) params.set('start_date', startDate);
+async function fetchChangesPage(startDate) {
+const params = new URLSearchParams({ limit: '1000', start_date: startDate });
 return pennylaneFetch(`/changelogs/customer_invoices?${params.toString()}`);
 }
 
 // Un seul "tick" — à appeler toutes les ~20 secondes par le job planifié
 // (voir router.js). Ne relit JAMAIS l'ensemble des factures.
 async function syncInvoiceChanges(db) {
-const cursor = getStoredCursor(db);
-const startDate = cursor ? null : new Date().toISOString(); // premier démarrage : pas de rattrapage d'historique ici, la synchro complète s'en charge
+let startDate = getStoredCheckpoint(db);
+if (!startDate) {
+// Tout premier démarrage (ou après un reset 422) : ancre le point de
+// départ sur "maintenant" et le MÉMORISE IMMÉDIATEMENT, avant même le
+// premier appel réseau — sinon, tant qu'aucun changement n'a encore été
+// vu, ce point de départ dériverait vers "maintenant" à CHAQUE tick
+// suivant (c'était exactement le bug du 24/09/2026, voir plus haut) : un
+// changement survenu entre deux ticks serait alors raté pour toujours.
+startDate = new Date().toISOString();
+storeCheckpoint(db, startDate);
+}
 
 let page;
 try {
-page = await fetchChangesPage({ cursor, startDate });
+page = await fetchChangesPage(startDate);
 } catch (e) {
 if (String(e.message).includes('(422)')) {
-console.warn('[PENNYLANE][CHANGES] curseur expiré/invalide, réinitialisé sur "maintenant" — la synchro complète programmée rattrapera l\'écart :', e.message);
-storeCursor(db, '');
+console.warn('[PENNYLANE][CHANGES] point de départ expiré/invalide (plus de 4 semaines), réinitialisé sur "maintenant" — la synchro complète programmée rattrapera l\'écart :', e.message);
+storeCheckpoint(db, new Date().toISOString());
 return { checked: 0, applied: 0, reset: true };
 }
 throw e;
 }
 
 const items = Array.isArray(page.items) ? page.items : [];
+if (items.length === 0) {
+// Rien de neuf : le point de départ N'AVANCE PAS (recommandation
+// officielle Pennylane — voir commentaire au-dessus). On retentera
+// exactement le même point de départ au prochain tick.
+return { checked: 0, applied: 0 };
+}
+
 const changedIds = [...new Set(items.filter((it) => it.operation !== 'delete').map((it) => String(it.id)))];
+// Le plus récent `processed_at` vu dans cette page (tous types d'opération
+// confondus, delete compris) — sert de nouveau point de départ une fois la
+// page entièrement traitée, voir plus bas.
+const maxProcessedAt = items.reduce((max, it) => (it.processed_at && (!max || it.processed_at > max) ? it.processed_at : max), null);
 
 if (changedIds.length === 0) {
-// Rien de neuf, mais on avance quand même le curseur si Pennylane en a
-// renvoyé un nouveau (page vide ou uniquement des 'delete' ignorés).
-if (page.next_cursor) storeCursor(db, page.next_cursor);
+// Cette page ne contient que des suppressions (ignorées, voir plus haut) —
+// rien à écrire en base, mais la fenêtre a bien été vérifiée : on avance
+// quand même le point de départ (seulement si la page est entièrement
+// vidée) pour ne pas la revérifier indéfiniment.
+if (!page.has_more && maxProcessedAt) storeCheckpoint(db, maxProcessedAt);
 return { checked: items.length, applied: 0 };
 }
 
@@ -458,8 +509,9 @@ return { checked: items.length, applied: 0 };
 // le client s'il n'est pas encore connu localement (cas rare : client tout
 // juste créé entre deux synchros complètes). Rien n'est écrit en base ici,
 // comme dans syncFinance — en cas d'échec en cours de route, ce tick est
-// abandonné SANS avancer le curseur : le prochain passage (~20s plus tard)
-// repartira du même point de départ et retentera, aucune perte possible.
+// abandonné SANS avancer le point de départ : le prochain passage (~20s
+// plus tard) repartira du même point de départ et retentera, aucune perte
+// possible.
 const fetchedInvoices = [];
 const fetchedCustomers = [];
 try {
@@ -486,9 +538,10 @@ return { checked: items.length, applied: 0, error: e.message };
 }
 
 // Phase 2 (sync, transaction atomique) : écriture des factures/clients +
-// avancement du curseur DANS LA MÊME transaction — si l'écriture échoue
-// pour une raison quelconque, le curseur n'avance pas non plus, donc rien
-// n'est perdu (comportement identique à syncFinance : tout ou rien).
+// avancement du point de départ DANS LA MÊME transaction — si l'écriture
+// échoue pour une raison quelconque, le point de départ n'avance pas non
+// plus, donc rien n'est perdu (comportement identique à syncFinance : tout
+// ou rien).
 const upsertCustomer = buildUpsertCustomer(db);
 const upsertInvoice = buildUpsertInvoice(db);
 const defaultStatusId = defaultDeadlineStatusId(db);
@@ -521,7 +574,12 @@ PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer',
 defaultStatusId
 );
 }
-storeCursor(db, page.next_cursor || cursor || '');
+// Le point de départ n'avance QUE si cette page a été entièrement vidée
+// (has_more: false) — s'il reste d'autres pages (rare, gros volume ponctuel),
+// on le laisse en l'état : le prochain tick relira depuis le même point,
+// verra à nouveau ces changements (upsert = sans risque) et progressera
+// page par page jusqu'à rattraper tout le retard.
+if (!page.has_more && maxProcessedAt) storeCheckpoint(db, maxProcessedAt);
 });
 runAll();
 
