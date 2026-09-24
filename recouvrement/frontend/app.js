@@ -381,7 +381,9 @@ return `<span class="finance-hors-encours-badge" title="Reste-dû Pennylane non 
 // Statuts internes déjà "pris en charge" autrement qu'en relance active (même
 // exclusion que côté back et que le digest mail quotidien) — un litige en
 // cours ou une promesse de paiement obtenue n'attend pas une relance du jour.
-const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde'];
+// 'douteux' ajouté le 24/09/2026 (demande Lina) — même liste que côté back
+// (financeRoutes.js), à garder synchronisée.
+const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde','douteux'];
 // Recalcule les KPI de recouvrement (encours, montant actionable, taux de
 // retard, aging, répartition par statut, DSO) côté front, à partir du cache
 // local déjà filtré par la période ET les chips de filtre actifs — reproduit
@@ -539,7 +541,7 @@ const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMont
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
 wrap.innerHTML=`
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div></div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse/douteux (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
 <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
@@ -644,7 +646,7 @@ archived: {bg:'var(--surface2)', fg:'var(--text-muted)'},
 // onglets "À venir" et "En retard" : une facture déjà suivie autrement que
 // par une relance active n'a plus besoin d'apparaître dans ces deux vues-là.
 // Mêmes valeurs que FINANCE_STATUTS_NON_ACTIONABLES ci-dessus, + en_cours.
-const FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE=['litige','promesse_paiement','solde','en_cours'];
+const FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE=['litige','promesse_paiement','solde','en_cours','douteux'];
 // Test d'UNE facture contre UN chip donné (utilisé pour les compteurs par
 // chip, et comme brique de financeMatchesFilters ci-dessous).
 function financeMatchesFilterKey(inv,key){
