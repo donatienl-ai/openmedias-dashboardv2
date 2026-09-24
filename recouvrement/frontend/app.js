@@ -126,7 +126,12 @@ if(localStorage.getItem('theme')==='dark'&&document.getElementById('theme-btn'))
 function closeModal(event){if(event&&event.target!==document.getElementById('modal-overlay'))return;document.getElementById('modal-overlay').style.display='none';}
 function showToast(msg,type='success'){const el=document.createElement('div');el.className=`toast ${type}`;el.innerHTML=`<span>${type==='success'?'✅':'⚠️'}</span><span>${msg}</span>`;document.body.appendChild(el);setTimeout(()=>el.remove(),4000);}
 function formatDateFR(str){if(!str)return '—';const[y,m,d]=str.split('-');return `${d}/${m}/${y}`;}
-function fmtCA(v){return new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(v||0);}
+// Centimes affichés et pris en compte (demande Lina 24/09/2026) — avant,
+// maximumFractionDigits:0 arrondissait tout à l'euro près à l'affichage
+// (les montants stockés/calculés, eux, gardaient déjà les centimes partout,
+// aussi bien côté Pennylane que sur les échéances locales — seul l'AFFICHAGE
+// les cachait).
+function fmtCA(v){return new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2}).format(v||0);}
 function fmtCACompact(v){ v=v||0; if(Math.abs(v)<10000)return fmtCA(v); return new Intl.NumberFormat('fr-FR',{notation:'compact',style:'currency',currency:'EUR',minimumFractionDigits:0,maximumFractionDigits:1}).format(v); }
 // Lecture explicite en UTC d'un timestamp SQLite ("YYYY-MM-DD HH:MM:SS", écrit
 // par datetime('now'), donc sans indicateur de fuseau) : new Date(str) tout
@@ -1142,9 +1147,12 @@ const statusPill=inst.isEcheance1
 ? financeStatusPillHtml(inst.statusId,(statusId)=>patchFinanceInvoice(invoiceId,{deadlineStatusId:statusId}))
 : financeStatusPillHtml(inst.statusId,(statusId)=>patchFinanceInstallment(invoiceId,inst.id,{statusId}));
 const paidField=inst.isEcheance1?'':`<label class="finance-installment-paid-field">Réglé <input type="number" class="form-input" step="0.01" min="0" style="max-width:100px" value="${inst.paidAmount||0}" onchange="patchFinanceInstallment('${invoiceId}',${inst.id},{paidAmount:this.value})"></label>`;
-const soldeLabel=inst.isEcheance1
+// Le "X € restant" en rouge à droite de chaque échéance a été retiré
+// (demande Lina 24/09/2026) — le "Soldée" en vert reste affiché quand
+// l'échéance est intégralement réglée, seul le compteur rouge disparaît.
+const soldeLabel=(inst.isEcheance1||inst.solde>0)
 ? '' // le restant dû de l'échéance 1 est déjà affiché plus haut dans la fiche (Restant dû TTC)
-: `<span style="font-size:12px;font-weight:600;${inst.solde>0?'color:#dc2626':'color:var(--green)'}">${inst.solde>0?`${fmtCA(inst.solde)} restant`:'Soldée'}</span>`;
+: `<span style="font-size:12px;font-weight:600;color:var(--green)">Soldée</span>`;
 return `<div class="finance-installment-row">
 <div class="finance-installment-row-top">
 <span class="finance-installment-dot" style="background:${inst.statusColor||'var(--text-muted)'}"></span>
