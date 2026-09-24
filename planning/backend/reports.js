@@ -366,14 +366,16 @@ function setupReports(db) {
     // et ne doivent donc plus jamais réapparaître dans ce mail non plus ; et
     // les statuts Pennylane hors recouvrement (notamment "paid", qui peut
     // garder un remaining_amount résiduel par bug Pennylane) sont exclus pour
-    // ne pas relancer un client qui a déjà payé.
+    // ne pas relancer un client qui a déjà payé. "douteux" ajouté le
+    // 24/09/2026 (demande Lina, même logique que litige/promesse/soldée :
+    // déjà suivie autrement, pas besoin d'une relance automatique).
     const rows = db.prepare(`
       SELECT i.*, c.name AS customer_name, c.contact_name AS contact_name,
              c.contact_email AS contact_email, c.contact_phone AS contact_phone
       FROM pennylane_invoices i
       LEFT JOIN pennylane_customers c ON c.id = i.customer_id
       WHERE i.remaining_amount > 0
-        AND i.internal_status NOT IN ('litige', 'promesse_paiement', 'solde')
+        AND i.internal_status NOT IN ('litige', 'promesse_paiement', 'solde', 'douteux')
         AND i.date_emission >= '2025-01-01'
         AND (i.status IS NULL OR i.status NOT IN (${REPORTS_PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',')}))
     `).all(...REPORTS_PENNYLANE_HORS_RECOUVREMENT);
@@ -393,7 +395,7 @@ function setupReports(db) {
 
     const totalDu = enRetard.reduce((s, r) => s + (r.remaining_amount || 0), 0);
     let html = `<h2>💶 Relances du jour — ${enRetard.length} facture(s) en retard</h2>
-      <p>${enRetard.length} facture(s) encore dues et en retard, pour un total de ${fmtMoney(totalDu)}. Statuts déjà classés "litige", "promesse de paiement" ou "soldée" sont exclus de cette liste.</p>
+      <p>${enRetard.length} facture(s) encore dues et en retard, pour un total de ${fmtMoney(totalDu)}. Statuts déjà classés "litige", "promesse de paiement", "douteux" ou "soldée" sont exclus de cette liste.</p>
       <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px">
         <tr style="background:#1a1a2e;color:#fff">
           <th style="padding:8px;text-align:left">Facture</th>
