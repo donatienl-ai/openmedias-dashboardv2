@@ -438,6 +438,22 @@ res.status(500).json({ error: e.message });
 }
 });
 
+// TEMPORAIRE — diagnostic Nom/Prenom (24/09/2026, demande Lina) : la colonne
+// NOM PRENOM est vide pour TOUTES les factures (0/2099 verifie en direct) alors
+// que le mecanisme de recuperation de contact existe deja cote sync
+// (fetchPrimaryContact, pennylane.js) -- sert a inspecter la forme reelle d'un
+// client Pennylane brut pour corriger ce mecanisme si l'hypothese de champ
+// (contacts.url) est fausse. Lecture seule, aucune ecriture. A retirer une
+// fois le diagnostic termine.
+app.get('/api/finance/debug/pennylane-customer/:id', requireFinance, async (req, res) => {
+try {
+const raw = await pennylane.pennylaneFetch(`/customers/${encodeURIComponent(req.params.id)}`);
+res.json(raw);
+} catch (e) {
+res.status(500).json({ error: e.message });
+}
+});
+
 // Commentaires libres sur une facture (distincts de l'historique de relances :
 // une note interne, pas une action de relance envoyée au client).
 app.get('/api/finance/invoices/:id/comments', requireFinance, (req, res) => {
