@@ -466,6 +466,18 @@ db.prepare("UPDATE finance_invoice_comments SET comment=?, updated_at=datetime('
 res.json(db.prepare('SELECT * FROM finance_invoice_comments WHERE id=?').get(req.params.commentId));
 });
 
+// Suppression d'un commentaire (demande Lina 24/09/2026). Mêmes droits que la
+// modification ci-dessus (requireFinance, pas de vérification d'auteur) —
+// cohérent avec la décision déjà prise pour l'édition, pas une nouvelle
+// politique inventée pour ce point précis.
+app.delete('/api/finance/invoices/:id/comments/:commentId', requireFinance, (req, res) => {
+const existing = db.prepare('SELECT id FROM finance_invoice_comments WHERE id=? AND invoice_id=?')
+.get(req.params.commentId, req.params.id);
+if (!existing) return res.status(404).json({ error: 'Commentaire introuvable' });
+db.prepare('DELETE FROM finance_invoice_comments WHERE id=?').run(existing.id);
+res.status(204).end();
+});
+
 // Échéances de paiement personnalisées (Pennylane n'expose qu'une seule
 // deadline — `installments` y est encore en alpha et toujours null — donc ces
 // dates d'échelonnement sont gérées entièrement de notre côté). Chaque
