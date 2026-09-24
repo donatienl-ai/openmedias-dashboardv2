@@ -128,6 +128,21 @@ remainingTtc: Number(invoice.remaining_amount_with_tax) || 0,
 // champ `contacts.url`). On prend le premier contact renvoyé — Pennylane ne
 // distingue pas de contact "principal" dans son modèle, donc c'est la
 // meilleure approximation disponible sans configuration supplémentaire.
+// CORRECTIF 24/09/2026 (demande Lina, colonne Nom Prenom vide sur 100% des
+// factures) : diagnostic fait via une route de debug temporaire (deployee
+// puis retiree) a confirme que le sous-endpoint /customers/:id/contacts
+// interroge ci-dessous renvoie une liste VIDE pour la quasi-totalite des
+// clients de ce compte Pennylane (echantillon de clients avec facture(s)
+// encore due(s) : 0/8) -- Pennylane a bien ce sous-endpoint, mais l'equipe
+// ne l'a jamais utilise cote Pennylane. En revanche, le champ `recipient`
+// present DIRECTEMENT sur l'objet client (GET /customers, sans appel
+// supplementaire) contient le plus souvent le nom du destinataire de la
+// facture (ex. "Christelle Berardi") -- c'est la vraie source utilisee
+// maintenant en priorite pour contact_name, voir les deux upsertCustomer.run
+// plus bas (syncFinance et syncInvoiceChanges). fetchPrimaryContact/l'appel
+// /contacts est GARDE tel quel (email/telephone de contact, et prioritaire
+// sur `recipient` pour le nom si jamais un jour rempli) -- juste plus
+// jamais la SEULE source pour le nom.
 async function fetchPrimaryContact(contactsUrl) {
 if (!contactsUrl) return null;
 try {
@@ -315,7 +330,7 @@ String(c.id),
 c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
 (Array.isArray(c.emails) ? c.emails[0] : c.email) || '',
 c.phone || c.phone_number || '',
-contact ? contact.name : null,
+(contact && contact.name) || (c.recipient || '').trim() || null,
 contact ? contact.email : null,
 contact ? contact.phone : null
 );
@@ -553,7 +568,7 @@ String(c.id),
 c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
 (Array.isArray(c.emails) ? c.emails[0] : c.email) || '',
 c.phone || c.phone_number || '',
-null, null, null
+(c.recipient || '').trim() || null, null, null
 );
 }
 for (const inv of fetchedInvoices) {
