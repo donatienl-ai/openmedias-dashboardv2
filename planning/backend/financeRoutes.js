@@ -1,10 +1,5 @@
 module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES }) {
 // ── RECOUVREMENT / PENNYLANE (nouveau projet) ────────────────────────────────
-// Outil interne de suivi des impayés : Pennylane reste la source de vérité
-// facturation (voir ./pennylane.js), ce module ajoute juste par-dessus ce
-// que Pennylane ne fait pas nativement — statut de recouvrement, attribution
-// par collaborateur, historique de relances multi-canal, KPI (DSO, taux de
-// retard, aging) — jusqu'ici suivis à la main (Excel + Trello).
 function joursDeRetard(deadline) {
 if (!deadline) return null;
 const d = new Date(`${deadline}T00:00:00`);
@@ -14,20 +9,12 @@ today.setHours(0, 0, 0, 0);
 return Math.round((today - d) / 86400000);
 }
 
-// Un statut d'échéance "compte comme réglée" quand la case cochée en
-// Paramètres (compte_regle) le dit — pas quand son libellé vaut "Soldée" en
-// dur, pour que l'équipe puisse renommer/dupliquer ce comportement sur un
-// autre statut sans toucher au code.
 function isStatusReglee(statusId) {
 if (statusId == null) return false;
 const s = db.prepare('SELECT compte_regle FROM finance_installment_statuses WHERE id=?').get(statusId);
 return !!(s && s.compte_regle);
 }
-// Chaîne de validation d'une facture : échéance 1 (= la deadline principale,
-// avec son propre statut deadline_status_id — même pastille que 2/3/4) puis
-// les échéances suivantes dans l'ordre de leur date. `installmentItems` peut
-// être des lignes SQL brutes (due_date/status_id) ou déjà mises en forme
-// (dueDate/statusId) — les deux formes sont acceptées.
+
 function buildEcheanceChain(invoiceRow, installmentItems) {
 const chain = [{
 num: 1,
@@ -43,11 +30,7 @@ statusId: inst.status_id !== undefined ? inst.status_id : inst.statusId,
 });
 return chain;
 }
-// Référence de retard : la 1ère échéance de la chaîne qui n'est PAS encore à
-// un statut "compte comme réglée" (dans l'ordre 1→2→3→4, jamais la plus
-// tardive parmi les non réglées) — c'est sa date qui sert au calcul de
-// "jours de retard". Si tout est réglé, allReglees=true (déclenche le passage
-// auto de la facture en "Soldée", cf. maybeAutoSolde).
+
 function computeEcheanceReference(chain) {
 for (const item of chain) {
 if (!isStatusReglee(item.statusId)) return { due: item.due, num: item.num, allReglees: false };
@@ -55,10 +38,7 @@ if (!isStatusReglee(item.statusId)) return { due: item.due, num: item.num, allRe
 const last = chain[chain.length - 1];
 return { due: last.due, num: last.num, allReglees: true };
 }
-// Si la chaîne d'échéances d'une facture est intégralement réglée, on la fait
-// basculer en statut "Soldée" — même esprit que le passage auto "à relancer"
-// -> "en cours" à la première relance : un signal automatique, mais qui ne
-// vient jamais écraser un litige ou une promesse de paiement posés à la main.
+
 function maybeAutoSolde(invoiceId) {
 const invoice = db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(invoiceId);
 if (!invoice) return;
@@ -80,45 +60,24 @@ res.status(500).json({ error: e.message });
 }
 });
 
-// Statuts Pennylane NATIFS (colonne `status`, le statut brut renvoyé par
-// Pennylane — à ne pas confondre avec `internal_status`, notre propre suivi
-// de recouvrement) qui ne représentent pas une facture à recouvrer : un
-// brouillon n'a pas été envoyé, un avoir/une annulation n'est pas une dette.
-// On les synchronise quand même (voir pennylane.js) pour pouvoir en afficher
-// le compte — cf. /api/finance/kpis, syncOverview — mais ils ne doivent
-// jamais apparaître dans la liste de travail ni fausser les KPI d'encours.
-// `paid` en fait partie aussi : certaines factures encaissées gardent un
-// remaining_amount non nul côté Pennylane (le champ ne retombe pas toujours
-// à 0 à l'encaissement) — sans cette exclusion, elles pouvaient être comptées
-// comme de l'encours en retard alors qu'elles sont soldées (bug remonté :
-// onglet "Encaissée" affichant des factures "Xj de retard").
 const PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete', 'paid'];
 const HORS_RECOUVREMENT_PLACEHOLDERS = PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',');
 
-// Filtre de performance (09/2026, demande Lina) : on ne charge plus au
-// quotidien les factures ÉMISES avant le 01/01/2025 — la base continue de
-// TOUT stocker/synchroniser (voir pennylane.js, syncFinance, volontairement
-// SANS filtre de date, cf. commentaire dans ce fichier), seule cette route
-// d'AFFICHAGE réduit le volume renvoyé au front. Effet accepté par Lina :
-// une très vieille facture encore due aujourd'hui sort de cette vue
-// quotidienne (donc aussi des compteurs d'onglets, qui ne collent plus à
-// 100% avec Pennylane dans ce cas rare) — voir le prompt de dev, point 6.
 function shapeInvoiceRow(r, installments) {
-  // Référence de retard : la 1ère échéance (1, puis 2/3/4...) pas encore à
-  // un statut "compte comme réglée"
   const echRef = computeEcheanceReference(buildEcheanceChain(r, installments));
   
-  // Gestion intelligente Nom / Prénom (import direct Pennylane ou split du contact)
-  let firstName = r.customer_first_name || '';
-  let lastName = r.customer_last_name || '';
+  // Extraction sécurisée Prénom / Nom depuis contact_name ou customer_name sans toucher au SQL
+  let firstName = '';
+  let lastName = '';
+  const rawContact = String(r.contact_name || '').trim();
   
-  if (!firstName && !lastName && r.contact_name) {
-    const parts = String(r.contact_name).trim().split(' ');
+  if (rawContact) {
+    const parts = rawContact.split(' ');
     firstName = parts[0] || '';
     lastName = parts.slice(1).join(' ') || '';
   }
   
-  const fullName = [firstName, lastName].filter(Boolean).join(' ') || r.customer_name || 'Client inconnu';
+  const fullName = rawContact || r.customer_name || 'Client inconnu';
 
   return {
     id: r.id,
@@ -136,7 +95,6 @@ function shapeInvoiceRow(r, installments) {
     dateEmission: r.date_emission,
     deadline: r.deadline,
     deadlineManual: !!r.deadline_manual,
-    // Statut de l'échéance 1, même pastille personnalisable que 2/3/4.
     deadlineStatusId: r.deadline_status_id,
     deadlineStatusLabel: r.deadline_status_label || null,
     deadlineStatusColor: r.deadline_status_color || null,
@@ -144,7 +102,6 @@ function shapeInvoiceRow(r, installments) {
     amountTtc: r.amount,
     remainingAmountHt: r.remaining_amount_ht,
     remainingAmountTtc: r.remaining_amount,
-    // Alias conservés pour compat avec un ancien code éventuel côté front.
     amount: r.amount,
     remainingAmount: r.remaining_amount,
     status: r.status,
@@ -163,12 +120,10 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     SELECT i.*, 
       c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
       c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone,
-      c.first_name AS customer_first_name, c.last_name AS customer_last_name,
       lr.last_relance_at AS last_relance_at,
       ds.label AS deadline_status_label, ds.color AS deadline_status_color
     FROM pennylane_invoices i
     LEFT JOIN pennylane_customers c ON c.id = i.customer_id
-    -- Dernière relance par facture (toutes canaux confondus)
     LEFT JOIN (
       SELECT invoice_id, MAX(created_at) AS last_relance_at
       FROM finance_relances
@@ -178,7 +133,7 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     WHERE i.date_emission >= '2025-01-01'
   `).all();
 
-  // --- DÉDOUBLONNAGE STRICT : une seule facture par numéro (élimine les vrais doublons SQL) ---
+  // Dédoublonnage strict par numéro de facture
   const uniqueInvoices = new Map();
   for (const r of rows) {
     const invNum = String(r.invoice_number || r.id || '').trim();
@@ -187,9 +142,7 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
     }
   }
   const deduplicatedRows = Array.from(uniqueInvoices.values());
-  // ---------------------------------------------------------------------------------------------
 
-  // Échéances de paiement (2e/3e/4e tranche...) de TOUTES les factures
   const instRows = db.prepare(`
     SELECT fi.*, s.label AS status_label, s.color AS status_color
     FROM finance_invoice_installments fi
@@ -230,13 +183,11 @@ app.get('/api/finance/invoices', requireFinance, (req, res) => {
   res.json(list);
 });
 
-// Une seule facture, déjà mise en forme comme dans la liste ci-dessus
 app.get('/api/finance/invoices/:id', requireFinance, (req, res) => {
   const r = db.prepare(`
     SELECT i.*, 
       c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
       c.contact_name AS contact_name, c.contact_email AS contact_email, c.contact_phone AS contact_phone,
-      c.first_name AS customer_first_name, c.last_name AS customer_last_name,
       lr.last_relance_at AS last_relance_at,
       ds.label AS deadline_status_label, ds.color AS deadline_status_color
     FROM pennylane_invoices i
@@ -274,13 +225,9 @@ app.get('/api/finance/invoices/:id', requireFinance, (req, res) => {
   res.json(shapeInvoiceRow(r, installments));
 });
 
-// KPI de recouvrement : encours total, montant/nombre en retard, taux de
-// retard, aging (répartition de l'encours par tranche de retard) et DSO
 const FINANCE_STATUTS_NON_ACTIONABLES = ['litige', 'promesse_paiement', 'solde', 'douteux'];
 
 app.get('/api/finance/kpis', requireFinance, (req, res) => {
-// Même borne que /api/finance/invoices (cf. plus haut) : les factures ÉMISES
-// avant le 01/01/2025 sortent aussi des KPI de recouvrement.
 const unpaid = db.prepare(`
 SELECT remaining_amount, deadline, internal_status FROM pennylane_invoices
 WHERE remaining_amount > 0 AND (status IS NULL OR status NOT IN (${HORS_RECOUVREMENT_PLACEHOLDERS}))
@@ -292,7 +239,7 @@ let nbEnRetard = 0;
 let montantActionable = 0;
 let nbActionable = 0;
 const aging = { j0_30: 0, j31_60: 0, j61_90: 0, j90_plus: 0 };
-const parStatut = {}; // vue "pipeline" : répartition de l'encours par statut interne, retard ou pas
+const parStatut = {};
 for (const inv of unpaid) {
 totalEncours += inv.remaining_amount;
 const statut = inv.internal_status || 'a_relancer';
@@ -321,7 +268,6 @@ const caPeriode = db.prepare('SELECT COALESCE(SUM(amount),0) AS total FROM penny
 .get(periodStart.toISOString().slice(0, 10)).total || 0;
 const dso = caPeriode > 0 ? Math.round((totalEncours / caPeriode) * PERIOD_DAYS) : null;
 const tauxDeRetard = totalEncours > 0 ? Math.round((montantEnRetard / totalEncours) * 1000) / 10 : 0;
-// Aperçu de synchro : répartition par statut BRUT Pennylane
 const statusCounts = db.prepare('SELECT status, COUNT(*) AS n FROM pennylane_invoices GROUP BY status').all();
 const syncOverview = { total: 0, byStatus: {} };
 for (const row of statusCounts) {
@@ -389,7 +335,6 @@ maybeAutoSolde(req.params.id);
 res.json(db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id));
 });
 
-// Lien PDF
 app.get('/api/finance/invoices/:id/pdf', requireFinance, async (req, res) => {
 try {
 const invoice = db.prepare('SELECT id FROM pennylane_invoices WHERE id=?').get(req.params.id);
@@ -401,7 +346,6 @@ res.status(500).json({ error: e.message });
 }
 });
 
-// TEMPORAIRE — diagnostic Nom/Prenom
 app.get('/api/finance/debug/pennylane-customer/:id', requireFinance, async (req, res) => {
 try {
 const raw = await pennylane.pennylaneFetch(`/customers/${encodeURIComponent(req.params.id)}`);
@@ -411,7 +355,6 @@ res.status(500).json({ error: e.message });
 }
 });
 
-// TEMPORAIRE (suite) — meme diagnostic
 app.get('/api/finance/debug/pennylane-customer/:id/contacts', requireFinance, async (req, res) => {
 try {
 const raw = await pennylane.pennylaneFetch(`/customers/${encodeURIComponent(req.params.id)}/contacts`);
@@ -421,7 +364,6 @@ res.status(500).json({ error: e.message });
 }
 });
 
-// Commentaires libres sur une facture
 app.get('/api/finance/invoices/:id/comments', requireFinance, (req, res) => {
 res.json(db.prepare('SELECT * FROM finance_invoice_comments WHERE invoice_id=? ORDER BY created_at DESC').all(req.params.id));
 });
@@ -455,7 +397,6 @@ db.prepare('DELETE FROM finance_invoice_comments WHERE id=?').run(existing.id);
 res.status(204).end();
 });
 
-// Échéances de paiement personnalisées
 function installmentWithStatus(id) {
 return db.prepare(`
 SELECT fi.*, s.label AS status_label, s.color AS status_color
@@ -553,7 +494,6 @@ maybeAutoSolde(req.params.id);
 res.status(204).end();
 });
 
-// ── Statuts d'échéance personnalisables (Paramètres > Recouvrement) ─────────
 app.get('/api/finance/installment-statuses', requireFinance, (req, res) => {
 res.json(db.prepare('SELECT * FROM finance_installment_statuses ORDER BY sort_order ASC, id ASC').all());
 });
