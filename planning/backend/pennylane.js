@@ -1,3 +1,4 @@
+// ── CONNECTEUR PENNYLANE (recouvrement) ──────────────────────────────────────
 const API_BASE = 'https://app.pennylane.com/api/external/v2';
 
 function apiToken() {
