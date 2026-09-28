@@ -3,7 +3,14 @@ const wordsKey = value => normalize(value).split(' ').filter(Boolean).sort().joi
 
 export function resolveSaleName(rawName, roster) {
   const norm = normalize(rawName);
-  if (!norm) return null;
+
+  // Redirection automatique des entrées sans nom ou "Inconnu" vers Quentin PUREN
+  if (!norm || norm === 'inconnu') {
+    const quentin = roster.find(s => normalize(s.display).includes('quentin puren'));
+    if (quentin) return quentin.display;
+    return null;
+  }
+
   const exact = roster.filter(s => wordsKey(s.display) === wordsKey(rawName));
   if (exact.length === 1) return exact[0].display;
   const candidates = roster.filter(s => [s.last, ...(s.aliases || [])].some(alias => {
