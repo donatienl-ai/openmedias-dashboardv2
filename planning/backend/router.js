@@ -9,9 +9,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const cronBdc = require('node-cron');
-const { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST } = require('./db');
+const zlib = require('zlib');
+const { db, SLOTS_PAR_MEDIA, FORMATS_PAR_MEDIA, MEDIAS, SOUS_MEDIAS_SPECIALISES, SOUS_MEDIAS_LIST, CHANNELS, SOCIAL_POST_STATUSES, FINANCE_INTERNAL_STATUSES } = require('./db');
 const { setupReports } = require('./reports');
 const salesforce = require('./salesforce');
+const pennylane = require('./pennylane');
 
 const app = express.Router();
 
@@ -36,13 +38,58 @@ const EMAIL_ADMIN = process.env.EMAIL_ADMIN || 'donatien.l@openmedias.fr';
 const { hashPassword, verifyCommercialLogin, getCommercialById } = require('./auth');
 const salesTeams = require('./teams');
 
+// ── UTILISATEURS ADMINS (Lina, Lola, Thomas) ─────────────────────────
+const ADMIN_USERS = ['lina', 'lola', 'thomas'];
+
+function isUserAdmin(user) {
+  if (!user) return false;
+  const nom = (user.nom || '').toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  return ADMIN_USERS.some(u => nom.includes(u) || email.includes(u));
+}
+
+// ── JOURS DE DIFFUSION AUTORISÉS : lundi, mercredi, vendredi ─────────────────
+const JOURS_DIFFUSION = new Set([1, 3, 5]); // getDay() : 1=lundi, 3=mercredi, 5=vendredi
+const NOMS_JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+
+function jourSemaine(dateStr) {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d).getDay();
+}
+
+function jourNonDiffusable(dateStr) {
+  const j = jourSemaine(dateStr);
+  if (j === null || JOURS_DIFFUSION.has(j)) return null;
+  return NOMS_JOURS[j];
+}
+
+try {
+  const fuyardes = db.prepare("SELECT id, date_diffusion FROM emissions WHERE statut NOT IN ('annule','a_programmer')").all()
+    .filter((e) => jourNonDiffusable(e.date_diffusion));
+  const upd = db.prepare("UPDATE emissions SET statut='a_programmer', notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=?");
+  for (const e of fuyardes) {
+    upd.run(`📌 Jour de diffusion impossible (${e.date_diffusion} tombe un ${jourNonDiffusable(e.date_diffusion)} — diffusions lun/mer/ven uniquement) — renvoyée automatiquement`, e.id);
+  }
+  if (fuyardes.length) console.log(`[PLANNING] ${fuyardes.length} diffusion(s) hors lun/mer/ven renvoyée(s) en "à programmer"`);
+} catch (e) { console.error('[PLANNING] balayage jours de diffusion KO :', e.message); }
+
 function getHorizonMois() {
   const row = db.prepare("SELECT value FROM config WHERE key='horizon_mois'").get();
   return row ? parseInt(row.value, 10) : 3;
 }
 
 function requireEdit(req, res, next) {
+  if (req.headers.role === 'edit' || (req.commercial && isUserAdmin(req.commercial))) {
+    req.headers.role = 'edit';
+    return next();
+  }
   if (req.headers.role !== 'edit') return res.status(403).json({ error: 'Accès refusé' });
+  next();
+}
+
+function requireContentTeam(req, res, next) {
+  if (req.headers.role !== 'edit' && req.headers.role !== 'com') return res.status(403).json({ error: 'Accès refusé' });
   next();
 }
 
@@ -52,8 +99,7 @@ function requireCommercial(req, res, next) {
   const user = getCommercialById(id);
   if (!user) return res.status(401).json({ error: 'Compte introuvable ou désactivé' });
   
-  // Accès complet garanti pour Lina
-  if ((user.nom && user.nom.toLowerCase().includes('lina')) || (user.email && user.email.toLowerCase().includes('lina'))) {
+  if (isUserAdmin(user)) {
     user.role = 'admin';
     user.is_admin = 1;
   }
@@ -62,24 +108,44 @@ function requireCommercial(req, res, next) {
   next();
 }
 
+function requireFinance(req, res, next) {
+  requireCommercial(req, res, () => {
+    if (req.commercial.role === 'finance' || req.commercial.role === 'admin' || isUserAdmin(req.commercial)) return next();
+    return res.status(403).json({ error: 'Accès refusé' });
+  });
+}
+
+// ── LIMITEUR DE FRÉQUENCE ──────────────────────────────────────────────────
+const rateLimitBuckets = new Map();
+function checkRateLimit(key, max, windowMs) {
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= max) return false;
+  bucket.count += 1;
+  return true;
+}
+
+function clientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
+
 // ── PONT COMPTES → RÔLE PIN (login unique) ────────────────────────────────────
-// Toutes les routes existantes vérifient `req.headers.role` (valeurs historiques
-// 'edit'/'com', posées par le PIN côté front). Plutôt que de retoucher chaque
-// route une par une, on fait en sorte qu'un compte commercial (x-commercial-id)
-// avec le bon rôle produise le MÊME header, de façon transparente — les PIN
-// continuent aussi de fonctionner en parallèle le temps de la bascule complète.
 app.use((req, res, next) => {
   if (req.headers.role !== 'edit' && req.headers.role !== 'com') {
     const id = req.headers['x-commercial-id'];
     if (id) {
       const user = getCommercialById(id);
       if (user) {
-        // Accès complet garanti pour Lina (Paramètres + Édition)
-        if ((user.nom && user.nom.toLowerCase().includes('lina')) || (user.email && user.email.toLowerCase().includes('lina'))) {
+        req.commercial = user;
+        if (isUserAdmin(user) || user.role === 'edito' || user.role === 'admin') {
           user.role = 'admin';
           user.is_admin = 1;
-          req.headers.role = 'edit';
-        } else if (user.role === 'edito' || user.role === 'admin') {
           req.headers.role = 'edit';
         } else if (user.role === 'communication') {
           req.headers.role = 'com';
@@ -106,10 +172,9 @@ app.post('/api/auth/commercial', (req, res) => {
   const user = verifyCommercialLogin(req.body.email, req.body.password || '');
   if (!user) return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
   
-  // Accès complet garanti pour Lina
-  const isLina = (user.nom && user.nom.toLowerCase().includes('lina')) || (user.email && user.email.toLowerCase().includes('lina'));
-  const effectiveRole = isLina ? 'admin' : (user.role || 'commercial');
-  const effectiveIsAdmin = isLina ? true : !!user.is_admin;
+  const isAdmin = isUserAdmin(user);
+  const effectiveRole = isAdmin ? 'admin' : (user.role || 'commercial');
+  const effectiveIsAdmin = isAdmin ? true : !!user.is_admin;
 
   res.json({ 
     role: 'sales', 
@@ -121,8 +186,6 @@ app.post('/api/auth/commercial', (req, res) => {
   });
 });
 
-// Définition du mot de passe par le commercial lui-même, via le lien reçu par email
-// à la création de son compte (ou après un renvoi d'invitation par l'édito).
 app.post('/api/auth/set-password', (req, res) => {
   const token = String(req.body.token || '').trim();
   const password = req.body.password || '';
@@ -134,29 +197,81 @@ app.post('/api/auth/set-password', (req, res) => {
   }
   db.prepare('UPDATE commercial_users SET password_hash=?, reset_token=NULL, reset_token_expires=NULL WHERE id=?')
     .run(hashPassword(password), user.id);
-
-  const isLina = (user.nom && user.nom.toLowerCase().includes('lina')) || (user.email && user.email.toLowerCase().includes('lina'));
-  res.json({ role: 'sales', accountRole: isLina ? 'admin' : (user.role || 'commercial'), commercial_id: user.id, nom: user.nom, email: user.email });
+  
+  const isAdmin = isUserAdmin(user);
+  res.json({ role: 'sales', accountRole: isAdmin ? 'admin' : (user.role || 'commercial'), commercial_id: user.id, nom: user.nom, email: user.email });
 });
 
-// Restaure une session déjà ouverte (SSO OpenDashboard ↔ OpenPlanning, ou retour
-// sur cette page) sans redemander les identifiants — le front appelle cette
-// route avec le x-commercial-id déjà connu (localStorage) au chargement.
+app.post('/api/auth/forgot-password', (req, res) => {
+  const email = String(req.body.email || '').toLowerCase().trim();
+  const genericMsg = 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.';
+  if (!email) return res.status(400).json({ error: 'Email requis' });
+  const FIFTEEN_MIN = 15 * 60 * 1000;
+  if (!checkRateLimit(`ip:${clientIp(req)}`, 5, FIFTEEN_MIN) || !checkRateLimit(`email:${email}`, 3, FIFTEEN_MIN)) {
+    return res.status(429).json({ error: 'Trop de tentatives. Réessaie dans quelques minutes.' });
+  }
+  const user = db.prepare('SELECT * FROM commercial_users WHERE lower(email)=? AND actif=1').get(email);
+  if (!user) return res.json({ success: true, message: genericMsg });
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  db.prepare('UPDATE commercial_users SET reset_token=?, reset_token_expires=? WHERE id=?').run(token, expires, user.id);
+  const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+  const lien = `${baseUrl}/planning/?invite=${token}`;
+  const prenom = user.nom.split(' ')[0];
+  const html = `
+  <div style="background:#f3f4f6;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+    <table role="presentation" style="max-width:480px;width:100%;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb">
+      <tr>
+        <td style="background:#2563EB;padding:28px 32px">
+          <div style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.3px">Planning <span style="font-weight:400;opacity:0.85">Diffusion</span></div>
+          <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#bfdbfe;font-weight:700;margin-top:4px">OpenMedias</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:32px 32px 8px;color:#111827">
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.6">Bonjour ${prenom},</p>
+          <p style="margin:0 0 24px;font-size:15px;line-height:1.6">
+            Une réinitialisation de mot de passe a été demandée pour ton compte OpenMedias.
+            Si ce n'est pas toi, tu peux ignorer cet email sans risque — ton mot de passe actuel reste valable.
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 32px 32px;text-align:center">
+          <a href="${lien}" style="display:inline-block;background:#2563EB;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:13px 28px;border-radius:9px">
+            Choisir un nouveau mot de passe
+          </a>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 32px 28px">
+          <div style="height:1px;background:#e5e7eb;margin-bottom:20px"></div>
+          <p style="margin:0;font-size:12px;line-height:1.6;color:#9ca3af">
+            Ce lien est valable 2 heures et ne peut être utilisé qu'une seule fois.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </div>`;
+  reports.sendMailOnly(`Réinitialisation de ton mot de passe OpenMedias`, html, [user.email])
+    .catch((e) => console.error('[FORGOT-PASSWORD] échec envoi email:', e.message));
+  res.json({ success: true, message: genericMsg });
+});
+
 app.get('/api/auth/me', requireCommercial, (req, res) => {
-  const isLina = (req.commercial.nom && req.commercial.nom.toLowerCase().includes('lina')) || (req.commercial.email && req.commercial.email.toLowerCase().includes('lina'));
+  const isAdmin = isUserAdmin(req.commercial);
   res.json({
     commercial_id: req.commercial.id,
     nom: req.commercial.nom,
     email: req.commercial.email,
-    accountRole: isLina ? 'admin' : (req.commercial.role || 'commercial'),
-    isAdmin: isLina ? true : !!req.commercial.is_admin,
+    accountRole: isAdmin ? 'admin' : (req.commercial.role || 'commercial'),
+    isAdmin: isAdmin ? true : !!req.commercial.is_admin,
     teamId: req.commercial.team_id || null,
   });
 });
 
 // ── WEBHOOK SALESFORCE ────────────────────────────────────────────────────────
 
-// Normalisation d'un nom de média : casse, accents, espaces, "&" / " ET " / "+" / "/"
 function normMedia(s) {
   return String(s || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -169,14 +284,11 @@ function normMedia(s) {
     .trim();
 }
 
-// Médias canoniques du planning, indexés par forme normalisée
 const MEDIA_CANON = {};
 for (const m of MEDIAS) MEDIA_CANON[normMedia(m)] = m;
 
-// Valeurs SF volontairement hors planning (comme dans le seed Excel) : aucune émission créée
 const MEDIA_IGNORES = new Set(['FORBES'].map(normMedia));
 
-// Alias picklist Salesforce → média planning.
 const MEDIA_ALIASES_RAW = {
   'TIME IMMERSION':                    { media: 'TIME', format: 'Immersion' },
   'TIME PRINT':                        { media: 'TIME', format: 'Article print' },
@@ -297,6 +409,7 @@ function insertEmission(payload, isBdc = false) {
   const raisons = [];
   if (resolu.park) raisons.push(`Média SF: "${media}"${resolu.raison ? ' — ' + resolu.raison : ''}`);
   if (dateManquante) raisons.push(sansDateExplicite ? 'Date de diffusion pas encore connue (case cochée côté Salesforce)' : 'Date de diffusion manquante côté Salesforce');
+  if (!dateManquante && jourNonDiffusable(dateEff)) raisons.push(`Date de diffusion un ${jourNonDiffusable(dateEff)} (diffusions lun/mer/ven uniquement)`);
   if (!formatFinal) raisons.push('Format manquant côté Salesforce');
   if (raisons.length) {
     statut = 'a_programmer';
@@ -578,6 +691,31 @@ app.get('/api/bdc/template-defaults', requireCommercial, (req, res) => {
   res.json({ descriptionItems: cfg.descriptionItems });
 });
 
+const BDC_TEMPLATE_META = {
+  'figaro-48h-hp': { label: 'Le Figaro — 48H Home Page', group: 'Le Figaro', lang: 'fr' },
+  'bfm-business-vision': { label: 'BFM Business — Vision d’Entreprises', group: 'BFM', lang: 'fr' },
+  'capital-emission': { label: 'Capital — L’Émission', group: 'Capital', lang: 'fr' },
+};
+const BDC_GROUP_ORDER = ['BFM', 'Le Figaro', 'Capital', 'Challenges', 'TIME', 'Médias spécialisés'];
+
+app.get('/api/bdc/templates', requireCommercial, (req, res) => {
+  const list = Object.entries(BDC_TEMPLATES).map(([key, cfg]) => {
+    const meta = BDC_TEMPLATE_META[key] || {};
+    return {
+      key,
+      label: meta.label || cfg.label || key,
+      group: meta.group || cfg.group || 'Médias spécialisés',
+      lang: meta.lang || cfg.lang || 'fr',
+    };
+  });
+  list.sort((a, b) => {
+    const ga = BDC_GROUP_ORDER.indexOf(a.group), gb = BDC_GROUP_ORDER.indexOf(b.group);
+    if (ga !== gb) return (ga === -1 ? 99 : ga) - (gb === -1 ? 99 : gb);
+    return a.label.localeCompare(b.label, 'fr');
+  });
+  res.json(list);
+});
+
 app.get('/api/bdc/preview', requireCommercial, async (req, res) => {
   try {
     const templateKey = req.query.templateKey || 'figaro-48h-hp';
@@ -601,6 +739,161 @@ app.post('/api/bdc/generate', requireCommercial, async (req, res) => {
     console.error('[BDC-GENERATE]', e);
     res.status(500).json({ error: String(e.message || e) });
   }
+});
+
+// ── BDC — ENVOI POUR SIGNATURE VIA DOCUSIGN ───────────────────────────────────
+const docusignSend = require('./docusignSend');
+
+const DS_STATUT_MAP = { sent: 'envoye', delivered: 'envoye', completed: 'signe', declined: 'refuse', voided: 'annule' };
+
+const BDC_TEMPLATE_MEDIA = {
+  'figaro-48h-hp': { media: 'Le Figaro HP + HP Eco', sousMedia: null },
+  'bfm-business-vision': { media: 'BFM Business 1&2', sousMedia: null },
+  'capital-emission': { media: 'Capital', sousMedia: null },
+};
+for (const [key, cfg] of Object.entries(BDC_TEMPLATES)) {
+  if (BDC_TEMPLATE_MEDIA[key] || cfg.planningMedia === undefined) continue;
+  if (cfg.planningMedia) BDC_TEMPLATE_MEDIA[key] = { media: cfg.planningMedia, sousMedia: cfg.planningSousMedia || null };
+}
+
+function upsertEmissionPourBdcEnvoye({ entreprise, templateKey, dateDiffusion, montantHT, commercial }) {
+  const mapping = BDC_TEMPLATE_MEDIA[templateKey] || null;
+  if (!mapping) return { id: null, statut: null, cree: false };
+  const media = mapping.media;
+  const sousMedia = mapping.sousMedia || null;
+
+  const entNorm = entreprise.toLowerCase().trim();
+  const dateValide = /^\d{4}-\d{2}-\d{2}$/.test(dateDiffusion || '') && !jourNonDiffusable(dateDiffusion)
+    ? dateDiffusion : null;
+
+  const existante = dateValide
+    ? db.prepare(`SELECT id FROM emissions WHERE statut='bdc_attente' AND LOWER(TRIM(entreprise))=? AND media=? AND commercial=? AND date_diffusion=?`)
+        .get(entNorm, media, commercial.nom, dateValide)
+    : db.prepare(`SELECT id FROM emissions WHERE statut='a_programmer' AND LOWER(TRIM(entreprise))=? AND media=? AND commercial=? AND notes LIKE '📌 BDC envoyé via DocuSign%'`)
+        .get(entNorm, media, commercial.nom);
+  if (existante) return { id: existante.id, statut: dateValide ? 'bdc_attente' : 'a_programmer', cree: false };
+
+  const equipe = commercial.equipe_edito_id
+    ? db.prepare('SELECT nom FROM equipes_edito WHERE id=?').get(commercial.equipe_edito_id)
+    : null;
+  const statutEm = dateValide ? 'bdc_attente' : 'a_programmer';
+  const dateBdd = dateValide || new Date().toISOString().slice(0, 10);
+  const note = dateValide ? null
+    : '📌 BDC envoyé via DocuSign — date de diffusion à caler (période libre ou jour non diffusable)';
+
+  const r = db.prepare(`
+    INSERT INTO emissions (entreprise,media,sous_media,date_diffusion,date_diffusion_originale,commercial,resp_edit,statut,montant,notes)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(entreprise, media, sousMedia, dateBdd, dateBdd, commercial.nom, equipe ? equipe.nom : null,
+         statutEm, Number(montantHT || 0), note);
+  console.log(`[BDC-DOCUSIGN] créneau planning ${statutEm} id=${r.lastInsertRowid} — ${entreprise} / ${media} / ${dateValide || 'sans date'}`);
+  return { id: r.lastInsertRowid, statut: statutEm, cree: true };
+}
+
+app.post('/api/bdc/docusign/send', requireCommercial, async (req, res) => {
+  try {
+    const signerEmail = String(req.body.signerEmail || '').trim();
+    const signerName = String(req.body.signerName || req.body.contact || '').trim();
+    if (!signerEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(signerEmail)) {
+      return res.status(400).json({ error: 'Email du signataire manquant ou invalide' });
+    }
+    if (!signerName) return res.status(400).json({ error: 'Nom du signataire manquant (champ Contact)' });
+    if (!String(req.body.entreprise || '').trim()) return res.status(400).json({ error: 'Entreprise manquante' });
+
+    let senderUserId = req.commercial.docusign_user_id;
+    if (!senderUserId) {
+      try {
+        senderUserId = await docusignSend.resolveDocuSignUserId(req.commercial.email);
+        if (senderUserId) {
+          db.prepare('UPDATE commercial_users SET docusign_user_id=? WHERE id=?').run(senderUserId, req.commercial.id);
+        }
+      } catch (e) {
+        console.warn('[BDC-DOCUSIGN] résolution userId:', e.message);
+      }
+      if (!senderUserId) {
+        return res.status(400).json({
+          error: `Aucun compte DocuSign actif trouvé pour ${req.commercial.email}. Demande à Donatien de vérifier que tu as un accès DocuSign avec cet email.`,
+        });
+      }
+    }
+
+    const templateKey = req.body.templateKey || 'figaro-48h-hp';
+    const pdf = await renderBdcPdf(templateKey, bdcFieldsFromInput(req.body));
+    const { envelopeId, status } = await docusignSend.sendBdcEnvelope({
+      pdfBuffer: pdf,
+      entreprise: String(req.body.entreprise || '').trim(),
+      signerName,
+      signerEmail,
+      message: String(req.body.signerMessage || '').trim() || undefined,
+      senderUserId,
+    });
+
+    let emission = { id: null, statut: null, cree: false };
+    try {
+      emission = upsertEmissionPourBdcEnvoye({
+        entreprise: String(req.body.entreprise || '').trim(),
+        templateKey,
+        dateDiffusion: String(req.body.dateDiffusion || ''),
+        montantHT: req.body.montantHT,
+        commercial: req.commercial,
+      });
+    } catch (e) {
+      console.warn('[BDC-DOCUSIGN] créneau planning non créé:', e.message);
+    }
+
+    db.prepare(`INSERT INTO bdc_envois (envelope_id, entreprise, contact, email, template, montant_ht, statut, docusign_status, commercial, sender_ds_user_id, emission_id, date_diffusion)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(envelopeId, String(req.body.entreprise || '').trim(), signerName, signerEmail,
+           templateKey, Number(req.body.montantHT || 0), 'envoye', status || 'sent', req.commercial.nom, senderUserId, emission.id,
+           String(req.body.dateDiffusion || '').trim() || null);
+    console.log(`[BDC-DOCUSIGN] enveloppe ${envelopeId} envoyée par ${req.commercial.nom} (depuis son compte) — ${req.body.entreprise} → ${signerEmail}`);
+    res.json({ ok: true, envelopeId, emission });
+  } catch (e) {
+    if (e.code === 'CONSENT_REQUIRED') {
+      return res.status(428).json({ error: 'consent_required', consentUrl: e.consentUrl });
+    }
+    console.error('[BDC-DOCUSIGN]', e);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
+app.get('/api/bdc/docusign/envois', requireCommercial, async (req, res) => {
+  const isPriv = req.headers.role === 'edit' || req.commercial.role === 'admin' || isUserAdmin(req.commercial);
+  const rows = isPriv
+    ? db.prepare('SELECT * FROM bdc_envois ORDER BY created_at DESC LIMIT 100').all()
+    : db.prepare('SELECT * FROM bdc_envois WHERE commercial=? ORDER BY created_at DESC LIMIT 100').all(req.commercial.nom);
+
+  const upd = db.prepare("UPDATE bdc_envois SET statut=?, docusign_status=?, updated_at=datetime('now') WHERE id=?");
+  let refreshed = 0;
+
+  const updEmission = db.prepare('UPDATE bdc_envois SET emission_id=? WHERE id=?');
+  for (const r of rows) {
+    if (r.emission_id || !r.template || !r.entreprise) continue;
+    try {
+      const compte = db.prepare('SELECT * FROM commercial_users WHERE nom=?').get(r.commercial) || { nom: r.commercial };
+      const em = upsertEmissionPourBdcEnvoye({
+        entreprise: r.entreprise, templateKey: r.template,
+        dateDiffusion: r.date_diffusion || '', montantHT: r.montant_ht, commercial: compte,
+      });
+      if (em.id) updEmission.run(em.id, r.id);
+    } catch (e) {
+      console.warn(`[BDC-DOCUSIGN] réparation créneau envoi ${r.id}: ${e.message}`);
+    }
+  }
+
+  for (const r of rows) {
+    if (r.statut !== 'envoye' || refreshed >= 10) continue;
+    try {
+      const { status } = await docusignSend.getEnvelopeStatus(r.envelope_id, r.sender_ds_user_id || undefined);
+      const mapped = DS_STATUT_MAP[status] || r.statut;
+      if (mapped !== r.statut || status !== r.docusign_status) upd.run(mapped, status, r.id);
+      r.statut = mapped; r.docusign_status = status;
+      refreshed++;
+    } catch (e) {
+      console.warn(`[BDC-DOCUSIGN] refresh enveloppe ${r.envelope_id}: ${e.message}`);
+    }
+  }
+  res.json(rows);
 });
 
 // ── EMISSIONS - LECTURE ───────────────────────────────────────────────────────
@@ -700,6 +993,15 @@ app.patch('/api/emissions/:id', (req, res) => {
   const newDate = date_diffusion || e.date_diffusion;
   const newMedia = media || e.media;
 
+  let forceAProgrammer = false;
+  if (date_diffusion && date_diffusion !== e.date_diffusion) {
+    const jourKO = jourNonDiffusable(date_diffusion);
+    if (jourKO) {
+      alertes.push(`📌 Un ${jourKO} n'est pas un jour de diffusion (lun/mer/ven uniquement) — la diffusion a été renvoyée vers « À programmer »`);
+      forceAProgrammer = true;
+    }
+  }
+
   const clearSousMedia = media && newMedia !== 'Médias spécialisés';
   let touchSousMedia = 0, sousMediaVal = null;
   if (clearSousMedia) {
@@ -733,9 +1035,9 @@ app.patch('/api/emissions/:id', (req, res) => {
     entreprise=COALESCE(?,entreprise), commercial=COALESCE(?,commercial),
     sous_media=CASE WHEN ?=1 THEN ? ELSE sous_media END,
     updated_at=datetime('now') WHERE id=?
-  `).run(date_diffusion||null, resp_edit||null, notes||null,
+  `).run(forceAProgrammer ? null : (date_diffusion||null), resp_edit||null, notes||null,
     homepage!==undefined?(homepage?1:0):null, homepage_eco!==undefined?(homepage_eco?1:0):null,
-    statut||null, secteur||null, format||null, montant!==undefined?montant:null, upsell!==undefined?upsell:null, media||null,
+    forceAProgrammer ? 'a_programmer' : (statut||null), secteur||null, format||null, montant!==undefined?montant:null, upsell!==undefined?upsell:null, media||null,
     entreprise||null, commercial||null, touchSousMedia, sousMediaVal, id);
 
   res.json({ success: true, alertes });
@@ -826,7 +1128,108 @@ app.get('/api/reporting/semaine', (req, res) => {
 });
 
 // ── META ──────────────────────────────────────────────────────────────────────
-app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMois(), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST }));
+app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMois(), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST, channels: CHANNELS, socialPostStatuses: SOCIAL_POST_STATUSES, financeInternalStatuses: FINANCE_INTERNAL_STATUSES }));
+
+// ── RÉTROPLANNING COMMUNICATION ─────────────────────────────────────────────
+app.get('/api/social-posts', (req, res) => {
+  res.json(db.prepare('SELECT * FROM social_posts ORDER BY scheduled_date ASC').all());
+});
+
+function parseChannels(input) {
+  const arr = Array.isArray(input) ? input : String(input || '').split(',');
+  return [...new Set(arr.map((c) => String(c).trim()).filter((c) => CHANNELS.includes(c)))];
+}
+
+app.post('/api/social-posts', requireContentTeam, (req, res) => {
+  const channels = parseChannels(req.body.channel);
+  const title = String(req.body.title || '').trim();
+  const scheduledDate = String(req.body.scheduledDate || '').trim();
+  const notes = req.body.notes ? String(req.body.notes).trim() : null;
+  const assignedTo = req.body.assignedTo ? String(req.body.assignedTo).trim() : null;
+  const driveLink = req.body.driveLink ? String(req.body.driveLink).trim() : null;
+  const imageData = req.body.imageData ? String(req.body.imageData) : null;
+  const status = SOCIAL_POST_STATUSES.includes(req.body.status) ? req.body.status : 'a_faire';
+  if (!channels.length) return res.status(400).json({ error: 'Sélectionne au moins un canal' });
+  if (!title) return res.status(400).json({ error: 'Titre requis' });
+  if (!scheduledDate) return res.status(400).json({ error: 'Date requise' });
+  const r = db.prepare(
+    'INSERT INTO social_posts (channel, title, notes, scheduled_date, status, assigned_to, drive_link, image_data) VALUES (?,?,?,?,?,?,?,?)'
+  ).run(channels.join(','), title, notes, scheduledDate, status, assignedTo, driveLink, imageData);
+  res.status(201).json(db.prepare('SELECT * FROM social_posts WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.patch('/api/social-posts/:id', requireContentTeam, (req, res) => {
+  const post = db.prepare('SELECT * FROM social_posts WHERE id=?').get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post introuvable' });
+  const channels = req.body.channel !== undefined ? parseChannels(req.body.channel) : parseChannels(post.channel);
+  const status = req.body.status !== undefined ? req.body.status : post.status;
+  if (!channels.length) return res.status(400).json({ error: 'Sélectionne au moins un canal' });
+  if (!SOCIAL_POST_STATUSES.includes(status)) return res.status(400).json({ error: 'Statut invalide' });
+  db.prepare(`
+    UPDATE social_posts SET
+      channel=?, title=COALESCE(?,title), notes=?, scheduled_date=COALESCE(?,scheduled_date),
+      status=?, assigned_to=?, drive_link=?, image_data=?, updated_at=datetime('now')
+    WHERE id=?
+  `).run(
+    channels.join(','),
+    req.body.title !== undefined ? String(req.body.title).trim() : null,
+    req.body.notes !== undefined ? String(req.body.notes).trim() : post.notes,
+    req.body.scheduledDate !== undefined ? String(req.body.scheduledDate).trim() : null,
+    status,
+    req.body.assignedTo !== undefined ? String(req.body.assignedTo).trim() : post.assigned_to,
+    req.body.driveLink !== undefined ? String(req.body.driveLink).trim() : post.drive_link,
+    req.body.imageData !== undefined ? (req.body.imageData ? String(req.body.imageData) : null) : post.image_data,
+    req.params.id
+  );
+  res.json(db.prepare('SELECT * FROM social_posts WHERE id=?').get(req.params.id));
+});
+
+app.delete('/api/social-posts/:id', requireContentTeam, (req, res) => {
+  db.prepare('DELETE FROM social_posts WHERE id=?').run(req.params.id);
+  res.json({ success: true });
+});
+
+// ── BOÎTE À IDÉES ────────────────────────────────────────────────────────────
+app.get('/api/social-ideas', (req, res) => {
+  res.json(db.prepare('SELECT * FROM social_ideas ORDER BY created_at DESC').all());
+});
+
+app.post('/api/social-ideas', requireContentTeam, (req, res) => {
+  const title = String(req.body.title || '').trim();
+  if (!title) return res.status(400).json({ error: 'Titre requis' });
+  const channels = parseChannels(req.body.channel);
+  const notes = req.body.notes ? String(req.body.notes).trim() : null;
+  const r = db.prepare(
+    'INSERT INTO social_ideas (title, channel, notes) VALUES (?,?,?)'
+  ).run(title, channels.join(',') || null, notes);
+  res.status(201).json(db.prepare('SELECT * FROM social_ideas WHERE id=?').get(r.lastInsertRowid));
+});
+
+app.patch('/api/social-ideas/:id', requireContentTeam, (req, res) => {
+  const existing = db.prepare('SELECT * FROM social_ideas WHERE id=?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Idée introuvable' });
+  const title = req.body.title !== undefined ? String(req.body.title).trim() : existing.title;
+  if (!title) return res.status(400).json({ error: 'Titre requis' });
+  const channels = req.body.channel !== undefined ? parseChannels(req.body.channel) : null;
+  const channel = channels !== null ? (channels.join(',') || null) : existing.channel;
+  const notes = req.body.notes !== undefined ? (String(req.body.notes).trim() || null) : existing.notes;
+  db.prepare('UPDATE social_ideas SET title=?, channel=?, notes=? WHERE id=?').run(title, channel, notes, req.params.id);
+  res.json(db.prepare('SELECT * FROM social_ideas WHERE id=?').get(req.params.id));
+});
+
+app.delete('/api/social-ideas/:id', requireContentTeam, (req, res) => {
+  db.prepare('DELETE FROM social_ideas WHERE id=?').run(req.params.id);
+  res.json({ success: true });
+});
+
+app.get('/api/social-team', requireContentTeam, (req, res) => {
+  res.json(db.prepare(
+    "SELECT id, nom FROM commercial_users WHERE role='communication' AND actif=1 ORDER BY nom ASC"
+  ).all());
+});
+
+// ── RECOUVREMENT / PENNYLANE ────────────────────────────────────────────────
+require('./financeRoutes')(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES });
 
 // ── SEED ──────────────────────────────────────────────────────────────────────
 const seedFile = path.join(__dirname, 'seed_excel.sql');
@@ -881,7 +1284,7 @@ app.delete('/api/admin/equipes/:id', requireEdit, (req, res) => {
   res.json({ success: true });
 });
 
-// ── ADMIN - SALESFORCE ────────────────────────────────────────────────────────
+// ── ADMIN - SALESFORCE : liste des commerciaux à rattacher ────────────────────
 app.get('/api/admin/salesforce-commerciaux', requireEdit, async (req, res) => {
   try {
     const commerciaux = await salesforce.getCommerciaux();
@@ -893,7 +1296,7 @@ app.get('/api/admin/salesforce-commerciaux', requireEdit, async (req, res) => {
 });
 
 // ── ADMIN - COMPTES COMMERCIAUX ───────────────────────────────────────────────
-const VALID_ROLES = ['commercial', 'manager', 'edito', 'communication', 'admin'];
+const VALID_ROLES = ['commercial', 'manager', 'edito', 'communication', 'finance', 'admin'];
 
 app.get('/api/admin/commerciaux', requireEdit, (req, res) => {
   res.json(db.prepare(`
@@ -1044,20 +1447,58 @@ app.delete('/api/admin/commerciaux/:id', requireEdit, (req, res) => {
 // ── REPORTING AUTOMATIQUE ───────────────────────────────────────────────────
 const reports = setupReports(db);
 
+// ── SYNCHRONISATION PENNYLANE AUTOMATIQUE (recouvrement) ───────────────────
+if (!process.env.PENNYLANE_API_TOKEN) {
+  console.warn('⚠️ PENNYLANE_API_TOKEN absent — check rapide et synchro complète automatique de recouvrement désactivés (le bouton manuel restera aussi en erreur tant que la variable n\'est pas configurée)');
+} else {
+  let pennylaneChangesRunning = false;
+  setInterval(() => {
+    if (pennylaneChangesRunning) return;
+    pennylaneChangesRunning = true;
+    pennylane.syncInvoiceChanges(db)
+      .catch((e) => console.error('[PENNYLANE][CHANGES] tick en échec :', e.message))
+      .finally(() => { pennylaneChangesRunning = false; });
+  }, 20 * 1000);
+
+  cronBdc.schedule('0 3 * * 0', async () => {
+    const row = db.prepare("SELECT value FROM config WHERE key='pennylane_last_full_sync_at'").get();
+    const lastAt = row ? new Date(row.value) : null;
+    const daysSince = lastAt && !Number.isNaN(lastAt.getTime()) ? (Date.now() - lastAt.getTime()) / 86400000 : Infinity;
+    if (daysSince < 13) {
+      console.log(`[PENNYLANE][SYNC COMPLET AUTO] sautée — dernière synchro complète il y a ${daysSince.toFixed(1)} j (<13)`);
+      return;
+    }
+    try {
+      const result = await pennylane.syncFinance(db);
+      console.log(`[PENNYLANE][SYNC COMPLET AUTO] OK — ${result.invoicesSynced} facture(s), ${result.customersSynced} client(s)`);
+    } catch (e) {
+      console.error('[PENNYLANE][SYNC COMPLET AUTO] échec :', e.message);
+      reports.sendMailOnly(
+        '⚠️ Échec de la synchro Pennylane automatique',
+        `<p>La synchro complète automatique de recouvrement (dimanche) a échoué :</p><pre>${e.message}</pre><p>Le bouton manuel "Synchroniser Pennylane" reste disponible en attendant. Elle sera retentée automatiquement dimanche prochain. Si ça se reproduit plusieurs dimanches de suite, le check rapide risque d'approcher la limite des 4 semaines d'historique côté Pennylane.</p>`,
+        ['lina.e@openmedias.fr']
+      );
+    }
+  }, { timezone: 'Europe/Paris' });
+
+  console.log('🔄 Synchro Pennylane automatique configurée (check ~20s + synchro complète dimanche si >13j)');
+}
+
 app.post('/api/admin/test-report', (req, res) => {
   const secret = req.headers['x-sf-secret'];
   const isEditRole = req.headers.role === 'edit';
   if (secret !== SF_WEBHOOK_SECRET && !isEditRole) return res.status(403).json({ error: 'Unauthorized' });
   const type = req.body.type;
   const map = {
-    mensuel: reports.reportMensuel,
-    hebdo: reports.reportHebdo,
-    apercu: reports.reportApercuMoisSuivant,
-    kickoff: reports.reportKickoffLundi,
-    aprogrammer: reports.reportAProgrammerLundi,
-    clevel: reports.reportAProgrammerClevel
+    mensuel: () => reports.reportMensuel({ force: true }),
+    hebdo: () => reports.reportHebdo({ force: true }),
+    apercu: () => reports.reportApercuMoisSuivant({ force: true }),
+    kickoff: () => reports.reportKickoffLundi({ force: true }),
+    aprogrammer: () => reports.reportAProgrammerLundi({ force: true }),
+    clevel: () => reports.reportAProgrammerClevel({ force: true }),
+    relances: () => reports.reportRelancesQuotidien({ force: true })
   };
-  if (!map[type]) return res.status(400).json({ error: 'type invalide (mensuel|hebdo|apercu|kickoff|aprogrammer|clevel)' });
+  if (!map[type]) return res.status(400).json({ error: 'type invalide (mensuel|hebdo|apercu|kickoff|aprogrammer|clevel|relances)' });
   map[type]();
   res.json({ success: true, message: `Rapport "${type}" déclenché, vérifie ta boîte mail` });
 });
@@ -1089,19 +1530,74 @@ function checkBdcEnRetard() {
 
     const html = `<h2>⏰ BDC en attente depuis ${jours} jours ouvrés</h2>
       <p><b>${e.entreprise}</b> — ${e.media} — bloqué par <b>${e.commercial || 'commercial inconnu'}</b>${e.date_diffusion ? ' pour le ' + e.date_diffusion : ''}.</p>
-      <p>Merci de finaliser le BDC (signature) ou de libérer le créneau si l'opération ne se fait plus.</p>`;
+      <p>Merci de finaliser le BDC (signature) ou de libérer le créneau si l'opération ne se fait plus.</p>
+      <p style="color:#aaa;font-size:10px;margin-top:16px">instance ${require('os').hostname()} · service ${process.env.RENDER_SERVICE_NAME || 'local'} · pid ${process.pid} · rev ${(process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || 'dev'}</p>`;
     const dest = [EMAIL_ADMIN, ...extra];
     reports.sendMailOnly(`⏰ BDC en attente — ${e.entreprise} (${jours}j ouvrés)`, html, dest);
     console.log(`[BDC-ALERTE] id=${e.id} "${e.entreprise}" — ${jours}j ouvrés — mail envoyé à ${dest.filter(Boolean).join(',')}`);
   }
 }
 
-cronBdc.schedule('0 9 * * 1-5', checkBdcEnRetard, { timezone: 'Europe/Paris' });
+if (process.env.BDC_ALERTES_MAIL === '1') {
+  cronBdc.schedule('0 9 * * 1-5', checkBdcEnRetard, { timezone: 'Europe/Paris' });
+  console.log('📧 Alertes BDC en attente ACTIVÉES (BDC_ALERTES_MAIL=1, lun-ven 9h)');
+} else {
+  console.log('⏸️  Alertes BDC en attente EN PAUSE (mettre BDC_ALERTES_MAIL=1 pour réactiver)');
+}
 
 app.post('/api/admin/test-bdc-alerte', requireEdit, (req, res) => {
   checkBdcEnRetard();
   res.json({ success: true, message: 'Vérification BDC lancée, vérifie les logs et boîtes mail' });
 });
 
+// ── SAUVEGARDE AUTOMATIQUE DE LA BASE ───────────────────────────────────────
+const BACKUP_DIR = path.join(path.dirname(db.name), 'backups');
+
+function backupPlanningDb() {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  const jour = new Date().toISOString().slice(0, 10);
+  const dest = path.join(BACKUP_DIR, `planning-${jour}.db.gz`);
+  const gz = zlib.gzipSync(db.serialize());
+  fs.writeFileSync(dest, gz);
+  const limite = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  for (const f of fs.readdirSync(BACKUP_DIR)) {
+    const m = /^planning-(\d{4}-\d{2}-\d{2})\.db\.gz$/.exec(f);
+    if (m && m[1] < limite) fs.unlinkSync(path.join(BACKUP_DIR, f));
+  }
+  console.log(`[BACKUP] ${dest} écrit (${(gz.length / 1024).toFixed(0)} Ko)`);
+  return { dest, size: gz.length, jour };
+}
+
+cronBdc.schedule('17 6 * * *', async () => {
+  try {
+    const b = backupPlanningDb();
+    if (new Date().getDay() === 1 && EMAIL_ADMIN) {
+      if (b.size > 10 * 1024 * 1024) {
+        console.warn(`[BACKUP] ${(b.size / 1048576).toFixed(1)} Mo — trop gros pour l'email, snapshot local conservé`);
+      } else {
+        await reports.sendMailOnly(
+          `💾 Backup planning — semaine du ${b.jour}`,
+          `<p>Sauvegarde hebdomadaire automatique de la base du planning (fichier SQLite gzipé). Pour restaurer : dézipper et renommer en planning.db.</p><p>Les snapshots quotidiens (30 jours) sont aussi sur le disque persistant Render, dossier <code>backups/</code>.</p>`,
+          [EMAIL_ADMIN],
+          [{ ContentType: 'application/gzip', Filename: path.basename(b.dest), Base64Content: fs.readFileSync(b.dest).toString('base64') }]
+        );
+      }
+    }
+  } catch (e) { console.error('[BACKUP] échec :', e.message); }
+}, { timezone: 'Europe/Paris' });
+
+app.get('/api/admin/backup/latest', (req, res) => {
+  if (SF_WEBHOOK_SECRET === 'changeme') return res.status(503).json({ error: 'Backup désactivé : SF_WEBHOOK_SECRET non configuré' });
+  if (req.headers['x-sf-secret'] !== SF_WEBHOOK_SECRET) return res.status(403).json({ error: 'Unauthorized' });
+  try {
+    const fichiers = fs.readdirSync(BACKUP_DIR).filter(f => /^planning-\d{4}-\d{2}-\d{2}\.db\.gz$/.test(f)).sort();
+    if (!fichiers.length) return res.status(404).json({ error: 'Aucun backup pour le moment' });
+    res.download(path.join(BACKUP_DIR, fichiers[fichiers.length - 1]));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 module.exports = app;
 module.exports.checkBdcEnRetard = checkBdcEnRetard;
+module.exports.backupPlanningDb = backupPlanningDb;
