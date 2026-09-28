@@ -1,6 +1,6 @@
 // Agrégation métier, indépendante du serveur et testable avec des sources fictives.
 export function withLiveDashboardSettings(snapshot, settings) {
-  return { ...snapshot, settings: { monthlyRevenueObjective: settings.monthlyRevenueObjective } };
+  return { ...snapshot, settings: { monthlyRevenueObjective: settings?.monthlyRevenueObjective } };
 }
 
 export function createDashboardService({ getCalls, getRdvInRange, getRdvBookedInRange, getPropals, getSignatures, getRevenue, getSalesforgeRdv, getBdc, getPropalsComptes, resolveRange, comparisonRange, getReportSettings, sourceSnapshot = () => [] }) {
@@ -36,21 +36,23 @@ async function collectData(preset, range) {
   const revenue = pick(5, { totalAmount: 0, detail: [] });
   const signatures = pick(4, { total: 0, totalAmount: 0, detail: [] });
 
-  // Récupération des appels et réattribution de l'historique "Inconnu" à Quentin PUREN
+  // Récupération sécurisée des appels et réattribution "Inconnu" -> "Quentin PUREN"
   const rawCalls = pick(0, { total: 0, detail: [] });
   const callsMap = new Map();
 
-  (rawCalls.detail || []).forEach(item => {
-    let name = (item.name || item.commercial || item.label || '').trim();
+  const rawDetail = Array.isArray(rawCalls?.detail) ? rawCalls.detail : [];
+  rawDetail.forEach(item => {
+    if (!item) return;
+    let name = (item.name || item.commercial || item.label || '').toString().trim();
     
-    // Si l'entrée est marquée "Inconnu" ou vide, on la réattribue à Quentin PUREN
+    // Si l'entrée est anonyme / "Inconnu", on la réattribue à Quentin PUREN
     if (!name || name.toLowerCase() === 'inconnu') {
       name = 'Quentin PUREN';
     }
 
-    const currentCalls = item.calls || item.count || item.value || 0;
+    const count = Number(item.calls || item.count || item.value || 0) || 0;
     const existing = callsMap.get(name) || { ...item, name, calls: 0 };
-    existing.calls = (existing.calls || 0) + currentCalls;
+    existing.calls = (existing.calls || 0) + count;
     callsMap.set(name, existing);
   });
 
@@ -59,7 +61,7 @@ async function collectData(preset, range) {
   const filteredCalls = {
     ...rawCalls,
     detail: reattributedCallsDetail,
-    total: reattributedCallsDetail.reduce((acc, curr) => acc + (curr.calls || 0), 0) || rawCalls.total
+    total: reattributedCallsDetail.reduce((acc, curr) => acc + (curr.calls || 0), 0) || (rawCalls?.total || 0)
   };
 
   // Repère "mois en cours" affiché sous CA & Signatures, indépendant de la période.
@@ -96,7 +98,7 @@ async function collectData(preset, range) {
     salesforge: pick(6, { total: 0, detail: [] }),
     bdc: pick(7, { sent: { total: 0, detail: [] }, signed: { total: 0, detail: [] }, pending: { total: 0, detail: [] } }),
     propalsComptes: pick(8, { total: 0, totalAmount: 0, detail: [] }),
-    settings: { monthlyRevenueObjective: getReportSettings().monthlyRevenueObjective },
+    settings: { monthlyRevenueObjective: getReportSettings()?.monthlyRevenueObjective },
     errors: Object.keys(errors).length ? errors : null,
   };
 }
@@ -120,14 +122,16 @@ async function collectCompareData(range) {
   const rawCompCalls = v(0, { total: 0, detail: [] });
   const compCallsMap = new Map();
 
-  (rawCompCalls.detail || []).forEach(item => {
-    let name = (item.name || item.commercial || item.label || '').trim();
+  const compDetail = Array.isArray(rawCompCalls?.detail) ? rawCompCalls.detail : [];
+  compDetail.forEach(item => {
+    if (!item) return;
+    let name = (item.name || item.commercial || item.label || '').toString().trim();
     if (!name || name.toLowerCase() === 'inconnu') {
       name = 'Quentin PUREN';
     }
-    const currentCalls = item.calls || item.count || item.value || 0;
+    const count = Number(item.calls || item.count || item.value || 0) || 0;
     const existing = compCallsMap.get(name) || { ...item, name, calls: 0 };
-    existing.calls = (existing.calls || 0) + currentCalls;
+    existing.calls = (existing.calls || 0) + count;
     compCallsMap.set(name, existing);
   });
 
@@ -136,7 +140,7 @@ async function collectCompareData(range) {
   const filteredCompCalls = {
     ...rawCompCalls,
     detail: reattributedCompCallsDetail,
-    total: reattributedCompCallsDetail.reduce((acc, curr) => acc + (curr.calls || 0), 0) || rawCompCalls.total
+    total: reattributedCompCallsDetail.reduce((acc, curr) => acc + (curr.calls || 0), 0) || (rawCompCalls?.total || 0)
   };
 
   return {
