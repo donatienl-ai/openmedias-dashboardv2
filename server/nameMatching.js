@@ -1,14 +1,13 @@
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const wordsKey = value => normalize(value).split(' ').filter(Boolean).sort().join(' ');
 
-export function resolveSaleName(rawName, roster) {
+export function resolveSaleName(rawName, roster = []) {
   const norm = normalize(rawName);
 
-  // Redirection automatique des entrées sans nom ou "Inconnu" vers Quentin PUREN
+  // Si le nom est vide ou vaut "inconnu", on rattache directement à Quentin dans le roster
   if (!norm || norm === 'inconnu') {
-    const quentin = roster.find(s => normalize(s.display).includes('quentin puren'));
-    if (quentin) return quentin.display;
-    return null;
+    const quentin = roster.find(s => normalize(s.display).includes('quentin'));
+    return quentin ? quentin.display : 'Quentin';
   }
 
   const exact = roster.filter(s => wordsKey(s.display) === wordsKey(rawName));
