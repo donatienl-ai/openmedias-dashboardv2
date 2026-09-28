@@ -198,14 +198,6 @@ function setupReports(db) {
   }
 
   // ── KICK-OFF LUNDI — diffusions à venir cette semaine (lundi→vendredi) ──
-  // Idempotence : un seul mail par semaine, même si deux process tournent en
-  // parallèle sur la MÊME base (chevauchement old/new instance pendant un
-  // deploy Render — cause probable des doublons constatés le 24/08/2026).
-  // L'UPDATE conditionnel est atomique en SQLite (verrou d'écriture) : seul le
-  // premier process voit changes=1 et envoie. Si le doublon venait d'une AUTRE
-  // base (vieux service encore actif avec son propre disque), l'empreinte en
-  // pied de mail (hostname/pid/compteur) permet de le repérer.
-  // { force: true } (endpoint de test admin) bypasse la déduplication.
   function reportKickoffLundi({ force = false } = {}) {
     const today = new Date();
     const vendredi = new Date(today); vendredi.setDate(today.getDate() + 4);
@@ -240,16 +232,12 @@ function setupReports(db) {
         html += '</ul>';
       }
     }
-    // Empreinte de diagnostic : si un doublon réapparaît, comparer ces lignes
-    // entre les deux mails — hostname/pid différents = un second service tourne.
     html += empreinteHtml(emissions.length + ' diffusion(s)');
     console.log(`[KICKOFF] semaine du ${semaine} — ${emissions.length} diffusion(s) — envoi (instance ${os.hostname()} pid ${process.pid})`);
     sendMail(`Kick-off semaine du ${fmt(today)}`, html);
   }
 
   // ── NOTIF INDIVIDUELLE "À PROGRAMMER" — tous les lundis 14h, Eva et Flavie séparément ──
-  // Deux colonnes : à gauche ce qui lui est assigné personnellement (resp_edit), à droite
-  // ce qui n'est assigné à personne — pour que rien ne traîne oublié dans le panneau.
   function reportAProgrammerLundi({ force = false } = {}) {
     const dateCle = new Date().toISOString().slice(0, 10);
     if (!force && !claimReportOnce(`aprogrammer_${dateCle}`)) {
@@ -331,11 +319,7 @@ function setupReports(db) {
 
   // ── RELANCES QUOTIDIENNES — recouvrement Pennylane, tous les matins ouvrés ──
   // Digest des factures encore dues, en retard, et pas déjà classées dans un
-  // statut "réglé/en discussion" (litige, promesse de paiement, soldée) —
-  // celles-là n'ont plus besoin d'une relance du jour. Envoyé aux comptes
-  // rôle 'finance' + 'admin' actifs (mêmes destinataires que l'accès à
-  // l'onglet Recouvrement). Choix d'horaire : lundi-vendredi 8h Paris — à
-  // ajuster si "tous les matins" doit en fait couvrir aussi le week-end.
+  // statut "réglé/en discussion" (promesse de paiement, soldée) — les litiges sont inclus.
   function joursDeRetardRelance(deadline) {
     if (!deadline) return null;
     const d = new Date(`${deadline}T00:00:00`);
@@ -357,7 +341,7 @@ function setupReports(db) {
       FROM pennylane_invoices i
       LEFT JOIN pennylane_customers c ON c.id = i.customer_id
       WHERE i.remaining_amount > 0
-        AND i.internal_status NOT IN ('litige', 'promesse_paiement', 'solde')
+        AND i.internal_status NOT IN ('promesse_paiement', 'solde')
     `).all();
     const enRetard = rows
       .map((r) => ({ ...r, daysLate: joursDeRetardRelance(r.deadline) }))
@@ -375,7 +359,7 @@ function setupReports(db) {
 
     const totalDu = enRetard.reduce((s, r) => s + (r.remaining_amount || 0), 0);
     let html = `<h2>💶 Relances du jour — ${enRetard.length} facture(s) en retard</h2>
-      <p>${enRetard.length} facture(s) encore dues et en retard, pour un total de ${fmtMoney(totalDu)}. Statuts déjà classés "litige", "promesse de paiement" ou "soldée" sont exclus de cette liste.</p>
+      <p>${enRetard.length} facture(s) encore dues et en retard, pour un total de ${fmtMoney(totalDu)}.</p>
       <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px">
         <tr style="background:#1a1a2e;color:#fff">
           <th style="padding:8px;text-align:left">Facture</th>
@@ -407,23 +391,15 @@ function setupReports(db) {
   }
 
   // ── Scheduling (Europe/Paris) ──
-  // Tous les jours à 11h : vérifie si c'est le dernier vendredi (mensuel) ou dernier mercredi (aperçu mois suivant)
   cron.schedule('0 11 * * *', () => {
     const now = new Date();
     if (now.getDay() === 5 && isLastWeekdayOfMonth(now, 5)) reportMensuel();
     if (now.getDay() === 3 && isLastWeekdayOfMonth(now, 3)) reportApercuMoisSuivant();
   }, { timezone: 'Europe/Paris' });
 
-  // Tous les vendredis à 11h : rapport hebdomadaire
   cron.schedule('0 11 * * 5', () => reportHebdo(), { timezone: 'Europe/Paris' });
-
-  // Tous les lundis à 9h : kick-off de la semaine
   cron.schedule('0 9 * * 1', () => reportKickoffLundi(), { timezone: 'Europe/Paris' });
-
-  // Tous les lundis à 14h : notif individuelle "à programmer" (Eva, Flavie) + vue C-level
   cron.schedule('0 14 * * 1', () => { reportAProgrammerLundi(); reportAProgrammerClevel(); }, { timezone: 'Europe/Paris' });
-
-  // Du lundi au vendredi à 8h : digest des relances de recouvrement du jour
   cron.schedule('0 8 * * 1-5', () => reportRelancesQuotidien(), { timezone: 'Europe/Paris' });
 
   console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h, relances lun-ven 8h)');
