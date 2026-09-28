@@ -40,28 +40,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(compression());
-// Limite relevée (défaut 100kb) : le rétroplanning communication envoie l'image
-// de preview d'un post en base64 dans le JSON (pas d'upload multipart), un
-// visuel compressé côté client dépasse vite la limite par défaut.
 app.use(express.json({ limit: '5mb' }));
 
 const PASSWORD = process.env.DASHBOARD_PASSWORD || 'change-moi';
 
-// ── AUTH PARTAGÉE AVEC OPENPLANNING (fusion) ──────────────────────────────────
-// Les comptes commerciaux (email + mot de passe, table commercial_users) sont
-// désormais LE système d'auth du dashboard aussi — mêmes comptes que le
-// planning. Le mot de passe unique historique (DASHBOARD_PASSWORD) reste
-// accepté en parallèle comme filet de sécurité temporaire pendant la bascule
-// (accès admin complet), à retirer une fois les comptes commerciaux validés.
 const { verifyCommercialLogin, getCommercialById } = (await import('../planning/backend/auth.js')).default;
-// Handle SQLite brut, réutilisé uniquement pour un ping de santé (SELECT 1) sur
-// /api/admin/cache — détecte un disque persistant Render non monté / hors service
-// avant que ça ne se voie comme une erreur confuse ailleurs dans l'appli.
 const { db: planningDb } = (await import('../planning/backend/db.js')).default;
-// ── ÉQUIPES + RÉGLAGES ADMIN : mêmes modules partagés que le planning (SQLite
-// persisté), pour n'avoir qu'un seul backend admin quelle que soit la page
-// depuis laquelle on les modifie (remplace teamsStore.js et settings.js,
-// tous deux volatiles en mémoire).
 const {
   listSalesTeams, getTeamMembers, createSalesTeam, renameSalesTeam, deleteSalesTeam,
   findAccountByRosterName, setAccountTeam,
@@ -70,9 +54,6 @@ const {
   getReportSettings, updateReportSettings, recordLoginEvent, getLoginEvents,
 } = (await import('../planning/backend/adminSettings.js')).default;
 
-// --- Middleware d'authentification : compte commercial OU mot de passe unique (legacy) ---
-// Le front envoie soit "x-commercial-id" (compte individuel), soit
-// "x-dashboard-password" (filet de sécurité, accès admin complet).
 function requireAuth(req, res, next) {
   const legacyPw = req.headers['x-dashboard-password'];
   if (legacyPw && legacyPw === PASSWORD) {
@@ -87,9 +68,6 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'Non authentifié' });
 }
 
-// --- Middleware d'authentification : réservé aux comptes admin ---
-// (role='admin', ou l'ancien flag is_admin des comptes migrés) ou au mot de
-// passe unique legacy (qui garde un accès complet le temps de la bascule).
 function isAdminAccount(commercial) {
   return !!commercial && (commercial.role === 'admin' || !!commercial.is_admin);
 }
@@ -100,7 +78,6 @@ function requireAdmin(req, res, next) {
   });
 }
 
-// --- Journal des connexions (persisté SQLite, 200 derniers événements) ---
 function clientIp(req) {
   const fwd = req.headers['x-forwarded-for'];
   return (fwd ? String(fwd).split(',')[0] : req.socket?.remoteAddress || '').trim() || 'inconnue';
@@ -109,10 +86,8 @@ function recordLogin(req, ok) {
   recordLoginEvent(ok, clientIp(req), req.headers['user-agent']);
 }
 
-// --- Route de connexion : compte commercial (email+mdp) OU mot de passe unique (legacy) ---
 app.post('/api/login', (req, res) => {
   const { password, email } = req.body || {};
-  // Legacy : mot de passe unique (pas d'email transmis) — filet de sécurité pendant la bascule.
   if (email === undefined) {
     if (password === PASSWORD) {
       recordLogin(req, true);
@@ -121,7 +96,6 @@ app.post('/api/login', (req, res) => {
     recordLogin(req, false);
     return res.status(401).json({ ok: false, error: 'Mot de passe incorrect' });
   }
-  // Nouveau : compte commercial individuel (même compte que sur le planning).
   const user = verifyCommercialLogin(email, password || '');
   if (!user) {
     recordLogin(req, false);
@@ -140,16 +114,10 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-// --- Console admin : journal des connexions ---
 app.get('/api/admin/logins', requireAdmin, (req, res) => {
   res.json({ events: getLoginEvents(200) });
 });
 
-// ---------- ÉQUIPES (lecture ouverte à tout compte connecté ; édition réservée aux admins) ----------
-// Mêmes équipes que "Équipes de vente" côté planning (table sales_teams,
-// appartenance via commercial_users.team_id) — une seule source de vérité,
-// affichée ici sous forme de {id, label, members: [noms du roster]} pour ne
-// rien changer côté React (SettingsModal, TvView, FilterDropdown...).
 function teamsWithRosterMembers() {
   return listSalesTeams().map((t) => ({
     id: t.id,
@@ -162,16 +130,7 @@ function teamsWithRosterMembers() {
 app.get('/api/teams', requireAuth, (req, res) => {
   res.json({ teams: teamsWithRosterMembers() });
 });
-// Liste des noms du roster (pour construire les cases à cocher membres d'équipe
-// côté planning, qui n'a pas accès à server/roster.js directement, et pour la
-// liste "Sales" + le filtre "Managers" côté client — cf. client/src/App.js).
-// Roster désormais dérivé en direct de commercial_users (voir roster.js) :
-// ouvert à tout compte connecté, pas seulement admin, sinon un commercial/
-// manager ordinaire ne verrait jamais les nouveaux collègues dans son propre
-// filtre "Sales". `names` reste un tableau de chaînes (contrat déjà utilisé
-// par planning/frontend/index.html) ; `managers` est un sous-ensemble ajouté
-// pour que le rôle Manager/Sales du dashboard n'ait plus besoin lui non plus
-// d'une liste figée à la main (cf. client/src/teams.js MANAGERS).
+
 app.get('/api/admin/roster', requireAuth, (req, res) => {
   const roster = getRoster();
   res.json({
@@ -194,8 +153,6 @@ app.patch('/api/admin/teams/:id', requireAdmin, (req, res) => {
     if (Array.isArray(members)) {
       const current = new Set(getTeamMembers(req.params.id).map((u) => resolveDisplayName(u.nom) || u.nom));
       const next = new Set(members);
-      // Ajouts : il faut un compte existant pour ce nom (les groupements sont
-      // désormais basés sur les comptes, plus sur une simple liste de noms).
       for (const name of next) {
         if (current.has(name)) continue;
         const entry = getRoster().find((s) => s.display === name);
@@ -203,7 +160,6 @@ app.patch('/api/admin/teams/:id', requireAdmin, (req, res) => {
         if (!account) throw new Error(`Aucun compte pour « ${name} » — créez-lui d'abord un compte dans Comptes.`);
         setAccountTeam(account.id, req.params.id);
       }
-      // Retraits
       for (const name of current) {
         if (next.has(name)) continue;
         const entry = getRoster().find((s) => s.display === name);
@@ -225,10 +181,6 @@ app.delete('/api/admin/teams/:id', requireAdmin, (req, res) => {
   }
 });
 
-// --- Route principale : agrège toutes les sources sur une plage de dates ---
-// ---------- DEBUG : noms bruts des sources (diagnostic matching) ----------
-// Auth : header x-dashboard-password OU ?pw= (pratique navigateur).
-// Usage : /api/debug/names?preset=this_week&pw=LE_MOT_DE_PASSE
 app.get('/api/debug/names', async (req, res) => {
   const pw = req.headers['x-dashboard-password'] || req.query.pw;
   if (pw !== PASSWORD) return res.status(401).json({ error: 'Mot de passe invalide' });
@@ -252,8 +204,6 @@ app.get('/api/debug/names', async (req, res) => {
   }
 });
 
-// Agrège toutes les sources pour une plage donnée.
-// Utilisé par la route /api/dashboard ET par le reporting email.
 const { collectData, collectCompareData, computeDashboard } = createDashboardService({
   getCalls, getRdvInRange, getRdvBookedInRange, getPropals, getSignatures, getRevenue, getSalesforgeRdv, getBdc, getPropalsComptes, resolveRange, comparisonRange, getReportSettings,
   sourceSnapshot: () => buildSourceSnapshot({
@@ -262,10 +212,6 @@ const { collectData, collectCompareData, computeDashboard } = createDashboardSer
   }),
 });
 
-// Cache mémoire + rafraîchissement en arrière-plan (voir dashboardCache.js).
-// On pré-chauffe les périodes les plus consultées ; les autres (yesterday,
-// last_week, last_30, custom...) sont mises en cache à la première ouverture
-// puis servies instantanément ensuite (stale-while-revalidate).
 const dashboardCache = createDashboardCache({
   compute: computeDashboard,
   resolveRange,
@@ -274,20 +220,15 @@ const dashboardCache = createDashboardCache({
 
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
-    // Édito / communication n'ont pas accès au dashboard — leur landing page
-    // est le planning (voir App.js, redirection juste après connexion).
     if (req.commercial && ['edito', 'communication'].includes(req.commercial.role)) {
       return res.status(403).json({ error: "Ce compte n'a pas accès au dashboard — rendez-vous sur /planning" });
     }
-    // Finance non plus : son outil dédié est /recouvrement (onglet séparé,
-    // pas un onglet du dashboard ni du planning — voir App.js).
     if (req.commercial && req.commercial.role === 'finance') {
       return res.status(403).json({ error: "Ce compte n'a pas accès au dashboard — rendez-vous sur /recouvrement" });
     }
     const preset = req.query.preset || 'today';
     const range = resolveRange(preset, req.query.start, req.query.end);
     const full = withLiveDashboardSettings(await dashboardCache.get(preset, range), getReportSettings());
-    // Mot de passe legacy et comptes admin gardent la vue complète (toute l'équipe).
     if (req.commercial && !isAdminAccount(req.commercial)) {
       if (req.commercial.role === 'manager' && req.commercial.team_id) {
         const members = getTeamMembers(req.commercial.team_id);
@@ -309,7 +250,6 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   }
 });
 
-// ---------- CA MENSUEL SUR N MOIS GLISSANTS (graphique d'évolution) ----------
 app.get('/api/revenue-by-month', requireAuth, async (req, res) => {
   try {
     if (req.commercial && ['edito', 'communication', 'finance'].includes(req.commercial.role)) {
@@ -333,11 +273,6 @@ app.get('/api/revenue-by-month', requireAuth, async (req, res) => {
   }
 });
 
-// ---------- MES RDV À VENIR (vue perso "Ma semaine" du commercial connecté) ----------
-// Seule pièce réellement nouvelle pour cette vue : une LISTE d'événements
-// individuels datés (pas juste un compteur). Les autres chiffres de "Ma
-// semaine" (calls, propals) sont récupérés côté client depuis /api/dashboard
-// (déjà scopé au commercial connecté via scopeDataToCommercial).
 app.get('/api/mes-rdv-a-venir', requireAuth, async (req, res) => {
   if (!req.commercial) {
     return res.status(400).json({ error: 'Réservé aux comptes commerciaux individuels (pas au mot de passe legacy)' });
@@ -361,45 +296,44 @@ app.get('/api/newsletter-stats', requireAuth, async (req, res) => {
     const range = resolveRange(preset, req.query.start, req.query.end);
     const r = { start: range.start, end: range.end };
 
+    const withTimeout = (promise, fallback, ms = 4000) =>
+      Promise.race([
+        promise,
+        new Promise((resolve) => setTimeout(() => resolve(fallback), ms))
+      ]);
+
+    const fallbackMj = { campaigns: [], totals: { sent: 0, delivered: 0, opened: 0, clicked: 0, unsubscribed: 0, openRate: 0, clickRate: 0, unsubRate: 0, count: 0 } };
+    const fallbackRdv = { total: 0, detail: [] };
+
     const [mjResult, nlRdvResult] = await Promise.allSettled([
-      getNewsletterStats(r),
-      getNewsletterRdv(r),
+      withTimeout(getNewsletterStats(r), fallbackMj),
+      withTimeout(getNewsletterRdv(r), fallbackRdv),
     ]);
 
-    const newsletters = mjResult.status === 'fulfilled'
-      ? mjResult.value
-      : { campaigns: [], totals: { sent: 0, delivered: 0, opened: 0, clicked: 0, unsubscribed: 0, openRate: 0, clickRate: 0, unsubRate: 0, count: 0 } };
-
-    const nlRdv = nlRdvResult.status === 'fulfilled'
-      ? nlRdvResult.value
-      : { total: 0, detail: [] };
+    const newsletters = mjResult.status === 'fulfilled' && mjResult.value ? mjResult.value : fallbackMj;
+    const nlRdv = nlRdvResult.status === 'fulfilled' && nlRdvResult.value ? nlRdvResult.value : fallbackRdv;
 
     const errors = {};
     if (mjResult.status === 'rejected') errors.mailjet = String(mjResult.reason?.message || mjResult.reason);
     if (nlRdvResult.status === 'rejected') errors.calendly = String(nlRdvResult.reason?.message || nlRdvResult.reason);
 
-    res.json({
+    return res.json({
       range: { preset, label: range.label, start: range.start.toISOString(), end: range.end.toISOString() },
       newsletters,
       nlRdv,
       errors: Object.keys(errors).length ? errors : null,
     });
   } catch (e) {
-    res.status(500).json({ error: String(e.message || e) });
+    return res.status(500).json({ error: String(e.message || e) });
   }
 });
 
-// ---------- REPORTING EMAIL (remplace Make à terme) ----------
-// Génère le reporting sur la période demandée et l'envoie aux destinataires.
 async function sendReportNow({ to, theme, preset = 'today', start, end }) {
   const range = resolveRange(preset, start, end);
   const month = resolveRange('this_month');
   const data = await collectData(preset, range);
-  // CA du mois (cumul depuis le 1er, indépendant de la période du rapport)
   const monthRevenue = data.monthRevenue;
 
-  // Comparatif (même logique que computeDashboard : désactivé sur >70j pour
-  // préserver les quotas API) — alimente la section "Points notables" (anomalies).
   const durationDays = (range.end - range.start) / 86400000;
   const compRange = durationDays <= 70 ? comparisonRange(preset, range) : null;
   const compare = compRange ? await collectCompareData(compRange).catch(() => null) : null;
@@ -418,9 +352,6 @@ function parseRecipients(str) {
   return String(str || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-// Déclenchement (cron) : GET /api/send-report?key=REPORT_KEY[&sync=1][&to=...][&theme=light|dark]
-// Par défaut répond immédiatement (202) et envoie en arrière-plan,
-// pour que n'importe quel cron externe fonctionne malgré le réveil Render.
 app.get('/api/send-report', async (req, res) => {
   const expected = process.env.REPORT_KEY;
   if (!expected || req.query.key !== expected) {
@@ -446,17 +377,10 @@ app.get('/api/send-report', async (req, res) => {
   }
 });
 
-// ---------- CONSOLE ADMIN (réglages + test, réservés aux comptes admin) ----------
 app.get('/api/admin/settings', requireAdmin, (req, res) => {
   res.json({ ...getReportSettings(), scheduler: getSchedulerState() });
 });
 
-// ---------- OBJECTIFS INDIVIDUELS (CA mensuel par commercial) ----------
-// Lecture ouverte à tout compte connecté (chacun doit pouvoir voir sa propre
-// jauge, et un manager celle de son équipe) ; écriture réservée aux admins.
-// Stocké dans planning.db (commercial_objectives, cf. planning/backend/db.js)
-// pour bénéficier du même disque persistant que le reste (pas de perte au
-// redémarrage, contrairement à l'ancien server/settings.js en mémoire).
 app.get('/api/objectifs', requireAuth, (req, res) => {
   try {
     const rows = planningDb.prepare(`
@@ -471,8 +395,6 @@ app.get('/api/objectifs', requireAuth, (req, res) => {
         displayName: resolveDisplayName({ nom: r.nom }),
         monthlyObjective: Math.max(0, Math.round(r.monthly_amount || 0)),
       }))
-      // Ignore les comptes sans correspondance dans le roster (server/roster.js) —
-      // on ne peut pas calculer de progression sans un nom de référence sûr.
       .filter((r) => r.displayName);
     res.json(out);
   } catch (e) {
@@ -496,12 +418,6 @@ app.patch('/api/admin/objectifs/:commercialId', requireAdmin, (req, res) => {
   }
 });
 
-// Endpoint léger pour le pinger (UptimeRobot) : maintient le service éveillé.
-// Volontairement RAPIDE et SANS appel externe (Salesforce/Aircall/etc.) : un
-// ping de santé qui dépendrait d'une API tierce lente donnerait de faux
-// "down" et réveillerait pour rien. On y ajoute juste mémoire/uptime en
-// process (gratuit) pour repérer une dérive mémoire avant le crash OOM
-// (cf. incident déjà rencontré sur ce service).
 app.get('/api/health', (req, res) => {
   const mem = process.memoryUsage();
   res.json({
@@ -512,9 +428,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Diagnostic complet (réservé admin) : âge/couverture de TOUS les caches
-// (dashboard + les caches bruts par connecteur, cf. server/rawDataCache.js)
-// + un ping SQLite pour vérifier que le disque persistant du planning répond.
 app.get('/api/admin/cache', requireAdmin, (req, res) => {
   let planningDbOk = true;
   let planningDbError = null;
@@ -525,7 +438,7 @@ app.get('/api/admin/cache', requireAdmin, (req, res) => {
     planningDbError = String(e?.message || e);
   }
   res.json({
-    entries: dashboardCache.stats(), // legacy : conservé pour compat avec un éventuel appelant existant
+    entries: dashboardCache.stats(),
     dashboard: dashboardCache.stats(),
     aircall: getAircallCacheStats(),
     salesforce: getSalesforceCacheStats(),
@@ -540,8 +453,6 @@ app.post('/api/admin/settings', requireAdmin, (req, res) => {
   catch (error) { res.status(error instanceof RangeError ? 400 : 500).json({ error: error.message }); }
 });
 
-// Envoie le reporting pour la VUE COURANTE (période + thème transmis par le front),
-// dans le même style que le reporting programmé, aux destinataires configurés.
 app.post('/api/admin/email-view', requireAdmin, async (req, res) => {
   try {
     const s = getReportSettings();
@@ -569,7 +480,6 @@ app.post('/api/admin/send-test', requireAdmin, async (req, res) => {
       start: b.start,
       end: b.end,
     });
-    // Diagnostic : quelle clé le serveur utilise + statut réel du message chez Mailjet
     const keyPrefix = (process.env.MAILJET_API_KEY || '').slice(0, 8);
     let mailjetStatus = null;
     if (out.messageId) {
@@ -581,46 +491,15 @@ app.post('/api/admin/send-test', requireAdmin, async (req, res) => {
   }
 });
 
-// ---------- OPENPLANNING (planning de diffusion + BDC, fusionné sous /planning) ----------
-// router.js est un express.Router() CommonJS (ancien server.js de
-// planning-diff-openmedias, converti). Le package.json imbriqué dans
-// planning/backend/ ({"type":"commonjs"}) permet à ce projet ESM de l'importer
-// tel quel via l'interop Node — pas de renommage .cjs nécessaire.
-// Monté à /planning : ses routes internes (/api/emissions, /api/bdc/*, ...)
-// deviennent /planning/api/... — le frontend planning (const API='api', relatif)
-// s'y retrouve automatiquement une fois servi depuis /planning/.
 const { default: planningRouter } = await import('../planning/backend/router.js');
 const planningFrontendDir = path.join(__dirname, '..', 'planning', 'frontend');
 app.use('/planning', express.static(planningFrontendDir));
 app.use('/planning', planningRouter);
 
-// ---------- RECOUVREMENT (Pennylane, fusionné sous /recouvrement) ----------
-// Gros onglet séparé, pas un sous-onglet du planning : son propre slug /
-// front autonome (recouvrement/frontend/index.html), mais RÉUTILISE le même
-// planningRouter (déjà chargé ci-dessus, un seul require donc un seul jeu de
-// crons/side-effects) — les routes /api/finance/*, /api/auth/*, /api/meta
-// qu'il expose sont indépendantes du reste du planning et n'ont pas besoin
-// d'être dupliquées dans un routeur à part. Express autorise un même Router
-// monté sous plusieurs préfixes sans souci (aucune route interne ne suppose
-// un chemin absolu, sauf le lien d'invitation qui pointe volontairement vers
-// /planning/?invite=... quel que soit le rôle invité).
 const recouvrementFrontendDir = path.join(__dirname, '..', 'recouvrement', 'frontend');
 app.use('/recouvrement', express.static(recouvrementFrontendDir));
 app.use('/recouvrement', planningRouter);
 
-// ---------- RADAR ÉDITORIAL (fusionné sous /radar) ----------
-// Même patron que /planning : un front autonome (radar/frontend/index.html, sans
-// build) servi en statique. Une seule route API : /radar/api/page-text, qui
-// remplace les proxies publics (allorigins, microlink...) utilisés par
-// l'analyse d'URL prospect côté front — voir server/radarPageText.js.
-// Enregistrée AVANT le static et le 404 ci-dessous, sinon elle y passerait.
-//
-// catalogue.json (~2,3 Mo) et embeddings.json (~1,5 Mo) DOIVENT rester
-// cohérents entre eux : embeddings.json indexe les URLs du catalogue. Ils sont
-// écrits et commités par le même run, donc toujours de la même génération —
-// mais un navigateur pourrait en cacher un seul. D'où le no-store ci-dessous :
-// coût négligeable (compression() est actif en amont, et le front ne les charge
-// qu'une fois par session), et aucun risque de mélanger deux générations.
 const { registerRadarPageTextRoute } = await import('./radarPageText.js');
 registerRadarPageTextRoute(app);
 const radarFrontendDir = path.join(__dirname, '..', 'radar', 'frontend');
@@ -631,17 +510,11 @@ app.use('/radar', express.static(radarFrontendDir, {
     }
   },
 }));
-// Sans ce garde-fou, un fichier manquant sous /radar/ traverse le static et
-// atterrit dans le catch-all React tout en bas : le client recevait un HTTP 200
-// contenant le HTML du dashboard. Concrètement, tant qu'embeddings.json n'a pas
-// été généré, le radar voyait `res.ok === true` et ne détectait le problème
-// qu'au JSON.parse — il dégradait bien en TF-IDF, mais par accident. Le radar
-// n'a pas de routage interne : tout ce qui n'est pas un fichier est un 404.
+
 app.use('/radar', (req, res) => {
   res.status(404).json({ error: `Introuvable sous /radar : ${req.path}` });
 });
 
-// --- Sert le build React en production ---
 const clientBuild = path.join(__dirname, '..', 'client', 'build');
 app.use('/shared', express.static(path.join(__dirname, '..', 'shared')));
 app.use(express.static(clientBuild));
@@ -650,7 +523,6 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-// Planificateur de l'envoi automatique (réglé via la console admin)
 startScheduler(async () => {
   const s = getReportSettings();
   const to = parseRecipients(s.reportTo);
@@ -662,20 +534,10 @@ app.listen(PORT, () => {
   console.log(`OpenMedias Dashboard en écoute sur le port ${PORT}`);
 });
 
-// ---- Pré-chauffe au démarrage ----------------------------------------------
-// 1) On amorce le cache des calls bruts depuis le DÉBUT DU TRIMESTRE PRÉCÉDENT
-//    jusqu'à maintenant : toute période incluse (mois dernier, plages custom...)
-//    est ensuite servie sans rappeler Aircall.
-// 2) On pré-calcule ensuite les périodes les plus consultées.
-// Le rafraîchissement périodique ne re-récupère QUE la queue récente (les calls
-// passés sont immuables), ce qui préserve la couverture large à moindre coût.
 const REFRESH_DAYS = parseInt(process.env.AIRCALL_REFRESH_DAYS || '2', 10);
 const recentSince = () => new Date(Date.now() - REFRESH_DAYS * 86400000);
 
 async function warmCycleInitial() {
-  // Fenêtre d'amorçage : par défaut depuis le trimestre précédent. Peut être
-  // étendue via AIRCALL_PREWARM_MONTHS (ex. 12 = amorce toute l'année écoulée,
-  // au prix d'un amorçage initial plus long).
   const PREWARM_MONTHS = parseInt(process.env.AIRCALL_PREWARM_MONTHS || '0', 10);
   const n = new Date();
   const qStart = PREWARM_MONTHS > 0
@@ -693,7 +555,7 @@ async function warmCycleInitial() {
 
 async function warmCyclePeriodic() {
   try {
-    await refreshRecent(recentSince()); // ne retouche que les derniers jours
+    await refreshRecent(recentSince());
   } catch (e) {
     console.error('Rafraîchissement Aircall (récent) KO :', String(e.message || e));
   }
