@@ -2,31 +2,69 @@ const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300
 const wordsKey = value => normalize(value).split(' ').filter(Boolean).sort().join(' ');
 
 export function resolveSaleName(rawName, roster = []) {
+  const safeRoster = Array.isArray(roster) ? roster : [];
   const norm = normalize(rawName);
 
-  // Si le nom est vide ou vaut "inconnu", on rattache directement à Quentin dans le roster
-  if (!norm || norm === 'inconnu') {
-    const quentin = roster.find(s => normalize(s.display).includes('quentin'));
-    return quentin ? quentin.display : 'Quentin';
+  // Détermine le nom exact de Quentin dans l'équipe
+  const quentinEntry = safeRoster.find(s => s && s.display && normalize(s.display).includes('quentin'));
+  const quentinName = quentinEntry ? quentinEntry.display : 'Quentin';
+
+  // Si le nom est vide, null ou égal à "inconnu" / "unassigned"
+  if (!norm || norm === 'inconnu' || norm === 'unknown' || norm === 'unassigned') {
+    return quentinName;
   }
 
-  const exact = roster.filter(s => wordsKey(s.display) === wordsKey(rawName));
+  const exact = safeRoster.filter(s => s && s.display && wordsKey(s.display) === wordsKey(rawName));
   if (exact.length === 1) return exact[0].display;
-  const candidates = roster.filter(s => [s.last, ...(s.aliases || [])].some(alias => {
+
+  const candidates = safeRoster.filter(s => s && [s.last, ...(s.aliases || [])].some(alias => {
     const key = normalize(alias);
     return key && ` ${norm} `.includes(` ${key} `);
   }));
-  // Never silently assign an ambiguous name to the first person in the roster.
+
   return candidates.length === 1 ? candidates[0].display : rawName;
 }
 
-export function completeRosterRows(dataMap, roster, withAmount = false) {
-  const known = new Set(roster.map(s => s.display));
-  const rows = roster.map(s => ({ name: s.display, ...(dataMap.get(s.display) || {}), count: dataMap.get(s.display)?.count || 0 }));
-  // Keep unmatched records visible in the unrestricted total and its detail.
-  for (const [name, entry] of dataMap) {
-    if (!known.has(name)) rows.push({ name, ...entry, count: entry.count || 0, unmatched: true });
+export function completeRosterRows(dataMap, roster = [], withAmount = false) {
+  const safeRoster = Array.isArray(roster) ? roster : [];
+  const known = new Set(safeRoster.map(s => s?.display).filter(Boolean));
+
+  const quentinEntry = safeRoster.find(s => s && s.display && normalize(s.display).includes('quentin'));
+  const quentinName = quentinEntry ? quentinEntry.display : 'Quentin';
+
+  // Copie de travail de la map de données
+  const map = new Map(dataMap || []);
+
+  // Fusion de sécurité : intercepte tout "Inconnu" restant et le verse sur Quentin
+  for (const [name, entry] of map) {
+    const norm = normalize(name);
+    if (!norm || norm === 'inconnu' || norm === 'unknown') {
+      if (name !== quentinName) {
+        const qEntry = map.get(quentinName) || { count: 0, amount: 0, inbound: 0, outbound: 0 };
+        map.set(quentinName, {
+          ...qEntry,
+          count: (qEntry.count || 0) + (entry.count || 0),
+          amount: (qEntry.amount || 0) + (entry.amount || 0),
+          inbound: (qEntry.inbound || 0) + (entry.inbound || 0),
+          outbound: (qEntry.outbound || 0) + (entry.outbound || 0),
+        });
+        map.delete(name);
+      }
+    }
   }
+
+  const rows = safeRoster.map(s => ({
+    name: s?.display || '',
+    ...(map.get(s?.display) || {}),
+    count: map.get(s?.display)?.count || 0
+  }));
+
+  for (const [name, entry] of map) {
+    if (name && !known.has(name)) {
+      rows.push({ name, ...entry, count: entry?.count || 0, unmatched: true });
+    }
+  }
+
   if (withAmount) for (const row of rows) row.amount = row.amount || 0;
-  return rows.sort((a,b) => (withAmount ? b.amount-a.amount : b.count-a.count) || a.name.localeCompare(b.name));
+  return rows.sort((a, b) => (withAmount ? (b.amount || 0) - (a.amount || 0) : (b.count || 0) - (a.count || 0)) || (a.name || '').localeCompare(b.name || ''));
 }
