@@ -273,6 +273,28 @@ if (invoices[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de facture brute :',
 if (customers[0]) console.log('[PENNYLANE_DEBUG_RAW] exemple de client brut :', JSON.stringify(customers[0], null, 2));
 }
 
+// -----------------------------------------------------------------------------
+// AJOUT : Extraction systématique du Nom/Prénom rattaché à l'objet facture 
+// -----------------------------------------------------------------------------
+const invoiceContacts = new Map();
+for (const inv of invoices) {
+  const custId = customerIdOf(inv);
+  if (!custId || invoiceContacts.has(custId)) continue;
+
+  const cust = inv.customer || {};
+  const billing = inv.billing_address || cust.billing_address || {};
+  const firstName = cust.first_name || billing.first_name || '';
+  const lastName = cust.last_name || billing.last_name || '';
+  let name = [firstName, lastName].filter(Boolean).join(' ');
+  if (!name) {
+    name = inv.recipient_name || inv.recipient || billing.name || cust.recipient || '';
+  }
+  if (name) {
+    invoiceContacts.set(custId, name.trim());
+  }
+}
+// -----------------------------------------------------------------------------
+
 // Ne va chercher les contacts QUE pour les clients qui ont au moins une
 // facture encore due dans ce sync (inutile de multiplier les appels API
 // pour des clients soldés depuis longtemps qui n'apparaîtront nulle part
@@ -325,12 +347,14 @@ const defaultStatusId = defaultDeadlineStatusId(db);
 const runAll = db.transaction(() => {
 for (const c of customers) {
 const contact = contactsById.get(String(c.id));
+const extractedName = invoiceContacts.get(String(c.id)); // <-- Utilisation du nom extrait
+
 upsertCustomer.run(
 String(c.id),
 c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || '',
 (Array.isArray(c.emails) ? c.emails[0] : c.email) || '',
 c.phone || c.phone_number || '',
-(contact && contact.name) || (c.recipient || '').trim() || null,
+(contact && contact.name) || extractedName || (c.recipient || '').trim() || null, // <-- Modifié ici
 contact ? contact.email : null,
 contact ? contact.phone : null
 );
