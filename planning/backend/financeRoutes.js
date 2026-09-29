@@ -582,4 +582,6 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
 
   // Import Excel des créances douteuses (29/09/2026)
   require('./creancesDouteuses')(app, { db, requireFinance });
+  // Diagnostic avoirs / doublons Pennylane (29/09/2026)
+  require('./financeAvoirs')(app, { db, requireFinance });
 };
