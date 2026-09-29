@@ -14,14 +14,16 @@ let isAccountAdmin = false;
 // Seuls finance et admin ont leur place ici. Un autre rôle est renvoyé vers
 // sa vraie page d'accueil — même logique (inversée) que /planning et le
 // dashboard React, qui renvoient déjà 'finance' vers /recouvrement.
-function redirectAwayIfNotAllowed(accountRole){
-if(accountRole==='admin'||accountRole==='finance')return false;
+function redirectAwayIfNotAllowed(accountRole,accountRoles){
+  // Rôles multiples (09/2026) : il suffit d'avoir finance ou admin parmi ses rôles.
+  const rs=Array.isArray(accountRoles)&&accountRoles.length?accountRoles:[accountRole];
+  if(rs.includes('admin')||rs.includes('finance'))return false;
 if(accountRole==='edito'||accountRole==='communication'){ window.location.href='/planning'; return true; }
 window.location.href='/';
 return true;
 }
 function activateSession(d){
-isAccountAdmin = d.accountRole==='admin';
+isAccountAdmin = d.accountRole==='admin'||(d.accountRoles||[]).includes('admin');
 commercialId=d.commercial_id;
 commercialNom=d.nom||'';
 localStorage.setItem('commercialId',commercialId);
@@ -41,7 +43,7 @@ try{
 const r=await fetch(`${API}/auth/me`,{headers:{'x-commercial-id':commercialId}});
 if(!r.ok)throw new Error('session invalide');
 const d=await r.json();
-if(redirectAwayIfNotAllowed(d.accountRole))return true;
+if(redirectAwayIfNotAllowed(d.accountRole,d.accountRoles))return true;
 activateSession(d);
 return true;
 }catch{
@@ -63,7 +65,7 @@ try{
 const r=await fetch(`${API}/auth/commercial`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
 const d=await r.json();
 if(r.ok){
-if(redirectAwayIfNotAllowed(d.accountRole))return;
+if(redirectAwayIfNotAllowed(d.accountRole,d.accountRoles))return;
 activateSession(d);
 }else{
 errEl.textContent=d.error||'Email ou mot de passe incorrect.';
