@@ -12,7 +12,7 @@ utilisateur), ce qui a fait croire à une fonctionnalité absente/cassée
 et bien déployé). Le ?v= force le navigateur à retélécharger le fichier
 à chaque déploiement où la valeur change — à incrémenter à chaque futur
 déploiement de styles.css/app.js. -->
-<link rel="stylesheet" href="styles.css?v=20260923b">
+<link rel="stylesheet" href="styles.css?v=20260929">
 <link rel="stylesheet" href="/shared/suite.css">
 </head>
 <body>
@@ -99,6 +99,9 @@ même niveau que les autres, pas nested dans le planning. -->
 <span id="finance-last-sync" style="font-size:11px;color:var(--text-muted)"></span>
 <button type="button" class="finance-sync-detail-toggle" id="finance-sync-detail-toggle" onclick="toggleFinanceSyncOverview()">Détail de la synchro</button>
 <button class="btn-secondary" onclick="exportFinanceCsv()">⬇ Export CSV</button>
+<!-- Import du fichier Excel des créances douteuses (29/09/2026, demande Lina) -->
+<input type="file" id="finance-douteux-file" accept=".xlsx" style="display:none" onchange="importDouteuxExcel(this)">
+<button class="btn-secondary" id="finance-douteux-btn" onclick="document.getElementById('finance-douteux-file').click()" title="Importer le fichier Excel des créances douteuses (comptabilité) : les factures encore dues passent en Douteux">⬆ Importer douteux (Excel)</button>
 <button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()">↻ Synchroniser Pennylane</button>
 </div>
 </div>
@@ -157,6 +160,6 @@ colonne du tableau, c'est un mode de tri transversal. -->
 </div>
 </div>
 
-<script src="app.js?v=20260923b"></script>
+<script src="app.js?v=20260929"></script>
 </body>
 </html>
