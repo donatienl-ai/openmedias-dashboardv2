@@ -343,7 +343,7 @@ function applyImport(db, parsed, opts = {}) {
 // tout seul (au démarrage puis toutes les 20 min) et n'applique que si le contenu a changé.
 const SOURCE_2026_NAME = 'creances-douteuses-2026';
 const SOURCE_2026_LINK = process.env.DOUTEUX_2026_URL
-  || 'https://1drv.ms/x/c/d6eccc23093d687d/IQBYzzIFZNNPQYAg22VWCMDJAWbBjNHzjtXrHUbfY2-w5AM?e=0rZcIj';
+  || 'https://1drv.ms/x/c/d6eccc23093d687d/IQBYzzIFZNNPQYAg22VWCMDJAWbBjNHzjtXrHUbfY2-w5AM?e=WjhTL0';
 const SYNC_EVERY_MS = 20 * 60 * 1000;
 
 function shareToken(link) {
