@@ -909,6 +909,46 @@ await refreshFinanceInvoices();
 finally{ if(btn){ btn.disabled=false; btn.textContent='↻ Synchroniser Pennylane'; } }
 }
 
+// ── Import des créances douteuses (fichier Excel de la compta) — 29/09/2026 ──
+// Demande Lina : les fichiers « créances douteuses 2025 / 2026 » alimentent le
+// statut Douteux. Le fichier est envoyé tel quel au serveur (POST octet-stream),
+// qui le lit et renvoie un compte rendu détaillé (voir creancesDouteuses.js).
+async function importDouteuxExcel(input){
+const file=input.files&&input.files[0];
+input.value='';
+if(!file)return;
+const btn=document.getElementById('finance-douteux-btn');
+if(btn){ btn.disabled=true; btn.textContent='⏳ Import en cours…'; }
+try{
+const r=await fetch(`${API}/finance/douteux/import`,{method:'POST',headers:{'x-commercial-id':commercialId,'Content-Type':'application/octet-stream'},body:file});
+const d=await r.json();
+if(!r.ok)throw new Error(d.error||"Échec de l'import");
+showDouteuxImportReport(d,file.name);
+await refreshFinanceInvoices();
+}catch(e){ showToast(e.message||"Échec de l'import",'error'); }
+finally{ if(btn){ btn.disabled=false; btn.textContent='⬆ Importer douteux (Excel)'; } }
+}
+function showDouteuxImportReport(d,fileName){
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const block=(title,items,fmt,open)=>items.length?`<details ${open?'open':''} style="margin-top:10px"><summary style="cursor:pointer;font-weight:600">${title} (${items.length})</summary><ul style="margin:6px 0 0 18px;font-size:12px;color:var(--text-muted)">${items.map(i=>`<li>${fmt(i)}</li>`).join('')}</ul></details>`:'';
+const line=(n,label)=>`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border,#2a2f3a)"><span>${label}</span><strong>${n}</strong></div>`;
+document.getElementById('modal-title').textContent=`Import créances douteuses ${esc(d.exercice)}`;
+document.getElementById('modal-body').innerHTML=
+`<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${esc(fileName)} — ${d.lignes} ligne(s), ${d.facturesDansFichier} n° de facture</div>`
++line(d.marquees.length,'Passées en Douteux')
++line(d.dejaDouteux.length,'Déjà en Douteux')
++line(d.protegees.length,'Non modifiées (litige / promesse / soldée)')
++line(d.ignoreesSoldeZero.length,'Solde de fin d\'exercice à 0 (ignorées)')
++line(d.remplaceesParExerciceRecent.length,'Remplacées par un exercice plus récent')
++line(d.introuvables.length,'Introuvables dans les factures Pennylane')
++block('Passées en Douteux',d.marquees,i=>`${esc(i.numero)} — ${esc(i.client)} (${fmtCA(i.soldeFin)})`,false)
++block('Non modifiées (statut protégé)',d.protegees,i=>`${esc(i.numero)} — ${esc(i.client)} : ${esc(i.raison)}`,true)
++block('Introuvables dans Pennylane',d.introuvables,i=>`${esc(i.numero)} — ${esc(i.client)} (${fmtCA(i.soldeFin)})`,true)
++block('Émises avant 2025 (masquées par la règle d\'affichage 2025+)',d.avant2025,i=>`${esc(i.numero)} — ${esc(i.client)} (${esc(i.dateEmission)})`,false);
+document.getElementById('modal-footer').innerHTML='<button class="btn-secondary" onclick="closeModal()">Fermer</button>';
+document.getElementById('modal-overlay').style.display='flex';
+}
+
 // ── Export CSV (09/2026, demande Lina — "à la façon de Meta Business Suite")
 // Séparateur ; + BOM UTF-8 pour une ouverture directe dans Excel sans souci
 // d'accents ni de colonnes fusionnées — même pattern déjà utilisé dans
