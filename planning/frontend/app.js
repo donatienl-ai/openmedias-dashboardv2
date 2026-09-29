@@ -14,9 +14,11 @@ let commercialNom = localStorage.getItem('commercialNom') || '';
 // PIN) — permet à un compte admin/édito/communication/manager/commercial
 // d'obtenir les bonnes capacités, qu'il arrive par PIN, par login direct sur
 // cette page, ou par SSO depuis OpenDashboard.
-function planningRoleFor(accountRole){
-  if(accountRole==='admin'||accountRole==='edito')return 'edit';
-  if(accountRole==='communication')return 'com';
+function planningRoleFor(accountRole,accountRoles){
+  // Rôles multiples (09/2026) : union des accès des rôles cochés.
+  const rs=Array.isArray(accountRoles)&&accountRoles.length?accountRoles:[accountRole];
+  if(rs.includes('admin')||rs.includes('edito'))return 'edit';
+  if(rs.includes('communication'))return 'com';
   // 'finance' n'atteint jamais cette fonction : intercepté et redirigé vers
   // /recouvrement avant activateSession (cf. tryAutoLogin/commercialLoginSubmit).
   return 'sales'; // manager, commercial, ou valeur inconnue -> par défaut le plus restreint
@@ -24,14 +26,16 @@ function planningRoleFor(accountRole){
 // Active la session applicative (affiche l'app, cache l'écran de connexion) de
 // façon identique quel que soit le point d'entrée (PIN, login direct, SSO depuis
 // le dashboard) — évite de dupliquer cette logique 4 fois de façon divergente.
-function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal, accountRole}){
-  role=r; myName=nom||null; isCLevel=!!clevel; isAccountAdmin=(accountRole==='admin');
+function activateSession({role:r, nom, clevel, commercialIdVal, commercialNomVal, accountRole, accountRoles}){
+  // Rôles multiples (09/2026) : tous les rôles du compte (le principal seul pour une session PIN).
+  const rolesCompte=Array.isArray(accountRoles)&&accountRoles.length?accountRoles:(accountRole?[accountRole]:[]);
+  role=r; myName=nom||null; isCLevel=!!clevel; isAccountAdmin=(accountRole==='admin'||rolesCompte.includes('admin'));
 // Visibilité Montant/Upsell (diffusions) : ouverte à l'admin, au pôle com
 // (accountRole==='communication') et à la finance — même accès que Lola
 // (compte admin) demandé pour toute son équipe, sans faire de chacun un
 // compte admin (qui donnerait aussi Paramètres/Reporting/etc). Décision
 // Lina 09/2026, cf. statut-implementation-recouvrement.md.
-canSeeBudget=(isAccountAdmin||accountRole==='communication'||accountRole==='finance'||accountRole==='edito');
+canSeeBudget=(isAccountAdmin||['communication','finance','edito'].some(x=>rolesCompte.includes(x)));
   if(commercialIdVal){
     commercialId=commercialIdVal; commercialNom=commercialNomVal||'';
     localStorage.setItem('commercialId',commercialId); localStorage.setItem('commercialNom',commercialNom);
@@ -43,7 +47,7 @@ canSeeBudget=(isAccountAdmin||accountRole==='communication'||accountRole==='fina
   // renverrait aussitôt ici. Un compte admin partage le même rôle interne
   // "edit" qu'un édito (mêmes droits planning) mais A bien accès au dashboard,
   // lui — donc on ne masque l'onglet que si ce n'est pas un admin.
-  const hideDashboardTab=(role==='edit'&&!isAccountAdmin)||role==='com';
+  const hideDashboardTab=rolesCompte.length?!rolesCompte.some(x=>['admin','manager','commercial'].includes(x)):((role==='edit'&&!isAccountAdmin)||role==='com');
   document.getElementById('app-tab-dashboard').style.display = hideDashboardTab ? 'none' : '';
   // La barre entière était masquée pour ces rôles : avec le seul Dashboard
   // caché, il ne restait qu'un pavé actif et beaucoup de vide à droite, ce qui
@@ -84,6 +88,8 @@ canSeeBudget=(isAccountAdmin||accountRole==='communication'||accountRole==='fina
   // reste exclu : les routes /api/bdc/* exigent un compte (requireCommercial).
   // Les boutons de BLOCAGE de créneau, eux, restent réservés aux sales.
   if(commercialId)document.getElementById('nav-bdc').style.display='';
+  // Rôle finance coché (même en plus d'un autre rôle) : accès au Recouvrement.
+  if(rolesCompte.includes('finance')){const tRec=document.getElementById('app-tab-recouvrement');if(tRec)tRec.style.display='';}
   // Lien direct vers Paramètres depuis l'onglet du dashboard (/planning?view=parametres).
   if(isAccountAdmin && new URLSearchParams(window.location.search).get('view')==='parametres'){
     switchView('parametres');
@@ -116,7 +122,7 @@ async function tryAutoLogin(){
     if(!r.ok)throw new Error('session invalide');
     const d=await r.json();
     if(redirectIfFinance(d))return true;
-    activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole});
+    activateSession({role:planningRoleFor(d.accountRole,d.accountRoles), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole, accountRoles:d.accountRoles});
     await init();
     return true;
   }catch{
@@ -144,7 +150,7 @@ async function commercialLoginSubmit(){
     const d=await r.json();
     if(r.ok){
       if(redirectIfFinance(d))return;
-      activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole});
+      activateSession({role:planningRoleFor(d.accountRole,d.accountRoles), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole, accountRoles:d.accountRoles});
       await init();
     }else{
       errEl.textContent=d.error||'Email ou mot de passe incorrect.';
@@ -156,7 +162,7 @@ async function commercialLoginSubmit(){
 // de passe via le lien d'invitation reçu par email) : bascule vers l'app en rôle sales.
 function entrerCommeCommercial(d){
   if(redirectIfFinance(d))return;
-  activateSession({role:planningRoleFor(d.accountRole), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole});
+  activateSession({role:planningRoleFor(d.accountRole,d.accountRoles), nom:d.nom, clevel:false, commercialIdVal:d.commercial_id, commercialNomVal:d.nom, accountRole:d.accountRole, accountRoles:d.accountRoles});
   init();
 }
 
@@ -3061,6 +3067,21 @@ async function deleteSalesTeam(id,label){
 function salesTeamOptionsHtml(selectedId){
   return `<option value="">— équipe de vente —</option>`+salesTeamsCache.map(t=>`<option value="${t.id}" ${selectedId===t.id?'selected':''}>${t.label}</option>`).join('');
 }
+// Rôles multiples (09/2026, demande Lina) : menu déroulant à cases à cocher.
+// Ordre = priorité serveur (auth.js ROLE_PRIORITY) : le 1er rôle coché dans cet
+// ordre devient le rôle principal (page d'accueil du compte) ; les accès sont
+// l'union de tous les rôles cochés.
+const ROLES_PRIORITE=['admin','manager','commercial','edito','communication','finance'];
+function rolesTries(rs){return [...rs].sort((a,b)=>ROLES_PRIORITE.indexOf(a)-ROLES_PRIORITE.indexOf(b));}
+function rolesCompteDe(c){return [c.role||'commercial',...String(c.extra_roles||'').split(',').map(s=>s.trim()).filter(Boolean)].filter((v,i,a)=>a.indexOf(v)===i);}
+function rolesLibelle(rs){return rs.length?rolesTries(rs).map(v=>(ROLES_COMPTE.find(r=>r.value===v)||{label:v}).label).join(' + '):'— aucun —';}
+function rolesCoches(ddId){return [...document.querySelectorAll(`#${ddId} input[type=checkbox]:checked`)].map(i=>i.value);}
+function rolesMajLibelle(ddId){const dd=document.getElementById(ddId);if(dd)dd.querySelector('summary').textContent=rolesLibelle(rolesCoches(ddId));}
+function rolesDropdownHtml(ddId,selected,onchangeExtra){
+  return `<details class="roles-dd" id="${ddId}" style="position:relative;display:inline-block;min-width:170px"><summary class="form-select" style="list-style:none;cursor:pointer;white-space:nowrap" title="Cocher un ou plusieurs rôles">${rolesLibelle(selected)}</summary><div style="position:absolute;z-index:50;top:100%;left:0;margin-top:4px;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);padding:6px">${ROLES_COMPTE.map(r=>`<label title="${r.hint}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:13px;cursor:pointer;color:var(--text)"><input type="checkbox" value="${r.value}" ${selected.includes(r.value)?'checked':''} onchange="rolesMajLibelle('${ddId}');${onchangeExtra||''}"> ${r.label}</label>`).join('')}</div></details>`;
+}
+// Ferme le menu des rôles quand on clique ailleurs.
+document.addEventListener('click',e=>{document.querySelectorAll('details.roles-dd[open]').forEach(d=>{if(!d.contains(e.target))d.removeAttribute('open');});});
 function roleOptionsHtml(selectedRole){
   return ROLES_COMPTE.map(r=>`<option value="${r.value}" title="${r.hint}" ${selectedRole===r.value?'selected':''}>${r.label}</option>`).join('');
 }
@@ -3211,7 +3232,7 @@ function createCommercialFromSf(sfId,nom,sfEmail,uid){
   document.getElementById('modal-body').innerHTML=`
     <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="newacc-nom" value="${nom}"></div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Email de connexion</label><input class="form-input" type="email" id="newacc-email" value="${sfEmail||''}"></div>
-    <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label><select class="form-select" id="newacc-role">${roleOptionsHtml('commercial')}</select></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label>${rolesDropdownHtml('newacc-roles',['commercial'],'')}</div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Équipe de vente (commercial/manager)</label><select class="form-select" id="newacc-team">${salesTeamOptionsHtml(null)}</select></div>
     <div class="info-banner neutral" style="margin-top:10px">${ICON_MAIL} Un email va être envoyé à cette adresse pour que ${nom.split(' ')[0]} définisse lui/elle-même son mot de passe.</div>
   `;
@@ -3223,10 +3244,12 @@ function createCommercialFromSf(sfId,nom,sfEmail,uid){
 async function confirmCreateCommercial(sfId,equipe_edito_id){
   const nom=document.getElementById('newacc-nom').value.trim();
   const email=document.getElementById('newacc-email').value.trim();
-  const role=document.getElementById('newacc-role').value;
+  const roles=rolesCoches('newacc-roles');
+  if(!roles.length){showToast('Choisis au moins un rôle','warning');return;}
+  const role=rolesTries(roles)[0];
   const team_id=document.getElementById('newacc-team').value||null;
   if(!nom||!email){showToast('Nom et email sont requis','warning');return;}
-  const r=await fetch(`${API}/admin/commerciaux`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom,email,equipe_edito_id,sf_user_id:sfId,role,team_id})});
+  const r=await fetch(`${API}/admin/commerciaux`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom,email,equipe_edito_id,sf_user_id:sfId,role,roles,team_id})});
   const d=await r.json();
   if(!r.ok){showToast(d.error||'Erreur','warning');return;}
   closeModal();
@@ -3242,7 +3265,7 @@ function openManualAccountModal(){
   document.getElementById('modal-body').innerHTML=`
     <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="newacc-nom" placeholder="Ex: Eva Dupont"></div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Email de connexion</label><input class="form-input" type="email" id="newacc-email" placeholder="prenom.nom@openmedias.fr"></div>
-    <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label><select class="form-select" id="newacc-role">${roleOptionsHtml('edito')}</select></div>
+    <div class="form-group" style="margin-top:10px"><label class="form-label">Rôle</label>${rolesDropdownHtml('newacc-roles',['edito'],'')}</div>
     <div class="form-group" style="margin-top:10px"><label class="form-label">Équipe de vente (commercial/manager)</label><select class="form-select" id="newacc-team">${salesTeamOptionsHtml(null)}</select></div>
     <div class="info-banner neutral" style="margin-top:10px">${ICON_MAIL} Un email va être envoyé à cette adresse pour que la personne définisse elle-même son mot de passe.</div>
   `;
@@ -3254,10 +3277,12 @@ function openManualAccountModal(){
 async function confirmCreateManualAccount(){
   const nom=document.getElementById('newacc-nom').value.trim();
   const email=document.getElementById('newacc-email').value.trim();
-  const role=document.getElementById('newacc-role').value;
+  const roles=rolesCoches('newacc-roles');
+  if(!roles.length){showToast('Choisis au moins un rôle','warning');return;}
+  const role=rolesTries(roles)[0];
   const team_id=document.getElementById('newacc-team').value||null;
   if(!nom||!email){showToast('Nom et email sont requis','warning');return;}
-  const r=await fetch(`${API}/admin/commerciaux`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom,email,role,team_id})});
+  const r=await fetch(`${API}/admin/commerciaux`,{method:'POST',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({nom,email,role,roles,team_id})});
   const d=await r.json();
   if(!r.ok){showToast(d.error||'Erreur','warning');return;}
   closeModal();
@@ -3300,7 +3325,7 @@ function renderCommerciauxList(){
     <div class="param-row">
       <span class="pr-name">${c.nom}</span><span class="pr-email">${c.email}</span>
       <div class="pr-actions">
-        <div class="pr-field"><span class="pr-field-label">Rôle</span><select class="form-select" title="Rôle" onchange="updateCommercialRole(${c.id},this.value)">${roleOptionsHtml(c.role||'commercial')}</select></div>
+        <div class="pr-field"><span class="pr-field-label">Rôles</span>${rolesDropdownHtml('roles-'+c.id,rolesCompteDe(c),'updateCommercialRoles('+c.id+')')}</div>
         <div class="pr-field"><span class="pr-field-label">Équipe de vente</span><select class="form-select" title="Équipe de vente" onchange="updateCommercialTeam(${c.id},this.value)">${salesTeamOptionsHtml(c.team_id)}</select></div>
         <div class="pr-field"><span class="pr-field-label">Équipe édito</span><select class="form-select" title="Équipe édito" onchange="updateCommercialEquipe(${c.id},this.value)">
           <option value="">— équipe édito —</option>
@@ -3323,6 +3348,15 @@ async function updateCommercialTeam(id,team_id){
   await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({team_id:team_id||null})});
   await loadParametres();
   showToast('Équipe de vente mise à jour ✓','success');
+}
+async function updateCommercialRoles(id){
+  const roles=rolesCoches('roles-'+id);
+  if(!roles.length){showToast('Garde au moins un rôle','warning');await loadParametres();return;}
+  const r=await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({roles})});
+  if(!r.ok){showToast('Erreur','warning');await loadParametres();return;}
+  const c=commerciauxCache.find(x=>x.id===id);
+  if(c){const o=rolesTries(roles);c.role=o[0];c.extra_roles=o.slice(1).join(',');}
+  showToast('Rôles mis à jour ✓','success');
 }
 async function updateCommercialRole(id,role){
   const r=await fetch(`${API}/admin/commerciaux/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json',role:'edit'},body:JSON.stringify({role})});
