@@ -396,24 +396,6 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
     }
   });
 
-  app.get('/api/finance/debug/pennylane-customer/:id', requireFinance, async (req, res) => {
-    try {
-      const raw = await pennylane.pennylaneFetch(`/customers/${encodeURIComponent(req.params.id)}`);
-      res.json(raw);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.get('/api/finance/debug/pennylane-customer/:id/contacts', requireFinance, async (req, res) => {
-    try {
-      const raw = await pennylane.pennylaneFetch(`/customers/${encodeURIComponent(req.params.id)}/contacts`);
-      res.json(raw);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
   app.get('/api/finance/invoices/:id/comments', requireFinance, (req, res) => {
     res.json(db.prepare('SELECT * FROM finance_invoice_comments WHERE invoice_id=? ORDER BY created_at DESC').all(req.params.id));
   });
@@ -586,4 +568,7 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
     db.prepare('DELETE FROM finance_installment_statuses WHERE id=?').run(existing.id);
     res.status(204).end();
   });
+
+  // Import Excel des créances douteuses (29/09/2026)
+  require('./creancesDouteuses')(app, { db, requireFinance });
 };
