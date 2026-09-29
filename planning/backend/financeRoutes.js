@@ -67,7 +67,7 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
   // doivent être suivies d'un espace.
   function stripCivility(name) {
     let n = String(name || '').trim();
-    const re = /^(?:m\.|(?:mr|mme|mmes|mlle|melle|mm|monsieur|madame|mademoiselle|messieurs)\.?(?=\s))\s*(?:(?:et|&)\s+)?/i;
+    const re = /^(?:m\.|(?:mr|mme|mmes|mlle|melle|mm|monsieur|madame|mademoiselle|messieurs)\.?(?=[\s,]))[\s,]*(?:(?:et|&)\s+)?/i;
     let prev;
     do { prev = n; n = n.replace(re, '').trim(); } while (n !== prev && n);
     return n;
