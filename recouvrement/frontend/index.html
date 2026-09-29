@@ -99,9 +99,6 @@ même niveau que les autres, pas nested dans le planning. -->
 <span id="finance-last-sync" style="font-size:11px;color:var(--text-muted)"></span>
 <button type="button" class="finance-sync-detail-toggle" id="finance-sync-detail-toggle" onclick="toggleFinanceSyncOverview()">Détail de la synchro</button>
 <button class="btn-secondary" onclick="exportFinanceCsv()">⬇ Export CSV</button>
-<!-- Import du fichier Excel des créances douteuses (29/09/2026, demande Lina) -->
-<input type="file" id="finance-douteux-file" accept=".xlsx" style="display:none" onchange="importDouteuxExcel(this)">
-<button class="btn-secondary" id="finance-douteux-btn" onclick="document.getElementById('finance-douteux-file').click()" title="Importer le fichier Excel des créances douteuses (comptabilité) : les factures encore dues passent en Douteux">⬆ Importer douteux (Excel)</button>
 <button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()">↻ Synchroniser Pennylane</button>
 </div>
 </div>
