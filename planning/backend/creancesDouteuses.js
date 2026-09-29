@@ -353,19 +353,54 @@ const isZip = (b) => Buffer.isBuffer(b) && b.length > 4 && b[0] === 0x50 && b[1]
 
 async function downloadShared(link) {
   const attempts = [];
-  const candidates = [
-    ['api-shares', `https://api.onedrive.com/v1.0/shares/${shareToken(link)}/root/content`],
-    ['lien-direct', link + (link.includes('?') ? '&' : '?') + 'download=1'],
-  ];
-  for (const [name, url] of candidates) {
+  const UA = { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36' };
+  const tryUrl = async (name, url, extra = {}) => {
     try {
-      const res = await fetch(url, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (OpenMedias-dashboard)' } });
+      const res = await fetch(url, { redirect: 'follow', headers: { ...UA, ...(extra.headers || {}) } });
       const buf = Buffer.from(await res.arrayBuffer());
-      if (res.ok && isZip(buf)) return { buf, via: name, attempts };
-      attempts.push(`${name}: HTTP ${res.status}, ${buf.length} octets${res.ok ? ' (pas un .xlsx)' : ''}`);
+      if (res.ok && isZip(buf)) return { buf, via: name, finalUrl: res.url };
+      attempts.push(`${name}: HTTP ${res.status}, ${buf.length} o, ${(res.headers.get('content-type') || '').split(';')[0]}`);
+      return { html: buf.length < 3e6 && !isZip(buf) ? buf.toString('utf8') : '', finalUrl: res.url };
     } catch (e) {
       attempts.push(`${name}: ${e.message}`);
+      return {};
     }
+  };
+
+  // 1) Le lien de partage est redirigé vers la page OneDrive (resid + clé de partage « e »).
+  const first = await tryUrl('lien', link);
+  if (first.buf) return { ...first, attempts };
+  let finalUrl = first.finalUrl || link;
+  let resid = null, key = null;
+  try { const u = new URL(finalUrl); resid = u.searchParams.get('resid'); key = u.searchParams.get('e') || u.searchParams.get('authkey'); } catch (e) { /* ignoré */ }
+  attempts.push(`redirection: ${(() => { try { const u = new URL(finalUrl); return u.host + u.pathname.slice(0, 12); } catch (e) { return '?'; } })()} resid=${resid ? 'oui' : 'non'} cle=${key ? 'oui' : 'non'}`);
+
+  // 2) L'API de partage avec l'adresse d'origine puis l'adresse redirigée.
+  for (const [n, l] of [['api-origine', link], ['api-redirigee', finalUrl]]) {
+    const r = await tryUrl(n, `https://api.onedrive.com/v1.0/shares/${shareToken(l)}/root/content`);
+    if (r.buf) return { ...r, attempts };
+  }
+  // 3) Téléchargement direct avec l'identifiant de fichier et la clé de partage.
+  if (resid) {
+    const cands = [
+      ['download-resid-cle', `https://onedrive.live.com/download?resid=${encodeURIComponent(resid)}&authkey=${encodeURIComponent(key || '')}`],
+      ['download-resid', `https://onedrive.live.com/download?resid=${encodeURIComponent(resid)}`],
+      ['page-download', finalUrl + (finalUrl.includes('?') ? '&' : '?') + 'download=1'],
+    ];
+    for (const [n, u] of cands) {
+      const r = await tryUrl(n, u);
+      if (r.buf) return { ...r, attempts };
+    }
+  }
+  // 4) Dernier recours : chercher une adresse de téléchargement dans le code de la page.
+  const html = first.html || '';
+  const m = /"(?:@content\.downloadUrl|downloadUrl|FileGetUrl)"\s*:\s*"([^"]+)"/.exec(html);
+  if (m) {
+    const url = m[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+    const r = await tryUrl('adresse-dans-la-page', url);
+    if (r.buf) return { ...r, attempts };
+  } else {
+    attempts.push(`page: ${html.length} caractères, aucune adresse de téléchargement trouvée`);
   }
   return { buf: null, attempts };
 }
