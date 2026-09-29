@@ -35,7 +35,7 @@ const EMAIL_ADMIN = process.env.EMAIL_ADMIN || 'donatien.l@openmedias.fr';
 
 // ── MOTS DE PASSE (comptes commerciaux) ───────────────────────────────────────
 // Partagé avec le host OpenDashboard depuis la fusion — voir ./auth.js.
-const { hashPassword, verifyCommercialLogin, getCommercialById } = require('./auth');
+const { hashPassword, verifyCommercialLogin, getCommercialById, rolesOf, normalizeRoles } = require('./auth');
 const salesTeams = require('./teams');
 
 // ── UTILISATEURS ADMINS (Lina, Lola, Thomas) ─────────────────────────
@@ -110,7 +110,9 @@ function requireCommercial(req, res, next) {
 
 function requireFinance(req, res, next) {
   requireCommercial(req, res, () => {
-    if (req.commercial.role === 'finance' || req.commercial.role === 'admin' || isUserAdmin(req.commercial)) return next();
+    // Rôles multiples (09/2026) : finance OU admin parmi les rôles cochés.
+    const rs = rolesOf(req.commercial);
+    if (rs.includes('finance') || rs.includes('admin') || req.commercial.role === 'admin' || isUserAdmin(req.commercial)) return next();
     return res.status(403).json({ error: 'Accès refusé' });
   });
 }
@@ -143,11 +145,12 @@ app.use((req, res, next) => {
       const user = getCommercialById(id);
       if (user) {
         req.commercial = user;
-        if (isUserAdmin(user) || user.role === 'edito' || user.role === 'admin') {
+        const rs = rolesOf(user); // rôles multiples : union des accès
+        if (isUserAdmin(user) || rs.includes('edito') || rs.includes('admin')) {
           user.role = 'admin';
           user.is_admin = 1;
           req.headers.role = 'edit';
-        } else if (user.role === 'communication') {
+        } else if (rs.includes('communication')) {
           req.headers.role = 'com';
         }
       }
@@ -178,7 +181,8 @@ app.post('/api/auth/commercial', (req, res) => {
 
   res.json({ 
     role: 'sales', 
-    accountRole: effectiveRole, 
+    accountRole: effectiveRole,
+    accountRoles: isAdmin ? [...new Set(['admin', ...rolesOf(user)])] : rolesOf(user), 
     commercial_id: user.id, 
     nom: user.nom, 
     email: user.email, 
@@ -199,7 +203,7 @@ app.post('/api/auth/set-password', (req, res) => {
     .run(hashPassword(password), user.id);
   
   const isAdmin = isUserAdmin(user);
-  res.json({ role: 'sales', accountRole: isAdmin ? 'admin' : (user.role || 'commercial'), commercial_id: user.id, nom: user.nom, email: user.email });
+  res.json({ role: 'sales', accountRole: isAdmin ? 'admin' : (user.role || 'commercial'), accountRoles: isAdmin ? [...new Set(['admin', ...rolesOf(user)])] : rolesOf(user), commercial_id: user.id, nom: user.nom, email: user.email });
 });
 
 app.post('/api/auth/forgot-password', (req, res) => {
@@ -265,6 +269,7 @@ app.get('/api/auth/me', requireCommercial, (req, res) => {
     nom: req.commercial.nom,
     email: req.commercial.email,
     accountRole: isAdmin ? 'admin' : (req.commercial.role || 'commercial'),
+    accountRoles: isAdmin ? [...new Set(['admin', ...rolesOf(req.commercial)])] : rolesOf(req.commercial),
     isAdmin: isAdmin ? true : !!req.commercial.is_admin,
     teamId: req.commercial.team_id || null,
   });
@@ -1224,7 +1229,7 @@ app.delete('/api/social-ideas/:id', requireContentTeam, (req, res) => {
 
 app.get('/api/social-team', requireContentTeam, (req, res) => {
   res.json(db.prepare(
-    "SELECT id, nom FROM commercial_users WHERE role='communication' AND actif=1 ORDER BY nom ASC"
+    "SELECT id, nom FROM commercial_users WHERE (role='communication' OR ',' || COALESCE(extra_roles,'') || ',' LIKE '%,communication,%') AND actif=1 ORDER BY nom ASC"
   ).all());
 });
 
@@ -1300,7 +1305,7 @@ const VALID_ROLES = ['commercial', 'manager', 'edito', 'communication', 'finance
 
 app.get('/api/admin/commerciaux', requireEdit, (req, res) => {
   res.json(db.prepare(`
-    SELECT cu.id, cu.email, cu.nom, cu.actif, cu.is_admin, cu.role, cu.team_id,
+    SELECT cu.id, cu.email, cu.nom, cu.actif, cu.is_admin, cu.role, cu.extra_roles, cu.team_id,
            cu.equipe_edito_id, e.nom as equipe_nom, st.label as team_label
     FROM commercial_users cu
     LEFT JOIN equipes_edito e ON e.id = cu.equipe_edito_id
@@ -1389,13 +1394,16 @@ app.post('/api/admin/commerciaux', requireEdit, (req, res) => {
   const equipe_edito_id = req.body.equipe_edito_id || null;
   const sf_user_id = req.body.sf_user_id || null;
   const team_id = req.body.team_id || null;
-  const role = VALID_ROLES.includes(req.body.role) ? req.body.role : 'commercial';
+  // Rôles multiples (09/2026) : `roles` = liste cochée ; rôle principal = le plus large.
+  const multi = Array.isArray(req.body.roles) ? normalizeRoles(req.body.roles, VALID_ROLES) : null;
+  const role = multi && multi.role ? multi.role : (VALID_ROLES.includes(req.body.role) ? req.body.role : 'commercial');
+  const extra_roles = multi ? multi.extra : '';
   const is_admin = role === 'admin' ? 1 : (req.body.is_admin ? 1 : 0);
   if (!nom || !email) return res.status(400).json({ error: 'Nom et email requis' });
   try {
     const placeholder = crypto.randomBytes(32).toString('hex');
-    const r = db.prepare(`INSERT INTO commercial_users (email,password_hash,nom,sf_user_id,equipe_edito_id,is_admin,role,team_id) VALUES (?,?,?,?,?,?,?,?)`)
-      .run(email, hashPassword(placeholder), nom, sf_user_id, equipe_edito_id, is_admin, role, team_id);
+    const r = db.prepare(`INSERT INTO commercial_users (email,password_hash,nom,sf_user_id,equipe_edito_id,is_admin,role,team_id,extra_roles) VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(email, hashPassword(placeholder), nom, sf_user_id, equipe_edito_id, is_admin, role, team_id, extra_roles);
     const user = { id: r.lastInsertRowid, nom, email };
     envoyerInvitation(req, user);
     res.status(201).json({ id: r.lastInsertRowid, invitationEnvoyee: true });
@@ -1412,7 +1420,15 @@ app.post('/api/admin/commerciaux/:id/resend-invite', requireEdit, (req, res) => 
 });
 
 app.patch('/api/admin/commerciaux/:id', requireEdit, (req, res) => {
-  const { equipe_edito_id, actif, password, is_admin, role, team_id } = req.body;
+  const { equipe_edito_id, actif, password, is_admin, team_id } = req.body;
+  let role = req.body.role;
+  let extraRoles;
+  if (Array.isArray(req.body.roles)) {
+    const multi = normalizeRoles(req.body.roles, VALID_ROLES);
+    if (!multi.role) return res.status(400).json({ error: 'Choisir au moins un rôle' });
+    role = multi.role;
+    extraRoles = multi.extra;
+  }
   if (role !== undefined && !VALID_ROLES.includes(role)) {
     return res.status(400).json({ error: `Rôle invalide (attendu: ${VALID_ROLES.join(', ')})` });
   }
@@ -1426,6 +1442,7 @@ app.patch('/api/admin/commerciaux/:id', requireEdit, (req, res) => {
     actif = COALESCE(?, actif),
     is_admin = COALESCE(?, is_admin),
     role = COALESCE(?, role),
+      extra_roles = COALESCE(?, extra_roles),
     team_id = CASE WHEN ? THEN ? ELSE team_id END
     WHERE id=?`
   ).run(
@@ -1433,6 +1450,7 @@ app.patch('/api/admin/commerciaux/:id', requireEdit, (req, res) => {
     actif !== undefined ? (actif ? 1 : 0) : null,
     isAdminFinal,
     role !== undefined ? role : null,
+    extraRoles !== undefined ? extraRoles : null,
     team_id !== undefined ? 1 : 0, team_id || null,
     req.params.id
   );
