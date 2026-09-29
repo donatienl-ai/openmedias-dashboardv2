@@ -62,12 +62,23 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
   const PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete', 'paid'];
   const HORS_RECOUVREMENT_PLACEHOLDERS = PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',');
 
+  // Retire la civilité (M., Mr, Mme, Mlle, Monsieur, Madame…) placée devant les noms/prénoms
+  // de contact (demande Lina 29/09/2026). « Mrabet » n'est pas touché : les formes sans point
+  // doivent être suivies d'un espace.
+  function stripCivility(name) {
+    let n = String(name || '').trim();
+    const re = /^(?:m\.|(?:mr|mme|mmes|mlle|melle|mm|monsieur|madame|mademoiselle|messieurs)\.?(?=\s))\s*(?:(?:et|&)\s+)?/i;
+    let prev;
+    do { prev = n; n = n.replace(re, '').trim(); } while (n !== prev && n);
+    return n;
+  }
+
   function shapeInvoiceRow(r, installments) {
     const echRef = computeEcheanceReference(buildEcheanceChain(r, installments));
     
     let firstName = '';
     let lastName = '';
-    const rawContact = String(r.contact_name || '').trim();
+    const rawContact = stripCivility(r.contact_name);
     
     if (rawContact) {
       const parts = rawContact.split(' ');
@@ -104,8 +115,8 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
       customerPhone: r.customer_phone || '',
       customer_phone: r.customer_phone || '',
       
-      contactName: r.contact_name || '',
-      contact_name: r.contact_name || '',
+      contactName: rawContact,
+      contact_name: rawContact,
       
       contactEmail: r.contact_email || '',
       contact_email: r.contact_email || '',
