@@ -1504,6 +1504,15 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
     { label: 'Ventes gagnées', value: sig.total, color: '#8B5CF6' },
   ].map((s, i, arr) => ({ ...s, rate: i === 0 ? null : funnelRate(s.value, arr[i - 1].value) }));
 
+  // Taux de conversion (demande Thomas Durand, validée par Lina le 30/09/2026) :
+  // ventes gagnées ÷ R1 programmés sur la période × 100 (R1 = rendez-vous,
+  // pas les appels de prospection). « — » quand il n'y a aucun R1.
+  const conversionRate = funnelRate(sig.total, rdvT.r1.total);
+  const conversionLabel = conversionRate === null ? '—' : `${String(conversionRate).replace('.', ',')} %`;
+  // « Où j'en suis » sur le CA du mois (cf. buildCaRanking côté serveur) :
+  // jamais le score individuel d'un autre commercial.
+  const caRanking = d.caRanking || null;
+
   // ===== Leaderboard hebdo (Calls / RDV pris / CA), respecte le filtre équipe/masquage =====
   const weekCalls = fBlock(weekData?.calls || { total: 0, detail: [] });
   const weekRev = fBlock(weekData?.revenue || { totalAmount: 0, detail: [] }, true);
@@ -1694,7 +1703,10 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           delta={dPropals}
           clickable onClick={() => openModal('Propositions suivies (pistes + comptes) par commercial', propalsMerged, false, 'c-orange', [], propalsExtraCols)} />
         <Kpi unavailable={!!(d.errors?.signatures)} label="Ventes gagnées" value={sig.total} sub="opportunités Salesforce" color="c-violet" dot="#3B82F6" glow
-          secondary={!isThisMonth && !d.errors?.monthSignatures ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : null}
+          secondary={[
+            ...(!isThisMonth && !d.errors?.monthSignatures ? [{ value: monthSig.total, label: 'ce mois', dot: '#3B82F6' }] : []),
+            ...(!d.errors?.rdvToday ? [{ value: conversionLabel, label: 'conversion (ventes / R1)', dot: '#22C55E' }] : []),
+          ]}
           delta={dSig} />
         <div className="tile hero-ca col-2">
           <div className="lbl">CA gagné · {isToday ? 'du jour' : 'période'}
@@ -1721,6 +1733,22 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             {objectiveSaved && <span className="objective-saved" role="status">Objectif enregistré</span>}
           </div>}
         </div>
+        {caRanking && caRanking.pctOfAverage !== null && (
+          <div className="tile col-12 ca-ranking">
+            <div className="lbl">CA du mois vs moyenne des {caRanking.peers} commerciaux</div>
+            <div className="ca-ranking-body">
+              <div className="ca-ranking-gauge" aria-hidden="true">
+                <div
+                  className={`ca-ranking-fill ${caRanking.pctOfAverage >= 100 ? 'up' : 'down'}`}
+                  style={{ width: `${Math.min(caRanking.pctOfAverage, 200) / 2}%` }}
+                />
+                <div className="ca-ranking-mark" title="Moyenne des commerciaux (100 %)" />
+              </div>
+              <div className={`ca-ranking-pct ${caRanking.pctOfAverage >= 100 ? 'up' : 'down'}`}>{caRanking.pctOfAverage} %</div>
+            </div>
+            <div className="ca-ranking-legend">100 % = moyenne</div>
+          </div>
+        )}
       </>
     ),
 
