@@ -336,9 +336,18 @@ async function pinSubmit(){
   }catch{document.getElementById('pin-error').textContent='Erreur.';pinBuffer='';updateDots();}
 }
 
+// En-têtes des lectures du planning : le rôle, plus l'id du compte commercial
+// connecté pour que le serveur applique son horizon de visibilité personnel
+// (ex : 6 mois pour Lisa et Quentin, demande Thomas Durand 30/09/2026).
+function planningHeaders(){
+  const h={role};
+  if(commercialId)h['x-commercial-id']=commercialId;
+  return h;
+}
+
 // ── INIT ────────────────────────────────────────────────────────────────────
 async function init(){
-  meta=await fetch(`${API}/meta`).then(r=>r.json());
+  meta=await fetch(`${API}/meta`,{headers:planningHeaders()}).then(r=>r.json());
   joursBlockes=await fetch(`${API}/jours-bloques`).then(r=>r.json());
   buildMediaTabs();
   await loadData();
@@ -366,7 +375,7 @@ async function loadData(){
   if(searchQuery)url+=`&search=${encodeURIComponent(searchQuery)}`;
   if(bdcFilterActive)url+=`&statut=bdc_attente`;
   if(respFilter)url+=`&resp_edit=${encodeURIComponent(respFilter)}`;
-  [emissions,slotMap]=await Promise.all([fetch(url,{headers:{role}}).then(r=>r.json()),fetch(`${API}/slots?media=${encodeURIComponent(currentMedia)}&mois=${m}&annee=${y}`).then(r=>r.json())]);
+  [emissions,slotMap]=await Promise.all([fetch(url,{headers:planningHeaders()}).then(r=>r.json()),fetch(`${API}/slots?media=${encodeURIComponent(currentMedia)}&mois=${m}&annee=${y}`).then(r=>r.json())]);
 }
 
 // ── NAV ─────────────────────────────────────────────────────────────────────
@@ -931,7 +940,7 @@ async function selectMedia(m){
 async function refreshAll(){
   const btn=document.getElementById('refresh-btn');
   btn.style.transform='rotate(360deg)';btn.style.transition='transform 0.5s';
-  meta=await fetch(`${API}/meta`).then(r=>r.json());
+  meta=await fetch(`${API}/meta`,{headers:planningHeaders()}).then(r=>r.json());
   joursBlockes=await fetch(`${API}/jours-bloques`).then(r=>r.json());
   await loadData();renderCalendar();
   if(role==='edit')loadAProgrammer();
@@ -1733,7 +1742,7 @@ async function renderList(){
   let url=`${API}/emissions?mois=${m}&annee=${y}`;
   if(searchQuery)url+=`&search=${encodeURIComponent(searchQuery)}`;
   if(bdcFilterActive)url+=`&statut=bdc_attente`;
-  listAllCache=await fetch(url,{headers:{role}}).then(r=>r.json());
+  listAllCache=await fetch(url,{headers:planningHeaders()}).then(r=>r.json());
   refreshMsFilterButtons();
   applyListFilters();
 }
@@ -2330,6 +2339,9 @@ function bdcInit(){
       el.addEventListener('change', bdcSchedulePreview);
     });
 
+  document.getElementById('bdc2-montantHT').addEventListener('input', bdcSyncCapsulesOffer);
+  document.getElementById('bdc2-montantHT').addEventListener('change', bdcSyncCapsulesOffer);
+
   window.addEventListener('resize', bdcScalePreview);
   document.getElementById('bdc2-previewFrame').addEventListener('load', bdcScalePreview);
 }
@@ -2354,6 +2366,35 @@ function bdcRenderDescItems(items){
 function bdcAddDescItem(){
   document.getElementById('bdc2-descItemsList').appendChild(bdcMakeDescRow(''));
   bdcSchedulePreview();
+}
+
+// Offre « 4 capsules vidéos pour les réseaux sociaux » (demande Thomas Durand,
+// validée par Lina le 30/09/2026) : ajoutée automatiquement aux prestations dès
+// que le montant HT atteint 6 900 € (inclus), retirée automatiquement s'il
+// repasse en dessous. La ligne reste modifiable ou supprimable par le
+// commercial ; si elle a été modifiée à la main, on n'y touche plus. Rien n'est
+// ajouté si le modèle mentionne déjà des capsules vidéo (ex : Figaro Immersion).
+const BDC_CAPSULES_SEUIL_HT=6900;
+const BDC_CAPSULES_TEXTE='4 capsules vidéos pour les réseaux sociaux';
+function bdcSyncCapsulesOffer(){
+  const list=document.getElementById('bdc2-descItemsList');
+  const montantEl=document.getElementById('bdc2-montantHT');
+  if(!list||!montantEl)return;
+  const montant=parseFloat(String(montantEl.value||'').replace(',','.'));
+  const eligible=Number.isFinite(montant)&&montant>=BDC_CAPSULES_SEUIL_HT;
+  const autoInput=[...list.querySelectorAll('.form-input')].find(i=>i.dataset.autoOffer==='capsules'||i.value===BDC_CAPSULES_TEXTE);
+  if(eligible){
+    if(autoInput)return;
+    const dejaPresent=[...list.querySelectorAll('.form-input')].some(i=>/capsules?\s+vid/i.test(i.value));
+    if(dejaPresent)return;
+    const row=bdcMakeDescRow(BDC_CAPSULES_TEXTE);
+    row.querySelector('.form-input').dataset.autoOffer='capsules';
+    list.appendChild(row);
+    bdcSchedulePreview();
+  }else if(autoInput&&autoInput.value===BDC_CAPSULES_TEXTE){
+    autoInput.closest('.desc-item-row').remove();
+    bdcSchedulePreview();
+  }
 }
 async function bdcImporterSalesforce(){
   const input=document.getElementById('bdc2-sfInput');
@@ -2407,6 +2448,7 @@ async function bdcLoadDefaults(){
     const d=await fetch(`${API}/bdc/template-defaults?templateKey=${encodeURIComponent(templateKey)}`,{headers:{'x-commercial-id':commercialId}}).then(r=>r.json());
     bdcRenderDescItems(d.descriptionItems);
   }catch(e){}
+  bdcSyncCapsulesOffer();
   bdcSchedulePreview();
 }
 
