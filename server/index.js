@@ -218,6 +218,28 @@ const dashboardCache = createDashboardCache({
   warmPresets: ['last_month', 'this_month', 'this_week', 'today'],
 });
 
+// « Où j'en suis » (demande Thomas Durand, validée par Lina le 30/09/2026) :
+// chaque commercial se situe par rapport à la moyenne de TOUS les commerciaux
+// actifs (commercial + manager) sur le CA du mois, sans jamais voir le score
+// d'un autre. On ne renvoie qu'un pourcentage : son CA ÷ le CA moyen.
+const PEER_ROLES = ['commercial', 'manager'];
+function buildCaRanking(full, commercial) {
+  const me = resolveDisplayName(commercial);
+  if (!me || (full.errors && full.errors.monthRevenue)) return null;
+  const peers = [...new Set(getRoster().filter((s) => s.actif && PEER_ROLES.includes(s.role)).map((s) => s.display))];
+  if (peers.length < 2 || !peers.includes(me)) return null;
+  const rows = (full.monthRevenue && Array.isArray(full.monthRevenue.detail)) ? full.monthRevenue.detail : [];
+  const caOf = (name) => rows.filter((r) => r.name === name).reduce((sum, r) => sum + (r.amount || 0), 0);
+  const myCa = caOf(me);
+  const average = peers.map(caOf).reduce((a, b) => a + b, 0) / peers.length;
+  // CA du commercial en % du CA moyen (100 % = pile la moyenne) ; null tant
+  // que personne n'a encore de CA ce mois-ci.
+  return {
+    peers: peers.length,
+    pctOfAverage: average > 0 ? Math.round((myCa / average) * 100) : null,
+  };
+}
+
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     if (req.commercial && ['edito', 'communication'].includes(req.commercial.role)) {
@@ -242,7 +264,9 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       if (!displayName) {
         console.warn(`[SCOPE] commercial "${req.commercial.nom}" (id=${req.commercial.id}) introuvable dans le roster (roster.js, dérivé de commercial_users) — verra des données vides sur /api/dashboard. Vérifier son rôle (commercial/manager/admin) et son statut actif.`);
       }
-      return res.json(scopeDataToCommercial(full, displayName || req.commercial.nom));
+      const scoped = scopeDataToCommercial(full, displayName || req.commercial.nom);
+      const caRanking = buildCaRanking(full, req.commercial);
+      return res.json(caRanking ? { ...scoped, caRanking } : scoped);
     }
     res.json(full);
   } catch (e) {
