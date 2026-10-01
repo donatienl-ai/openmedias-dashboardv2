@@ -1427,3 +1427,16 @@ body, .tile, .period-btn, .period-menu, .modal, .login-card, .theme-btn {
      Login, recherche, dates personnalisées... étaient tous entre 13 et 15px. */
   input, select, textarea { font-size: 16px !important; }
 }
+
+/* CA du mois vs moyenne des commerciaux (dashboard personnel d'un commercial
+   — demande Thomas Durand, validée 30/09/2026). Jauge 0–200 %, repère à 100 %. */
+.ca-ranking-body { display: flex; align-items: center; gap: 16px; margin-top: 10px; }
+.ca-ranking-gauge { position: relative; flex: 1; height: 14px; border-radius: 999px; background: rgba(148, 163, 184, 0.25); overflow: hidden; }
+.ca-ranking-fill { height: 100%; border-radius: 999px; transition: width 0.4s ease; }
+.ca-ranking-fill.up { background: #22C55E; }
+.ca-ranking-fill.down { background: #F59E0B; }
+.ca-ranking-mark { position: absolute; top: -3px; bottom: -3px; left: 50%; width: 2px; background: currentColor; opacity: 0.6; }
+.ca-ranking-pct { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 90px; text-align: right; }
+.ca-ranking-pct.up { color: #16A34A; }
+.ca-ranking-pct.down { color: #D97706; }
+.ca-ranking-legend { font-size: 12px; opacity: 0.65; margin-top: 4px; text-align: center; }
