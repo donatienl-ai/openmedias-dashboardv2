@@ -79,6 +79,27 @@ function getHorizonMois() {
   return row ? parseInt(row.value, 10) : 3;
 }
 
+// Horizon élargi pour certains comptes (demande Thomas Durand, validée par
+// Lina le 30/09/2026) : Lisa et Quentin peuvent voir et poser des créneaux
+// jusqu'à 6 mois à l'avance. Tous les autres comptes gardent l'horizon global
+// (Paramètres > Horizon). Si l'horizon global devient plus grand, il s'applique
+// aussi à eux (on prend le maximum des deux).
+const HORIZON_MOIS_PAR_EMAIL = {
+  'lneveu@openmedias.fr': 6,
+  'quentin.p@openmedias.fr': 6,
+};
+function getHorizonMoisPour(user) {
+  const global = getHorizonMois();
+  const email = user && user.email ? String(user.email).trim().toLowerCase() : '';
+  const perso = HORIZON_MOIS_PAR_EMAIL[email];
+  return perso ? Math.max(global, perso) : global;
+}
+function getHorizonMoisRequete(req) {
+  if (req.commercial) return getHorizonMoisPour(req.commercial);
+  const id = req.headers['x-commercial-id'];
+  return getHorizonMoisPour(id ? getCommercialById(id) : null);
+}
+
 function requireEdit(req, res, next) {
   if (req.headers.role === 'edit' || (req.commercial && isUserAdmin(req.commercial))) {
     req.headers.role = 'edit';
@@ -611,7 +632,7 @@ app.post('/api/emissions/bdc', requireCommercial, (req, res) => {
     return res.status(400).json({ error: 'Les diffusions ne peuvent être calées que les lundis, mercredis ou vendredis.' });
   }
 
-  const horizonMois = getHorizonMois();
+  const horizonMois = getHorizonMoisRequete(req);
   const maxDate = new Date(); maxDate.setMonth(maxDate.getMonth() + horizonMois);
   if (new Date(date_diffusion) > maxDate) {
     return res.status(403).json({ error: `Date au-delà de l'horizon autorisé (${horizonMois} mois).` });
@@ -905,7 +926,7 @@ app.get('/api/bdc/docusign/envois', requireCommercial, async (req, res) => {
 app.get('/api/emissions', (req, res) => {
   const { media, mois, annee, search, statut, resp_edit } = req.query;
   if (req.headers.role !== 'edit' && mois && annee) {
-    const horizonMois = getHorizonMois();
+    const horizonMois = getHorizonMoisRequete(req);
     const maxDate = new Date(); maxDate.setMonth(maxDate.getMonth() + horizonMois);
     const reqDate = new Date(`${annee}-${String(mois).padStart(2,'0')}-01`);
     if (reqDate > maxDate) return res.json([]);
@@ -1133,7 +1154,7 @@ app.get('/api/reporting/semaine', (req, res) => {
 });
 
 // ── META ──────────────────────────────────────────────────────────────────────
-app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMois(), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST, channels: CHANNELS, socialPostStatuses: SOCIAL_POST_STATUSES, financeInternalStatuses: FINANCE_INTERNAL_STATUSES }));
+app.get('/api/meta', (req, res) => res.json({ medias: MEDIAS, slots: SLOTS_PAR_MEDIA, formats: FORMATS_PAR_MEDIA, horizonMois: getHorizonMoisRequete(req), sousMediasSpecialises: SOUS_MEDIAS_SPECIALISES, sousMediasListe: SOUS_MEDIAS_LIST, channels: CHANNELS, socialPostStatuses: SOCIAL_POST_STATUSES, financeInternalStatuses: FINANCE_INTERNAL_STATUSES }));
 
 // ── RÉTROPLANNING COMMUNICATION ─────────────────────────────────────────────
 app.get('/api/social-posts', (req, res) => {
