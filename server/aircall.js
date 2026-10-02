@@ -255,6 +255,25 @@ export async function refreshRecent(since) {
   };
 }
 
+// Attribution d'un appel à un commercial (correctif 02/10/2026, demande Lina).
+// Avant : un appel dont l'utilisateur Aircall n'était pas reconnu comme
+// commercial du dashboard (compte hors équipe commerciale, nom écrit
+// autrement, homonyme) était compté à Quentin (règle « Inconnu → Quentin » de
+// nameMatching.js), ce qui gonflait ses appels. Désormais ces appels vont dans
+// une ligne à part, « Autres utilisateurs Aircall », qui liste les noms
+// Aircall concernés : on voit tout de suite à qui ils appartiennent. Elle
+// n'entre ni dans le podium ni dans le graphique par commercial, et un compte
+// commercial ne la voit jamais (scoping par nom).
+export const OTHER_AIRCALL_USERS = 'Autres utilisateurs Aircall';
+const normName = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function attributeCall(rawUser) {
+  const raw = normName(rawUser);
+  if (!raw || ['inconnu', 'unknown', 'unassigned'].includes(raw)) return null;
+  // Nom vide ou « inconnu » écarté ci-dessus : c'est le seul cas où
+  // resolveSaleName rattachait par défaut à Quentin. Les alias restent gérés.
+  return matchSaleStrict(rawUser) || null;
+}
+
 export async function getCalls({ start, end }) {
   const from = toUnix(start);
   const to = toUnix(end);
@@ -266,11 +285,23 @@ export async function getCalls({ start, end }) {
   let totalOutbound = 0;
   for (const c of calls) {
     if (c.inbound) totalInbound += 1; else totalOutbound += 1;
-    const name = matchSaleStrict(c.user) || 'Inconnu';
+    const matched = attributeCall(c.user);
+    const name = matched || OTHER_AIRCALL_USERS;
     const e = map.get(name) || { count: 0, inbound: 0, outbound: 0 };
     e.count += 1;
     if (c.inbound) e.inbound += 1; else e.outbound += 1;
+    if (!matched) {
+      e.outsideTeam = true;
+      e._src = e._src || new Map();
+      const label = (c.user && String(c.user).trim()) || 'appel sans utilisateur';
+      e._src.set(label, (e._src.get(label) || 0) + 1);
+    }
     map.set(name, e);
+  }
+  const other = map.get(OTHER_AIRCALL_USERS);
+  if (other && other._src) {
+    other.sources = [...other._src.entries()].map(([n, count]) => ({ name: n, count })).sort((a, b) => b.count - a.count).slice(0, 15);
+    delete other._src;
   }
   const detail = buildFullList(map);
   // `truncated` reflète le plafond 50k sur la fenêtre récupérée.
