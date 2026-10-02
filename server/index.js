@@ -223,29 +223,15 @@ const dashboardCache = createDashboardCache({
 // actifs (commercial + manager) sur le CA du mois, sans jamais voir le score
 // d'un autre. On ne renvoie qu'un pourcentage : son CA ÷ le CA moyen.
 const PEER_ROLES = ['commercial', 'manager'];
-// Fenêtre glissante de 30 jours (02/10/2026, demande Lina) : avec le mois
-// civil, la jauge disparaissait en début de mois tant que personne n'avait de
-// CA. CA sur 30 jours mis en cache 10 min pour ne pas solliciter Salesforce à
-// chaque ouverture du dashboard.
-const CA_RANKING_DAYS = 30;
-let caRankingCache = { at: 0, rev: null };
-async function getRollingRevenue() {
-  if (caRankingCache.rev && Date.now() - caRankingCache.at < 10 * 60 * 1000) return caRankingCache.rev;
-  const end = new Date();
-  const start = new Date(end.getTime() - CA_RANKING_DAYS * 86400000);
-  const rev = await getRevenue({ start, end });
-  caRankingCache = { at: Date.now(), rev };
-  return rev;
-}
-
-async function buildCaRanking(commercial) {
+// CA du mois civil en cours (ventes signées Salesforce), décision Lina 02/10/2026.
+// Tant que personne n'a vendu ce mois-ci, la moyenne vaut 0 : pctOfAverage = null
+// et le dashboard affiche un message au lieu de la jauge.
+async function buildCaRanking(full, commercial) {
   const me = resolveDisplayName(commercial);
-  if (!me) return null;
+  if (!me || (full.errors && full.errors.monthRevenue)) return null;
   const peers = [...new Set(getRoster().filter((s) => s.actif && PEER_ROLES.includes(s.role)).map((s) => s.display))];
   if (peers.length < 2 || !peers.includes(me)) return null;
-  let rev;
-  try { rev = await getRollingRevenue(); } catch (e) { return null; }
-  const rows = (rev && Array.isArray(rev.detail)) ? rev.detail : [];
+  const rows = (full.monthRevenue && Array.isArray(full.monthRevenue.detail)) ? full.monthRevenue.detail : [];
   const caOf = (name) => rows.filter((r) => r.name === name).reduce((sum, r) => sum + (r.amount || 0), 0);
   const myCa = caOf(me);
   const average = peers.map(caOf).reduce((a, b) => a + b, 0) / peers.length;
@@ -282,7 +268,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
         console.warn(`[SCOPE] commercial "${req.commercial.nom}" (id=${req.commercial.id}) introuvable dans le roster (roster.js, dérivé de commercial_users) — verra des données vides sur /api/dashboard. Vérifier son rôle (commercial/manager/admin) et son statut actif.`);
       }
       const scoped = scopeDataToCommercial(full, displayName || req.commercial.nom);
-      const caRanking = await buildCaRanking(req.commercial);
+      const caRanking = await buildCaRanking(full, req.commercial);
       return res.json(caRanking ? { ...scoped, caRanking } : scoped);
     }
     res.json(full);
