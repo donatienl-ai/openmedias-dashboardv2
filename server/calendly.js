@@ -102,10 +102,21 @@ export async function getUpcomingRdvForHost({ end, displayName }) {
     .map((r) => ({ at: r.at, name: r.name, isR2: isR2(r) }))
     .sort((a, b) => a.at - b.at);
 }
+// Total = somme des RDV attribués à un commercial (cohérent avec le détail).
+function withTotal(detail) {
+  return { total: detail.reduce((sum, row) => sum + (row.count || 0), 0), detail };
+}
+
 function groupByHost(records) {
   const map = new Map();
   for (const r of records) {
-    const name = matchSaleStrict(r.hostRaw) || 'Inconnu';
+    // RDV dont l'hôte Calendly n'est pas un commercial du dashboard (ou sans
+    // hôte) : ignorés. Avant, ils étaient comptés à Quentin par défaut
+    // (règle « Inconnu → Quentin »). Correctif du 02/10/2026, demande Lina.
+    const raw = String(r.hostRaw || '').trim();
+    if (!raw || /^(inconnu|unknown|unassigned)$/i.test(raw)) continue;
+    const name = matchSaleStrict(raw);
+    if (!name) continue;
     const entry = map.get(name) || { count: 0 };
     entry.count += 1;
     map.set(name, entry);
@@ -121,8 +132,8 @@ export async function getRdvInRange({ start, end }) {
   const r1 = records.filter((r) => !isR2(r));
   const r2 = records.filter((r) => isR2(r));
   return {
-    r1: { total: r1.length, detail: groupByHost(r1) },
-    r2: { total: r2.length, detail: groupByHost(r2) },
+    r1: withTotal(groupByHost(r1)),
+    r2: withTotal(groupByHost(r2)),
   };
 }
 
@@ -161,8 +172,8 @@ export async function getRdvBookedInRange({ start, end }) {
   const r1 = createdInRange.filter((r) => !isR2(r));
   const r2 = createdInRange.filter((r) => isR2(r));
   return {
-    r1: { total: r1.length, detail: groupByHost(r1) },
-    r2: { total: r2.length, detail: groupByHost(r2) },
+    r1: withTotal(groupByHost(r1)),
+    r2: withTotal(groupByHost(r2)),
   };
 }
 
@@ -217,7 +228,7 @@ export async function getSalesforgeRdv({ start, end }) {
     });
   }
 
-  return { total: salesforgeRecords.length, detail: groupByHost(salesforgeRecords) };
+  return withTotal(groupByHost(salesforgeRecords));
 }
 
 // Managers dont on veut les RDV NL (noms exacts du roster)
