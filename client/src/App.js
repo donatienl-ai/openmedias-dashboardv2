@@ -1733,9 +1733,12 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
             {objectiveSaved && <span className="objective-saved" role="status">Objectif enregistré</span>}
           </div>}
         </div>
-        {caRanking && caRanking.pctOfAverage !== null && (
+        {caRanking && (
           <div className="tile col-12 ca-ranking">
             <div className="lbl">CA du mois vs moyenne des {caRanking.peers} commerciaux</div>
+            {caRanking.pctOfAverage === null ? (
+              <div className="ca-ranking-legend" style={{ textAlign: 'left', marginTop: 10 }}>Aucune vente signée ce mois-ci pour l’instant : la jauge démarre à la première vente de l’équipe.</div>
+            ) : (<>
             <div className="ca-ranking-body">
               <div className="ca-ranking-gauge" aria-hidden="true">
                 <div
@@ -1747,6 +1750,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
               <div className={`ca-ranking-pct ${caRanking.pctOfAverage >= 100 ? 'up' : 'down'}`}>{caRanking.pctOfAverage} %</div>
             </div>
             <div className="ca-ranking-legend">100 % = moyenne</div>
+            </>)}
           </div>
         )}
       </>
