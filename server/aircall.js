@@ -174,6 +174,9 @@ async function ensureCalls(from, to, priority = 'high') {
       at: c.started_at || 0,
       inbound: c.direction === 'inbound',
       user: c.user?.name || null,
+      // Ligne Aircall (numéro personnel du commercial) : sert à attribuer les
+      // appels sans utilisateur (message vocal, entrant manqué ou abandonné).
+      line: c.number?.name || null,
     }));
     // Fusion sans rétrécir : si un autre fetch a déjà acquis une couverture plus
     // large pendant que celui-ci tournait, on conserve la fenêtre la plus large
@@ -244,6 +247,9 @@ export async function refreshRecent(since) {
     at: c.started_at || 0,
     inbound: c.direction === 'inbound',
     user: c.user?.name || null,
+      // Ligne Aircall (numéro personnel du commercial) : sert à attribuer les
+      // appels sans utilisateur (message vocal, entrant manqué ou abandonné).
+      line: c.number?.name || null,
   }));
   const kept = callsCache.calls.filter((c) => c.at < sinceU); // historique immuable conservé
   callsCache = {
@@ -278,34 +284,33 @@ export async function getCalls({ start, end }) {
   const from = toUnix(start);
   const to = toUnix(end);
   await ensureCalls(from, to);
+  // Seuls les appels passés ou décrochés par un commercial du dashboard sont
+  // comptés (décision Lina du 02/10/2026). Sont exclus :
+  //  - les appels sans utilisateur Aircall (message vocal, entrant non
+  //    répondu, abandonné ou hors horaires sur une ligne personnelle) : ils
+  //    étaient auparavant comptés à Quentin par défaut ;
+  //  - les appels d'un utilisateur Aircall qui n'est pas commercial du
+  //    dashboard (admins, autres services).
+  // Le total « Calls » est donc la somme des appels des commerciaux.
   const calls = selectCalls(from, to);
 
   const map = new Map();
   let totalInbound = 0;
   let totalOutbound = 0;
+  let counted = 0;
   for (const c of calls) {
+    const name = attributeCall(c.user);
+    if (!name) continue;
+    counted += 1;
     if (c.inbound) totalInbound += 1; else totalOutbound += 1;
-    const matched = attributeCall(c.user);
-    const name = matched || OTHER_AIRCALL_USERS;
     const e = map.get(name) || { count: 0, inbound: 0, outbound: 0 };
     e.count += 1;
     if (c.inbound) e.inbound += 1; else e.outbound += 1;
-    if (!matched) {
-      e.outsideTeam = true;
-      e._src = e._src || new Map();
-      const label = (c.user && String(c.user).trim()) || 'appel sans utilisateur';
-      e._src.set(label, (e._src.get(label) || 0) + 1);
-    }
     map.set(name, e);
-  }
-  const other = map.get(OTHER_AIRCALL_USERS);
-  if (other && other._src) {
-    other.sources = [...other._src.entries()].map(([n, count]) => ({ name: n, count })).sort((a, b) => b.count - a.count).slice(0, 15);
-    delete other._src;
   }
   const detail = buildFullList(map);
   // `truncated` reflète le plafond 50k sur la fenêtre récupérée.
-  return { total: calls.length, totalInbound, totalOutbound, detail, truncated: callsCache.truncated };
+  return { total: counted, totalInbound, totalOutbound, detail, truncated: callsCache.truncated };
 }
 
 /**
