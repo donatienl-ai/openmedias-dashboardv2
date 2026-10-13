@@ -59,9 +59,28 @@ function amountsOf(invoice) {
   return {
     ht: Number((ttc - tax).toFixed(2)),
     ttc,
-    remainingHt: Number(invoice.remaining_amount_without_tax) || 0,
-    remainingTtc: Number(invoice.remaining_amount_with_tax) || 0,
+    // Facture payée dans Pennylane → restant 0 (Pennylane laisse parfois le restant
+    // égal au total sur des factures payées ; constaté sur ~1 400 factures, 13/10/2026).
+    remainingHt: isPaid(invoice) ? 0 : Number(invoice.remaining_amount_without_tax) || 0,
+    remainingTtc: isPaid(invoice) ? 0 : Number(invoice.remaining_amount_with_tax) || 0,
   };
+}
+
+function isPaid(invoice) {
+  return invoice.paid === true || invoice.status === 'paid';
+}
+
+// Mention spéciale : contient les acomptes / échéances saisis dans Pennylane.
+// Enregistrée seulement si le champ est présent dans la réponse (sinon on garde l'ancienne valeur).
+const _mentionStmts = new WeakMap();
+function saveSpecialMention(db, inv) {
+  if (!inv || !Object.prototype.hasOwnProperty.call(inv, 'special_mention')) return;
+  try {
+    if (!_mentionStmts.has(db)) _mentionStmts.set(db, db.prepare('UPDATE pennylane_invoices SET special_mention = ? WHERE id = ?'));
+    _mentionStmts.get(db).run(inv.special_mention ? String(inv.special_mention) : null, String(inv.id));
+  } catch (e) {
+    // Ne jamais bloquer la synchro pour la mention (ex. colonne pas encore créée).
+  }
 }
 
 async function fetchPrimaryContact(contactsUrl) {
@@ -207,6 +226,7 @@ async function syncFinance(db) {
         PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer',
         defaultStatusId
       );
+      saveSpecialMention(db, inv);
     }
     db.prepare(`
       INSERT INTO config (key,value) VALUES ('pennylane_last_full_sync_at', ?)
@@ -334,6 +354,7 @@ async function syncInvoiceChanges(db) {
         PENNYLANE_STATUSES_SOLDEES.includes(status) ? 'solde' : 'a_relancer',
         defaultStatusId
       );
+      saveSpecialMention(db, inv);
     }
     if (!page.has_more && maxProcessedAt) storeCheckpoint(db, maxProcessedAt);
   });
