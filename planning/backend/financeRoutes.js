@@ -1,3 +1,23 @@
+// Acomptes / échéances lus dans la mention spéciale Pennylane (13/10/2026).
+// Chargement protégé : si le module manque, la route marche sans ce champ.
+let echeancesPennylane = null;
+try { echeancesPennylane = require('./echeancesPennylane'); } catch (e) { console.warn('[finance] echeancesPennylane indisponible :', e.message); }
+
+function echeancesPennylaneDe(r) {
+  if (!echeancesPennylane || !r || !r.special_mention) return { acomptes: [], alertes: [] };
+  try {
+    return echeancesPennylane.calculerEcheances({
+      mention: r.special_mention,
+      montantTtc: r.amount,
+      restant: r.remaining_amount,
+      status: r.status,
+      aujourdhui: new Date().toISOString().slice(0, 10),
+    });
+  } catch (e) {
+    return { acomptes: [], alertes: ['Lecture des acomptes impossible : ' + e.message] };
+  }
+}
+
 module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES }) {
   function joursDeRetard(deadline) {
     if (!deadline) return null;
@@ -90,6 +110,7 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
 
     return {
       id: r.id,
+      echeancesPennylane: echeancesPennylaneDe(r),
       
       invoiceNumber: r.invoice_number,
       invoice_number: r.invoice_number,
