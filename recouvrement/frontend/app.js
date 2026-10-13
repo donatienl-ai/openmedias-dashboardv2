@@ -1042,7 +1042,7 @@ ${financeClientSnapshotHtml(inv)}
 </div>
 </div>
 <div class="finance-detail-section">
-<div class="form-label">Commentaires (notes internes, jamais envoyées au client)</div>
+<div class="form-label">Commentaires</div>
 <div style="display:flex;gap:8px;margin:6px 0 8px">
 <input class="form-input" id="finance-comment-input" placeholder="Ajouter un commentaire…">
 <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceComment('${id}')">+ Ajouter</button>
@@ -1051,6 +1051,8 @@ ${financeClientSnapshotHtml(inv)}
 </div>
 <div class="finance-detail-section">
 <div class="form-label">Échéances de paiement</div>
+<div id="finance-installments-list">${financeInstallmentsListHtml(id,installments,inv)}</div>
+<div class="form-label" style="margin-top:10px;font-size:11px">Ajouter une échéance (si elle n'est pas déjà dans Pennylane)</div>
 <div style="display:flex;gap:8px;margin:6px 0 8px;flex-wrap:wrap">
 <input class="form-input" id="finance-installment-label" placeholder="Libellé (optionnel)…" style="max-width:150px">
 <input class="form-input" id="finance-installment-date" type="date">
@@ -1058,7 +1060,6 @@ ${financeClientSnapshotHtml(inv)}
 ${newInstallmentStatusPillHtml}
 <button class="btn-primary" style="white-space:nowrap" onclick="submitFinanceInstallment('${id}')">+ Ajouter</button>
 </div>
-<div id="finance-installments-list">${financeInstallmentsListHtml(id,installments,inv)}</div>
 </div>
 `;
 }
@@ -1169,8 +1170,31 @@ document.getElementById('finance-comments-list').innerHTML=financeCommentsListHt
 // échéances 2/3/4 comme avant (finance_invoice_installments). Le bouton
 // "supprimer" est absent sur la 1ère ligne : une facture a toujours une
 // échéance principale, "supprimer" n'a pas de sens pour elle.
+// Acomptes / échéances saisis dans Pennylane (lus dans la mention spéciale de la
+// facture, 13/10/2026). Lecture seule : pour les modifier, on modifie la facture
+// dans Pennylane. L'état (soldé / en retard…) est calculé à partir du restant dû.
+function pennylaneAcomptesHtml(inv){
+const data=inv&&inv.echeancesPennylane;
+if(!data||(!(data.acomptes||[]).length&&!(data.alertes||[]).length))return '';
+const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ETAT={soldee:['Soldé','#16a34a'],partielle:['Partiellement réglé','#d97706'],en_retard:['En retard','#dc2626'],a_venir:['À venir','#64748b'],inconnu:['État inconnu','#64748b']};
+const lignes=(data.acomptes||[]).map((a)=>{
+const [lib,col]=ETAT[a.etat]||ETAT.inconnu;
+const nom=a.type==='solde'?'Solde':(a.rang===1?'1er ':a.rang+'e ')+(a.type==='acompte'?'acompte':'échéance');
+const detail=a.etat==='partielle'||(a.etat==='en_retard'&&a.regle>0)?' · réglé '+fmtCA(a.regle)+' / reste '+fmtCA(a.resteAPayer):(a.etat==='en_retard'?' · reste '+fmtCA(a.resteAPayer):'');
+const alerte=a.alerte?'<div style="font-size:11px;color:#b45309;margin-top:2px">⚠ '+esc(a.alerte)+' — à corriger dans Pennylane</div>':'';
+return '<div class="finance-installment-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border,#e5e7eb)">'
++'<strong style="font-size:12px">'+esc(nom)+'</strong>'
++'<span style="font-size:12px">'+(a.date?formatDateFR(a.date):'date ?')+' · '+(a.montant!=null?fmtCA(a.montant):'montant ?')+esc(detail)+'</span>'
++'<span style="margin-left:auto;font-size:11px;font-weight:600;color:'+col+'">'+lib+'</span>'
++'<div style="flex-basis:100%;font-size:10px;color:var(--text-muted)">Source : Pennylane</div>'+alerte+'</div>';
+}).join('');
+const alertes=(data.alertes||[]).map((x)=>'<div style="font-size:11px;color:#b45309">⚠ '+esc(x)+'</div>').join('');
+return '<div class="finance-pennylane-acomptes" style="margin:4px 0 8px">'+lignes+alertes+'</div>';
+}
 function financeInstallmentsListHtml(invoiceId,installments,inv){
-const ech1=inv?[{
+const acomptesPl=(inv&&inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[];
+const ech1=(inv&&!acomptesPl.length)?[{
 isEcheance1:true,
 dueDate:inv.deadline,
 amount:inv.amountTtc,
@@ -1180,8 +1204,9 @@ statusColor:inv.deadlineStatusColor,
 statusLabel:inv.deadlineStatusLabel,
 }]:[];
 const rows=[...ech1,...(installments||[])];
-if(!rows.length)return '<div class="idea-box-empty">Aucune échéance.</div>';
-return rows.map(inst=>{
+const plHtml=pennylaneAcomptesHtml(inv);
+if(!rows.length)return plHtml||'<div class="idea-box-empty">Aucune échéance.</div>';
+return plHtml+rows.map(inst=>{
 const label=inst.isEcheance1?'Échéance 1':inst.label;
 const dateHtml=inst.isEcheance1
 ? `<input type="date" class="form-input finance-deadline-input" style="max-width:130px;margin-left:6px" value="${inst.dueDate||''}" onchange="patchFinanceInvoice('${invoiceId}',{deadline:this.value})">`
