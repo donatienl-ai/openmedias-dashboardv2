@@ -244,6 +244,8 @@ try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN deadline_manual INTEGER
 try { db.exec('ALTER TABLE finance_invoice_installments ADD COLUMN status_id INTEGER'); } catch(e) {}
 try { db.exec('ALTER TABLE finance_invoice_installments ADD COLUMN paid_amount REAL DEFAULT 0'); } catch(e) {}
 try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN deadline_status_id INTEGER'); } catch(e) {}
+// Mention spéciale Pennylane : c'est là que sont écrits les acomptes / échéances (13/10/2026)
+try { db.exec('ALTER TABLE pennylane_invoices ADD COLUMN special_mention TEXT'); } catch(e) {}
 
 let justAddedCompteRegle = false;
 try {
