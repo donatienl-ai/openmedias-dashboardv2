@@ -1052,7 +1052,7 @@ ${financeClientSnapshotHtml(inv)}
 <div class="finance-detail-section">
 <div class="form-label">Échéances de paiement</div>
 <div id="finance-installments-list">${financeInstallmentsListHtml(id,installments,inv)}</div>
-<div class="form-label" style="margin-top:10px;font-size:11px">Ajouter une échéance (si elle n'est pas déjà dans Pennylane)</div>
+<div class="form-label" style="margin-top:10px;font-size:11px">Ajouter l'échéance ${financeProchainNumeroEcheance(inv,installments)}</div>
 <div style="display:flex;gap:8px;margin:6px 0 8px;flex-wrap:wrap">
 <input class="form-input" id="finance-installment-label" placeholder="Libellé (optionnel)…" style="max-width:150px">
 <input class="form-input" id="finance-installment-date" type="date">
@@ -1192,12 +1192,27 @@ return '<div class="finance-installment-row" style="display:flex;flex-wrap:wrap;
 const alertes=(data.alertes||[]).map((x)=>'<div style="font-size:11px;color:#b45309">⚠ '+esc(x)+'</div>').join('');
 return '<div class="finance-pennylane-acomptes" style="margin:4px 0 8px">'+lignes+alertes+'</div>';
 }
+// Échéance 1 = date d'échéance de la facture. Elle n'est affichée dans la liste
+// que lorsqu'elle a été « rentrée » : date modifiée à la main, statut posé, ou
+// échéances suivantes déjà saisies (demande Lina 13/10/2026). Sinon la première
+// échéance se saisit directement dans le formulaire « Ajouter l'échéance 1 ».
+function financeEcheance1Saisie(inv,installments){
+if(!inv)return false;
+if(((inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[]).length)return false;
+return !!(inv.deadlineManual||inv.deadlineStatusId!=null||(installments||[]).length);
+}
+function financeProchainNumeroEcheance(inv,installments){
+const pl=((inv&&inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[]).length;
+if(pl)return pl+(installments||[]).length+1;
+return financeEcheance1Saisie(inv,installments)?(installments||[]).length+2:1;
+}
 function financeInstallmentsListHtml(invoiceId,installments,inv){
 const acomptesPl=(inv&&inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[];
-const ech1=(inv&&!acomptesPl.length)?[{
+const autresMontant=(installments||[]).reduce((s,x)=>s+(Number(x.amount)||0),0);
+const ech1=financeEcheance1Saisie(inv,installments)?[{
 isEcheance1:true,
 dueDate:inv.deadline,
-amount:inv.amountTtc,
+amount:Math.max(0,Math.round(((Number(inv.amountTtc)||0)-autresMontant)*100)/100),
 solde:inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0),
 statusId:inv.deadlineStatusId,
 statusColor:inv.deadlineStatusColor,
@@ -1206,8 +1221,9 @@ statusLabel:inv.deadlineStatusLabel,
 const rows=[...ech1,...(installments||[])];
 const plHtml=pennylaneAcomptesHtml(inv);
 if(!rows.length)return plHtml||'<div class="idea-box-empty">Aucune échéance.</div>';
-return plHtml+rows.map(inst=>{
-const label=inst.isEcheance1?'Échéance 1':inst.label;
+return plHtml+rows.map((inst,idx)=>{
+const numero=acomptesPl.length+idx+(ech1.length?1:2);
+const label=inst.isEcheance1?'Échéance 1':('Échéance '+numero+(inst.label&&!/^\s*(é|e)ch(é|e)ance\s*\d+\s*$/i.test(inst.label)?' · '+inst.label:''));
 const dateHtml=inst.isEcheance1
 ? `<input type="date" class="form-input finance-deadline-input" style="max-width:130px;margin-left:6px" value="${inst.dueDate||''}" onchange="patchFinanceInvoice('${invoiceId}',{deadline:this.value})">`
 : ` ${formatDateFR(inst.dueDate)} · ${fmtCA(inst.amount)}`;
@@ -1260,6 +1276,15 @@ const dueDate=document.getElementById('finance-installment-date').value;
 const amount=Number(document.getElementById('finance-installment-amount').value);
 const statusId=financeNewInstallmentStatusId;
 if(!dueDate){ showToast('Date d’échéance requise','error'); return; }
+const invCache=financeInvoicesCache.find(i=>i.id===id);
+if(invCache&&financeProchainNumeroEcheance(invCache,invCache.installments)===1){
+// Échéance 1 = date d'échéance de la facture (montant = TTC moins les échéances suivantes).
+document.getElementById('finance-installment-label').value='';
+document.getElementById('finance-installment-date').value='';
+document.getElementById('finance-installment-amount').value='';
+await patchFinanceInvoice(id,{deadline:dueDate,deadlineStatusId:statusId});
+return;
+}
 if(!amount||amount<=0){ showToast('Montant invalide','error'); return; }
 const r=await fetch(`${API}/finance/invoices/${id}/installments`,{method:'POST',headers:financeHeaders(true),body:JSON.stringify({label,dueDate,amount,statusId})});
 const d=await r.json();
