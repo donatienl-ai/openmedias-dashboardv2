@@ -278,6 +278,30 @@ function construireRapport(db) {
 module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }) {
   if (config()) assurerCharge().catch((e) => console.warn('[trello] chargement initial :', e.message));
 
+  // Mise à jour automatique : nouveautés Trello toutes les 20 secondes (lecture seule).
+  if (config()) {
+    let occupe = false;
+    setInterval(async () => {
+      if (occupe || !etat.board) return;
+      occupe = true;
+      try { await rafraichir(); etat.erreur = null; } catch (e) { etat.erreur = e.message; } finally { occupe = false; }
+    }, 20000).unref();
+  }
+
+  // Bouton « Synchroniser » du recouvrement : lit les nouveautés Trello maintenant.
+  app.post('/api/finance/trello/sync', requireFinance, async (req, res) => {
+    try {
+      if (!config()) return res.status(503).json({ error: 'Trello non configuré' });
+      if (!etat.board) { await assurerCharge(); return res.json({ ok: true, nouvellesActions: etat.actions.length, chargeLe: etat.chargeLe }); }
+      const n = await rafraichir();
+      etat.erreur = null;
+      res.json({ ok: true, nouvellesActions: n || 0, chargeLe: etat.chargeLe });
+    } catch (e) {
+      etat.erreur = e.message;
+      res.status(502).json({ error: e.message });
+    }
+  });
+
   // État de la connexion (pour le bouton de synchro et l'alerte)
   app.get('/api/finance/trello/etat', requireFinance, (req, res) => {
     res.json({ configure: !!config(), charge: !!etat.board, enCours: !!etat.enCours, chargeLe: etat.chargeLe, cartes: etat.cartes.length, actions: etat.actions.length, erreur: etat.erreur });
