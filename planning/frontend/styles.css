@@ -398,8 +398,10 @@ header {
   background: var(--surface); padding: 10px; min-height: 110px;
   transition: background 0.1s;
 }
-.cal-day.ferie { background: #fef2f2; }
-[data-theme="dark"] .cal-day.ferie { background: rgba(220,38,38,0.05); }
+/* Jour férié grisé et hachuré, visible par tous (14/10/2026) */
+.cal-day.ferie { background: repeating-linear-gradient(135deg, var(--surface2), var(--surface2) 6px, transparent 6px, transparent 12px), var(--surface2); opacity: 0.75; cursor: not-allowed; }
+.cal-day.ferie .cal-day-num { color: var(--text-muted); text-decoration: line-through; }
+[data-theme="dark"] .cal-day.ferie { background: repeating-linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0.06) 6px, transparent 6px, transparent 12px), var(--surface2); }
 .cal-day.vide { background: var(--surface2); }
 .cal-day-header { display: flex; align-items: center; margin-bottom: 8px; gap: 6px; }
 .cal-day-num {
