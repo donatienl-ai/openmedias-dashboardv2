@@ -897,20 +897,28 @@ if(financeSelectedInvoiceId===id)openFinanceInvoiceDetail(id);
 showToast('Facture mise à jour');
 }catch(e){ showToast(e.message||"Échec de la mise à jour",'error'); }
 }
+// Un seul bouton : synchro complète Pennylane + Trello en parallèle (14/10/2026,
+// demande Lina). Trello est en lecture seule ; s'il n'est pas configuré ou ne
+// répond pas, la synchro Pennylane se fait quand même et on le signale.
 async function syncFinance(){
 const btn=document.getElementById('finance-sync-btn');
 if(btn){ btn.disabled=true; btn.textContent='⏳ Synchronisation…'; }
 try{
-const r=await fetch(`${API}/finance/sync`,{method:'POST',headers:financeHeaders()});
-const d=await r.json();
-if(!r.ok)throw new Error(d.error||'Échec de la synchro');
-document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date(d.syncedAt).toLocaleString('fr-FR')} (${d.invoicesSynced} facture(s), ${d.customersSynced} client(s))`;
-showToast('Synchro Pennylane effectuée');
+const [rp,rt]=await Promise.allSettled([
+fetch(`${API}/finance/sync`,{method:'POST',headers:financeHeaders()}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error||'Échec de la synchro Pennylane');return d;}),
+fetch(`${API}/finance/trello/sync`,{method:'POST',headers:financeHeaders()}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'Trello indisponible');return d;})
+]);
+const parts=[];
+if(rp.status==='fulfilled'){ parts.push(`Pennylane : ${rp.value.invoicesSynced} facture(s)`); }
+else showToast(rp.reason.message||'Échec de la synchro Pennylane','error');
+if(rt.status==='fulfilled'){ parts.push(`Trello : ${rt.value.nouvellesActions||0} nouveauté(s)`); }
+else showToast('Connexion Trello interrompue : '+(rt.reason.message||''),'error');
+document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date().toLocaleString('fr-FR')}${parts.length?' ('+parts.join(' · ')+')':''}`;
+if(rp.status==='fulfilled'&&rt.status==='fulfilled')showToast('Synchro Pennylane + Trello effectuée');
 await refreshFinanceInvoices();
-}catch(e){ showToast(e.message||'Échec de la synchro Pennylane','error'); }
-finally{ if(btn){ btn.disabled=false; btn.textContent='↻ Synchroniser Pennylane'; } }
+}catch(e){ showToast(e.message||'Échec de la synchro','error'); }
+finally{ if(btn){ btn.disabled=false; btn.textContent='↻ Synchroniser'; } }
 }
-
 // ── Import des créances douteuses (fichier Excel de la compta) — 29/09/2026 ──
 // Demande Lina : les fichiers « créances douteuses 2025 / 2026 » alimentent le
 // statut Douteux. Le fichier est envoyé tel quel au serveur (POST octet-stream),
