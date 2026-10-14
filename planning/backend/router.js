@@ -64,6 +64,37 @@ function jourNonDiffusable(dateStr) {
   return NOMS_JOURS[j];
 }
 
+// ── JOURS FÉRIÉS (France métropolitaine), calculés pour toutes les années ──────
+// 14/10/2026 : aucune diffusion un jour férié. Volontairement PAS ajouté à
+// jourNonDiffusable() : la réparation au démarrage ci-dessous déplacerait sinon
+// d'office les diffusions déjà posées un jour férié.
+function paquesUTC(y) {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const mo = Math.floor((h + l - 7 * m + 114) / 31), da = ((h + l - 7 * m + 114) % 31) + 1;
+  return Date.UTC(y, mo - 1, da);
+}
+const _feriesCache = new Map();
+function feriesAnnee(y) {
+  if (_feriesCache.has(y)) return _feriesCache.get(y);
+  const iso = (x) => new Date(x).toISOString().slice(0, 10);
+  const p = paquesUTC(y), J = 86400000;
+  const m = new Map([
+    [`${y}-01-01`, "Jour de l'an"], [iso(p + J), 'Lundi de Pâques'], [`${y}-05-01`, 'Fête du Travail'],
+    [`${y}-05-08`, 'Victoire 1945'], [iso(p + 39 * J), 'Ascension'], [iso(p + 50 * J), 'Lundi de Pentecôte'],
+    [`${y}-07-14`, 'Fête nationale'], [`${y}-08-15`, 'Assomption'], [`${y}-11-01`, 'Toussaint'],
+    [`${y}-11-11`, 'Armistice 1918'], [`${y}-12-25`, 'Noël'],
+  ]);
+  _feriesCache.set(y, m);
+  return m;
+}
+function jourFerie(dateStr) {
+  const s = String(dateStr || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return feriesAnnee(Number(s.slice(0, 4))).get(s) || null;
+}
+
 try {
   const fuyardes = db.prepare("SELECT id, date_diffusion FROM emissions WHERE statut NOT IN ('annule','a_programmer')").all()
     .filter((e) => jourNonDiffusable(e.date_diffusion));
@@ -436,6 +467,7 @@ function insertEmission(payload, isBdc = false) {
   if (resolu.park) raisons.push(`Média SF: "${media}"${resolu.raison ? ' — ' + resolu.raison : ''}`);
   if (dateManquante) raisons.push(sansDateExplicite ? 'Date de diffusion pas encore connue (case cochée côté Salesforce)' : 'Date de diffusion manquante côté Salesforce');
   if (!dateManquante && jourNonDiffusable(dateEff)) raisons.push(`Date de diffusion un ${jourNonDiffusable(dateEff)} (diffusions lun/mer/ven uniquement)`);
+  if (!dateManquante && jourFerie(dateEff)) raisons.push(`Date de diffusion un jour férié (${jourFerie(dateEff)})`);
   if (!formatFinal) raisons.push('Format manquant côté Salesforce');
   if (raisons.length) {
     statut = 'a_programmer';
@@ -627,6 +659,10 @@ app.post('/api/emissions/bdc', requireCommercial, (req, res) => {
   const sousMediaResolu = resolveSousMedia(media, sous_media);
   if (sousMediaResolu.error) return res.status(400).json({ error: sousMediaResolu.error });
 
+  const ferieBdc = jourFerie(date_diffusion);
+  if (ferieBdc) {
+    return res.status(400).json({ error: `Le ${date_diffusion} est un jour férié (${ferieBdc}) : pas de diffusion ce jour-là. Choisis une autre date.` });
+  }
   const jourSemaine = new Date(date_diffusion + 'T12:00:00').getDay();
   if (![1, 3, 5].includes(jourSemaine)) {
     return res.status(400).json({ error: 'Les diffusions ne peuvent être calées que les lundis, mercredis ou vendredis.' });
@@ -789,7 +825,7 @@ function upsertEmissionPourBdcEnvoye({ entreprise, templateKey, dateDiffusion, m
   const sousMedia = mapping.sousMedia || null;
 
   const entNorm = entreprise.toLowerCase().trim();
-  const dateValide = /^\d{4}-\d{2}-\d{2}$/.test(dateDiffusion || '') && !jourNonDiffusable(dateDiffusion)
+  const dateValide = /^\d{4}-\d{2}-\d{2}$/.test(dateDiffusion || '') && !jourNonDiffusable(dateDiffusion) && !jourFerie(dateDiffusion)
     ? dateDiffusion : null;
 
   const existante = dateValide
@@ -1020,6 +1056,9 @@ app.patch('/api/emissions/:id', (req, res) => {
   const newMedia = media || e.media;
 
   let forceAProgrammer = false;
+  if (date_diffusion && date_diffusion !== e.date_diffusion && jourFerie(date_diffusion)) {
+    return res.status(400).json({ error: `Le ${date_diffusion} est un jour férié (${jourFerie(date_diffusion)}) : pas de diffusion ce jour-là.` });
+  }
   if (date_diffusion && date_diffusion !== e.date_diffusion) {
     const jourKO = jourNonDiffusable(date_diffusion);
     if (jourKO) {
