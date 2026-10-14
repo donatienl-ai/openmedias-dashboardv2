@@ -91,7 +91,7 @@ function assurerCharge() {
   return etat.enCours;
 }
 
-// ── Outils ────────────────────────────────────────────────────────────────────
+// ── Outils ───────────────────────────────────────────────────────────────────
 function normNom(s) {
   return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .replace(/\b(sarl|sas|sasu|eurl|sa|sci|selarl|selas|ets|etablissements|societe|ste|groupe|group|holding|cabinet|et cie|cie)\b/g, ' ')
@@ -103,6 +103,17 @@ function numerosDans(txt) {
   let m;
   while ((m = re.exec(String(txt || '')))) out.add('F' + m[1]);
   return out;
+}
+// Nom de carte → nom de client : on retire ce qui suit « - » (média, SCP, Article…)
+function nomCarte(s) { return normNom(String(s || '').split(/\s[-–|]\s/)[0]); }
+function memeClient(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a))) return true;
+  const ta = a.split(' ').filter((x) => x.length >= 3), tb = new Set(b.split(' ').filter((x) => x.length >= 3));
+  if (!ta.length || !tb.size) return false;
+  const communs = ta.filter((x) => tb.has(x)).length;
+  return communs / Math.max(ta.length, tb.size) >= 0.6;
 }
 const extrait = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 160);
 const dateFR = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
@@ -152,12 +163,27 @@ function construireRapport(db) {
     if (a.type === 'addAttachmentToCard') ajouterNum(id, a.data.attachment && a.data.attachment.name);
   }
   for (const c of etat.cartes) { ajouterNum(c.id, c.name); ajouterNum(c.id, c.desc); }
+  // Date à laquelle « Soldée » a été posée sur chaque carte (la plus récente)
+  const idSoldee = new Set(b.labels.filter((l) => l.name === 'Soldée').map((l) => l.id));
+  const soldeeLe = new Map();
+  for (const a of etat.actions) {
+    const id = a.data && a.data.card && a.data.card.id;
+    if (!id) continue;
+    let pose = false;
+    if (a.type === 'addLabelToCard' && a.data.label && idSoldee.has(a.data.label.id)) pose = true;
+    if (a.type === 'updateCard' && a.data.old && 'idLabels' in a.data.old && a.data.card.idLabels) {
+      const avant = new Set(a.data.old.idLabels || []);
+      pose = a.data.card.idLabels.some((x) => idSoldee.has(x) && !avant.has(x));
+    }
+    if (a.type === 'commentCard' && /sold[ée]e?\b/i.test(a.data.text || '')) pose = true;
+    if (pose && (!soldeeLe.has(id) || a.date > soldeeLe.get(id))) soldeeLe.set(id, a.date);
+  }
 
   const rapport = {
     genereLe: new Date().toISOString(), trelloLuLe: etat.chargeLe, cartes: etat.cartes.length, actions: etat.actions.length,
     liens: { parNumero: 0, parNom: 0, nonRelieesRecouvrement: [] },
     numerosInconnus: [], scp: [], nouveauxDouteux: [],
-    incoherences: [], expliquees: {},
+    incoherences: [], classementsPrevus: [], expliquees: {},
   };
   const expliquee = (raison) => { rapport.expliquees[raison] = (rapport.expliquees[raison] || 0) + 1; };
 
@@ -178,10 +204,17 @@ function construireRapport(db) {
     }
     if (liees.length) rapport.liens.parNumero++;
     else {
-      const k = normNom(carte.name);
-      const fs = k.length >= 3 ? parClient.get(k) : null;
+      const k = nomCarte(carte.name);
+      let fs = k.length >= 3 ? parClient.get(k) : null;
+      if (!fs && k.length >= 3) {
+        const cands = [...parClient.keys()].filter((c) => memeClient(k, c));
+        if (cands.length === 1) fs = parClient.get(cands[0]);
+      }
       if (fs && fs.length) { liees = fs.slice(); rapport.liens.parNom++; }
-      else if (enRecouvrement && !carte.closed) rapport.liens.nonRelieesRecouvrement.push({ carte: carte.name, liste, lien: carte.shortUrl });
+      else if (enRecouvrement && !carte.closed) {
+        if (liste === 'ANNULATIONS' && !cites.length) expliquee('projet annulé sans facture (ANNULATIONS)');
+        else rapport.liens.nonRelieesRecouvrement.push({ carte: carte.name, liste, lien: carte.shortUrl, numerosCites: cites });
+      }
     }
     liees = [...new Map(liees.filter((f) => Number(f.amount) > 0).map((f) => [f.id, f])).values()];
     if (!liees.length) continue;
@@ -203,13 +236,22 @@ function construireRapport(db) {
         const citeExplicitement = coms.some((c) => numerosDans(c.texte).has(String(f.invoice_number).toUpperCase()));
         if (ouvertes.length < liees.length && !citeExplicitement) { expliquee('« Soldée » concerne une autre facture de la carte'); continue; }
         if ((avoirsClient.get(f.customer_id) || 0) >= restant(f) - 1) { expliquee('restant couvert par un avoir'); continue; }
+        const poseLe = soldeeLe.get(carte.id) || '2024-12-31';
+        if (!citeExplicitement && String(f.date_emission) > poseLe.slice(0, 10)) { expliquee('« Soldée » posée avant l\'émission de cette facture'); continue; }
+        const comFacture = coms.find((c) => numerosDans(c.texte).has(String(f.invoice_number).toUpperCase()) && /sold|trop[- ]?pay|trop[- ]?per[çc]u|r[ée]gl[ée]/i.test(c.texte));
+        if (comFacture) {
+          rapport.classementsPrevus.push({ facture: f.invoice_number, client: f.client, restantPennylane: restant(f), nouveauClassement: 'Soldée', raison: `Trello plus récent : « ${extrait(comFacture.texte)} » (${dateFR(comFacture.date)})`, lien: carte.shortUrl });
+          continue;
+        }
         const solde = coms.find((c) => /sold[ée]e?\s+le\s+\d{1,2}\/\d{1,2}/i.test(c.texte));
         ligne(f, 'Soldée dans Trello, restant dû dans Pennylane', solde ? `Trello : « ${extrait(solde.texte)} » (${dateFR(solde.date)})` : 'Aucune date de paiement dans les commentaires');
       }
     }
 
     // B. Payée dans Pennylane mais carte en RECOUVREMENT / « client douteux »
-    if ((liste === 'RECOUVREMENT' || labels.includes('client douteux')) && liees.length && !ouvertes.length) {
+    const dossierClos = labels.includes('clôture dossier') || labels.includes('Soldée') || coms.some((c) => /cl[ôo]ture|sold[ée]e|liquidation|avoir (fait|établi|etabli)/i.test(c.texte));
+    if ((liste === 'RECOUVREMENT' || labels.includes('client douteux')) && liees.length && !ouvertes.length && dossierClos) expliquee('dossier clos dans Trello (clôture, soldée, liquidation, avoir)');
+    else if ((liste === 'RECOUVREMENT' || labels.includes('client douteux')) && liees.length && !ouvertes.length) {
       ligne(liees[0], 'Payée dans Pennylane, carte encore en recouvrement dans Trello', `${liees.length} facture(s) liée(s), toutes soldées ou annulées`);
     }
 
@@ -227,7 +269,7 @@ function construireRapport(db) {
     }
   }
   rapport.resume = {
-    incoherences: rapport.incoherences.length, numerosInconnus: rapport.numerosInconnus.length,
+    incoherences: rapport.incoherences.length, classementsPrevus: rapport.classementsPrevus.length, numerosInconnus: rapport.numerosInconnus.length,
     nonRelieesRecouvrement: rapport.liens.nonRelieesRecouvrement.length, scp: rapport.scp.length, nouveauxDouteux: rapport.nouveauxDouteux.length,
   };
   return rapport;
