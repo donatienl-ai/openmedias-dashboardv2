@@ -304,7 +304,12 @@ function setFaviconEmoji(emoji){
   if(!link){ link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
   link.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
-const FERIES = new Set(['2026-01-01','2026-04-06','2026-05-01','2026-05-08','2026-05-14','2026-05-25','2026-07-14','2026-08-15','2026-11-01','2026-11-11','2026-12-25','2025-01-01','2025-04-21','2025-05-01','2025-05-08','2025-05-29','2025-06-09','2025-07-14','2025-08-15','2025-11-01','2025-11-11','2025-12-25']);
+// Jours fériés (France métropolitaine) calculés pour toutes les années, y compris
+// Pâques, Ascension et Pentecôte (14/10/2026 : la liste figée s'arrêtait à 2026).
+function paquesUTC(y){const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;return Date.UTC(y,mo-1,da);}
+const _feriesCache={};
+function feriesAnnee(y){if(_feriesCache[y])return _feriesCache[y];const iso=(x)=>new Date(x).toISOString().slice(0,10);const p=paquesUTC(y),J=86400000;const m=new Map([[y+'-01-01',"Jour de l'an"],[iso(p+J),'Lundi de Pâques'],[y+'-05-01','Fête du Travail'],[y+'-05-08','Victoire 1945'],[iso(p+39*J),'Ascension'],[iso(p+50*J),'Lundi de Pentecôte'],[y+'-07-14','Fête nationale'],[y+'-08-15','Assomption'],[y+'-11-01','Toussaint'],[y+'-11-11','Armistice 1918'],[y+'-12-25','Noël']]);_feriesCache[y]=m;return m;}
+const FERIES={has(s){return !!this.nom(s);},nom(s){s=String(s||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(s))return null;return feriesAnnee(Number(s.slice(0,4))).get(s)||null;}};
 
 function fmtClass(f) {
   if (!f) return '';
@@ -1670,7 +1675,7 @@ function renderCalendar(){
       if(inMonth){
         html+=`<div class="cal-day-header">
           <div class="cal-day-num${isToday?' today':''}">${day.getDate()}</div>
-          ${isFerie?'<span class="cal-day-badge badge-ferie">Férié</span>':''}
+          ${isFerie?'<span class="cal-day-badge badge-ferie" title="Jour férié : pas de diffusion">Férié · '+FERIES.nom(dateStr)+'</span>':''}
           ${isNonDiff?'':`<span class="badge-slots${complet?' complet':presque?' presque':''}">
             ${utilises}<span style="color:var(--text-muted);font-weight:400">/${totalSlots}</span>
           </span>`}
@@ -2831,8 +2836,8 @@ function statutBadge(s){
   const col={a_assigner:'var(--gold)',bdc_attente:'var(--bdc-text)',confirme:'var(--green)',a_programmer:'var(--accent)',annule:'var(--text-muted)'};
   return `<span style="color:${col[s]};font-weight:600;font-size:12px">${map[s]||s}</span>`;
 }
-function isJourAutorise(str){if(!str)return true;return[1,3,5].includes(new Date(str).getDay());}
-function onDateChange(el){if(!el.value)return;if(!isJourAutorise(el.value)){el.setCustomValidity('Seuls lundis, mercredis et vendredis.');el.reportValidity();el.value='';}else el.setCustomValidity('');}
+function isJourAutorise(str){if(!str)return true;return[1,3,5].includes(new Date(str).getDay())&&!FERIES.has(str);}
+function onDateChange(el){if(!el.value)return;if(!isJourAutorise(el.value)){el.setCustomValidity(FERIES.has(el.value)?('Jour férié ('+FERIES.nom(el.value)+') : pas de diffusion ce jour-là.'):'Seuls lundis, mercredis et vendredis.');el.reportValidity();el.value='';}else el.setCustomValidity('');}
 function toggleTheme(){const dark=document.documentElement.getAttribute('data-theme')==='dark';if(dark){document.documentElement.removeAttribute('data-theme');document.getElementById('theme-btn').textContent='☀️';localStorage.setItem('theme','light');}else{document.documentElement.setAttribute('data-theme','dark');document.getElementById('theme-btn').textContent='🌙';localStorage.setItem('theme','dark');}}
 // Déconnexion : oublie l'identité commerciale mémorisée et revient à l'écran de connexion.
 // Rechargement complet (plutôt que de ré-basculer les vues à la main) pour repartir sur un
