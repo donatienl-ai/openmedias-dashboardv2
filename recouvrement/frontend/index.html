@@ -99,7 +99,7 @@ même niveau que les autres, pas nested dans le planning. -->
 <span id="finance-last-sync" style="font-size:11px;color:var(--text-muted)"></span>
 <button type="button" class="finance-sync-detail-toggle" id="finance-sync-detail-toggle" onclick="toggleFinanceSyncOverview()">Détail de la synchro</button>
 <button class="btn-secondary" onclick="exportFinanceCsv()">⬇ Export CSV</button>
-<button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()">↻ Synchroniser Pennylane</button>
+<button class="btn-secondary" id="finance-sync-btn" onclick="syncFinance()" title="Synchronise Pennylane et Trello en même temps">↻ Synchroniser</button>
 </div>
 </div>
 <!-- Aperçu de la synchro (tous statuts Pennylane confondus, pas
@@ -157,6 +157,6 @@ colonne du tableau, c'est un mode de tri transversal. -->
 </div>
 </div>
 
-<script src="app.js?v=20260929r"></script>
+<script src="app.js?v=20261014t"></script>
 </body>
 </html>
