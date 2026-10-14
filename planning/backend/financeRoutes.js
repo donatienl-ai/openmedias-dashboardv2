@@ -605,4 +605,7 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
   require('./creancesDouteuses')(app, { db, requireFinance });
   // Diagnostic avoirs / doublons Pennylane (29/09/2026)
   require('./financeAvoirs')(app, { db, requireFinance });
+  // Trello × recouvrement, lecture seule (14/10/2026). Chargement protégé : si le
+  // module manque ou plante, le reste du recouvrement fonctionne normalement.
+  try { require('./trelloRecouvrement')(app, { db, requireFinance }); } catch (e) { console.warn('[trello] module indisponible :', e.message); }
 };
