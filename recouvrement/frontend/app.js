@@ -321,7 +321,29 @@ renderFinanceInvoices();
 renderFinanceKpis(computeFinanceKpisFromCache());
 }
 function financeHeaders(json){ const h={'x-commercial-id':commercialId}; if(json)h['Content-Type']='application/json'; return h; }
-async function loadFinance(){ await refreshFinanceInvoices(); }
+async function loadFinance(){ await refreshFinanceInvoices(); loadFinanceAVerifier(); }
+// « À vérifier » (14/10/2026) : factures où Pennylane, Trello et le dashboard ne
+// disent pas la même chose. Calculé côté serveur (lecture seule), une phrase
+// claire par facture pour les expertes-comptables. Admin + finance uniquement.
+let financeAVerifier=new Map();
+async function loadFinanceAVerifier(){
+try{
+const r=await fetch(`${API}/finance/a-verifier`,{headers:financeHeaders()});
+if(!r.ok)return;
+const d=await r.json();
+const m=new Map();
+for(const it of (d.items||[])){ if(it.id==null)continue; const k=String(it.id); if(!m.has(k))m.set(k,[]); m.get(k).push(it); }
+financeAVerifier=m;
+renderFinanceTabs();
+}catch(e){ /* Trello indisponible : l'onglet reste vide */ }
+}
+function financeAVerifierHtml(inv){
+const items=financeAVerifier.get(String(inv&&inv.id));
+if(!items||!items.length)return '';
+const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const lien=items.find(i=>i.lien);
+return '<div class="finance-detail-section" style="border-left:3px solid #f59e0b;padding-left:10px"><div class="form-label">À vérifier</div>'+items.map(i=>'<div style="font-size:12px;margin:2px 0">'+esc(i.raison)+'</div>').join('')+(lien?'<a href="'+esc(lien.lien)+'" target="_blank" rel="noopener" style="font-size:12px">Ouvrir la carte Trello ↗</a>':'')+'</div>';
+}
 async function refreshFinanceInvoices(){
 const [kpis,invoices]=await Promise.all([
 fetch(`${API}/finance/kpis`,{headers:financeHeaders()}).then(r=>r.json()),
@@ -401,7 +423,9 @@ const filters=filtersOverride||financeActiveFilters;
 const list=financeInvoicesCache.filter(inv=>invoiceInRange(inv,from,to)&&financeMatchesFilters(inv,filters));
 const unpaid=list.filter(inv=>{
 const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
-return remaining>0 && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
+// Une facture Soldée (statut interne) ne compte plus dans l'encours, même si
+// Pennylane affiche encore un reste (paiement non rapproché) — 14/10/2026.
+return remaining>0 && inv.internalStatus!=='solde' && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
 });
 let totalEncours=0,montantEnRetard=0,nbEnRetard=0,montantActionable=0,nbActionable=0;
 const aging={j0_30:0,j31_60:0,j61_90:0,j90_plus:0};
@@ -633,6 +657,7 @@ archived:['archived'],
 // obligeant à lire le texte pour juger de la gravité (relevé dans l'audit UX).
 const FINANCE_TAB_COLOR={
 all: {bg:'var(--accent-dim)', fg:'var(--accent)'},
+a_verifier: {bg:'rgba(245,158,11,0.15)', fg:'#f59e0b'},
 upcoming: {bg:'var(--accent-dim)', fg:'var(--accent)'},
 late: {bg:'var(--red-dim)', fg:'#dc2626'},
 douteux_manuel: {bg:'rgba(249,115,22,0.14)', fg:'#f97316'},
@@ -660,6 +685,7 @@ if(key==='all')return true;
 // aussi du statut "Douteux" des échéances (finance_installment_statuses,
 // autre système, non lié).
 if(key==='douteux_manuel')return inv.internalStatus==='douteux';
+if(key==='a_verifier')return financeAVerifier.has(String(inv.id));
 const statuses=PENNYLANE_TAB_STATUSES[key];
 if(!statuses||!statuses.includes(inv.status))return false;
 if((key==='upcoming'||key==='late')&&FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE.includes(inv.internalStatus))return false;
@@ -699,6 +725,7 @@ for(const key of Object.keys(PENNYLANE_TAB_STATUSES)){
 counts[key]=list.filter((i)=>financeMatchesFilterKey(i,key)).length;
 }
 counts.douteux_manuel=list.filter((i)=>financeMatchesFilterKey(i,'douteux_manuel')).length;
+counts.a_verifier=list.filter((i)=>financeMatchesFilterKey(i,'a_verifier')).length;
 const chip=(key,label,title)=>{
 const active=financeActiveFilters.has(key);
 const c=FINANCE_TAB_COLOR[key]||FINANCE_TAB_COLOR.all;
@@ -716,6 +743,7 @@ ${chip('partially_paid','Part. encaissée','Partiellement encaissée')}
 ${chip('cancelled','Annulée')}
 ${chip('credit_note','Avoir')}
 ${chip('archived','Archivée')}
+${chip('a_verifier','À vérifier','Pennylane, Trello et le dashboard ne disent pas la même chose : à trancher par les expertes-comptables')}
 `;
 }
 // Filtrage complet (période + onglets + recherche) — factorisé pour être
@@ -916,6 +944,7 @@ else showToast('Connexion Trello interrompue : '+(rt.reason.message||''),'error'
 document.getElementById('finance-last-sync').textContent=`Dernière synchro : ${new Date().toLocaleString('fr-FR')}${parts.length?' ('+parts.join(' · ')+')':''}`;
 if(rp.status==='fulfilled'&&rt.status==='fulfilled')showToast('Synchro Pennylane + Trello effectuée');
 await refreshFinanceInvoices();
+loadFinanceAVerifier();
 }catch(e){ showToast(e.message||'Échec de la synchro','error'); }
 finally{ if(btn){ btn.disabled=false; btn.textContent='↻ Synchroniser'; } }
 }
@@ -1049,6 +1078,7 @@ ${financeClientSnapshotHtml(inv)}
 <select class="form-select" style="max-width:200px;color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${id}',{internalStatus:this.value})">${statutOptionsHtml}</select>
 </div>
 </div>
+${financeAVerifierHtml(inv)}
 <div class="finance-detail-section">
 <div class="form-label">Commentaires</div>
 <div style="display:flex;gap:8px;margin:6px 0 8px">
