@@ -496,8 +496,16 @@ return sum+(inv.amountTtc!=null?inv.amountTtc:(inv.amount||0));
 },0);
 const dso=caPeriode>0?Math.round((totalEncours/caPeriode)*periodDays):null;
 const tauxDeRetard=totalEncours>0?Math.round((montantEnRetard/totalEncours)*1000)/10:0;
+// Douteux : hors encours/DSO, mais leur montant reste affiché en haut
+// (sous « Encours total ») — 15/10/2026, demande Lina. Bornés à la période,
+// indépendants de l'onglet sélectionné.
+const financeResteDe=(inv)=>inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+const douteuxListe=financeInvoicesCache.filter(inv=>inv.internalStatus==='douteux' && invoiceInRange(inv,from,to) && financeResteDe(inv)>0 && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status)));
+const montantDouteux=douteuxListe.reduce((s,inv)=>s+financeResteDe(inv),0);
 return {
 totalEncours,
+montantDouteux,
+nbDouteux:douteuxListe.length,
 montantEnRetard,
 nbFacturesEnRetard:nbEnRetard,
 nbFacturesTotal:unpaid.length,
@@ -584,8 +592,8 @@ const prevK=prevBounds?computeFinanceKpisFromCache(prevBounds):null;
 const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMontant}};
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
 wrap.innerHTML=`
-<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div></div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse/douteux (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
+<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div>${k.nbDouteux>0?`<div class="kpi-lbl" style="color:#f97316;font-weight:600" title="Suivis dans l'onglet Douteux, non comptés dans l'encours">+ ${fmtCA(k.montantDouteux)} en douteux (${k.nbDouteux} facture(s), hors encours)</div>`:''}</div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
 <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
