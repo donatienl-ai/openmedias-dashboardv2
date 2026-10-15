@@ -329,7 +329,9 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       for (const x of r.soldeesAvecReste) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.classementsPrevus) items.push({ id: x.id, facture: x.facture, raison: `À passer en Soldée d'après Trello. ${x.raison}`, lien: x.lien });
       for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
-      res.json({ pret: true, genereLe: r.genereLe, items });
+      // scp : numéros des factures des cartes de la liste Trello « Projets SCP »,
+      // retirées du dashboard et des calculs (15/10/2026, demande Lina).
+      res.json({ pret: true, genereLe: r.genereLe, items, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
