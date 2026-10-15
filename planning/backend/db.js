@@ -342,7 +342,8 @@ const FORMATS_PAR_MEDIA = {
 const MEDIAS = Object.keys(SLOTS_PAR_MEDIA);
 const CHANNELS = ['Instagram', 'LinkedIn', 'YouTube', 'Newsletter'];
 const SOCIAL_POST_STATUSES = ['a_faire', 'pret', 'publie'];
-const FINANCE_INTERNAL_STATUSES = ['a_relancer', 'en_cours', 'douteux', 'litige', 'promesse_paiement', 'solde'];
+// report_projet ajouté le 15/10/2026 (demande Lina) : projet reporté, suivi à part comme un litige.
+const FINANCE_INTERNAL_STATUSES = ['a_relancer', 'en_cours', 'douteux', 'litige', 'report_projet', 'promesse_paiement', 'solde'];
 
 const SOUS_MEDIAS_SPECIALISES = {
 "Figaro Sport": ["Article digital", "Immersion"],
