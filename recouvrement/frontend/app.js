@@ -225,8 +225,8 @@ await loadFinance();
 // parle plus à l'équipe compta) : c'est un renommage d'AFFICHAGE pur, la clé
 // technique en_cours ne change pas (base de données, API, filtres, mail
 // quotidien) — voir planning/backend/db.js, FINANCE_INTERNAL_STATUSES.
-const FINANCE_STATUS_LABEL={a_relancer:'À relancer',en_cours:'Relancé',douteux:'Douteux',litige:'Litige',promesse_paiement:'Promesse de paiement',solde:'Soldée'};
-const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',douteux:'#f97316',litige:'#dc2626',promesse_paiement:'#0d9488',solde:'var(--green)'};
+const FINANCE_STATUS_LABEL={a_relancer:'À relancer',en_cours:'Relancé',douteux:'Douteux',litige:'Litige',report_projet:'Report projet',promesse_paiement:'Promesse de paiement',solde:'Soldée'};
+const FINANCE_STATUS_COLOR={a_relancer:'var(--gold)',en_cours:'var(--accent)',douteux:'#f97316',litige:'#dc2626',report_projet:'#8b5cf6',promesse_paiement:'#0d9488',solde:'var(--green)'};
 const FINANCE_CANAL_LABEL={email:'📧 Email',telephone:'📞 Téléphone',courrier:'✉️ Courrier',sms:'💬 SMS',autre:'Autre'};
 let financeInvoicesCache=[];
 let financeSelectedInvoiceId=null; // facture ouverte dans le modal de détail
@@ -344,6 +344,8 @@ const m=new Map();
 for(const it of (d.items||[])){ if(it.id==null)continue; const k=String(it.id); if(!m.has(k))m.set(k,[]); m.get(k).push(it); }
 financeAVerifier=m;
 financePartielsTrello=new Map((d.partiels||[]).map((p)=>[String(p.id),p]));
+financeAvoirsParFacture=new Map();financeAvoirsParAvoir=new Map();
+for(const a of (d.avoirs||[])){const kf=String(a.factureId),ka=String(a.avoirId);if(!financeAvoirsParFacture.has(kf))financeAvoirsParFacture.set(kf,[]);financeAvoirsParFacture.get(kf).push(a);if(!financeAvoirsParAvoir.has(ka))financeAvoirsParAvoir.set(ka,[]);financeAvoirsParAvoir.get(ka).push(a);}
 if(Array.isArray(d.scp)){
 financeScpNumeros=new Set(d.scp.map(String));
 const avant=financeInvoicesCache.length;
@@ -357,6 +359,22 @@ renderFinanceTabs();
 // Pennylane (reste < montant), acomptes en partie réglés, ou paiement partiel lu dans Trello
 // (commentaires et pièces jointes, cf. trelloRecouvrement.js section G).
 let financePartielsTrello=new Map();
+// Avoirs reliés à leur facture (15/10/2026 : plus d'onglet Avoir, l'avoir se voit sur la facture).
+let financeAvoirsParFacture=new Map(),financeAvoirsParAvoir=new Map();
+function financeAvoirsHtml(inv){
+if(!inv)return '';
+const fr=(n)=>Number(n||0).toLocaleString('fr-FR',{minimumFractionDigits:0,maximumFractionDigits:2})+' €';
+const dfr=(s)=>s?String(s).slice(8,10)+'/'+String(s).slice(5,7)+'/'+String(s).slice(0,4):'';
+const lignes=[];
+for(const a of financeAvoirsParFacture.get(String(inv.id))||[]){
+lignes.push(a.type==='annule_avoir'?`Cette facture annule l'avoir ${a.avoirNumero} (−${fr(a.montant)}).`:`Avoir ${a.avoirNumero} du ${dfr(a.date)} : −${fr(a.montant)}.`);
+}
+for(const a of financeAvoirsParAvoir.get(String(inv.id))||[]){
+lignes.push(a.type==='annule_avoir'?`Avoir annulé par la facture ${a.factureNumero} du ${dfr(a.date)}.`:`Avoir de la facture ${a.factureNumero} (−${fr(a.montant)}).`);
+}
+if(!lignes.length)return '';
+return '<div class="finance-detail-section" style="border-left:3px solid var(--accent);padding-left:10px"><div class="form-label">Avoir lié</div>'+lignes.map((l)=>'<div style="font-size:12px;margin:2px 0">'+l+'</div>').join('')+'</div>';
+}
 function financeEstPartielle(inv){
 if(!inv||['cancelled','draft','credit_note','archived','paid'].includes(inv.status)||inv.internalStatus==='solde')return false;
 const reste=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
@@ -438,7 +456,7 @@ return `<span class="finance-hors-encours-badge" title="Reste-dû Pennylane non 
 // cours ou une promesse de paiement obtenue n'attend pas une relance du jour.
 // 'douteux' ajouté le 24/09/2026 (demande Lina) — même liste que côté back
 // (financeRoutes.js), à garder synchronisée.
-const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde','douteux'];
+const FINANCE_STATUTS_NON_ACTIONABLES=['litige','report_projet','promesse_paiement','solde','douteux'];
 // Recalcule les KPI de recouvrement (encours, montant actionable, taux de
 // retard, aging, répartition par statut, DSO) côté front, à partir du cache
 // local déjà filtré par la période ET les chips de filtre actifs — reproduit
@@ -609,7 +627,7 @@ const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMont
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
 wrap.innerHTML=`
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div>${k.nbDouteux>0?`<div class="kpi-lbl" style="color:#f97316;font-weight:600" title="Suivis dans l'onglet Douteux, non comptés dans l'encours">+ ${fmtCA(k.montantDouteux)} en douteux (${k.nbDouteux} facture(s), hors encours)</div>`:''}</div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse/report (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
 <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">Part de l'encours en retard (${k.nbFacturesEnRetard} facture(s))</div></div>
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
@@ -703,6 +721,8 @@ a_verifier: {bg:'rgba(245,158,11,0.15)', fg:'#f59e0b'},
 upcoming: {bg:'var(--accent-dim)', fg:'var(--accent)'},
 late: {bg:'var(--red-dim)', fg:'#dc2626'},
 douteux_manuel: {bg:'rgba(249,115,22,0.14)', fg:'#f97316'},
+litige_manuel: {bg:'var(--red-dim)', fg:'#dc2626'},
+report_projet: {bg:'rgba(139,92,246,0.14)', fg:'#8b5cf6'},
 paid: {bg:'var(--green-dim)', fg:'var(--green)'},
 partially_paid: {bg:'rgba(13,148,136,0.12)', fg:'#0d9488'},
 cancelled: {bg:'var(--surface2)', fg:'var(--text-dim)'},
@@ -715,7 +735,7 @@ archived: {bg:'var(--surface2)', fg:'var(--text-muted)'},
 // onglets "À venir" et "En retard" : une facture déjà suivie autrement que
 // par une relance active n'a plus besoin d'apparaître dans ces deux vues-là.
 // Mêmes valeurs que FINANCE_STATUTS_NON_ACTIONABLES ci-dessus, + en_cours.
-const FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE=['litige','promesse_paiement','solde','en_cours','douteux'];
+const FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE=['litige','report_projet','promesse_paiement','solde','en_cours','douteux'];
 // Test d'UNE facture contre UN chip donné (utilisé pour les compteurs par
 // chip, et comme brique de financeMatchesFilters ci-dessous).
 function financeMatchesFilterKey(inv,key){
@@ -728,6 +748,8 @@ if(key==='all')return true;
 // autre système, non lié).
 if(key==='douteux_manuel')return inv.internalStatus==='douteux';
 if(key==='a_verifier')return financeAVerifier.has(String(inv.id));
+if(key==='litige_manuel')return inv.internalStatus==='litige';
+if(key==='report_projet')return inv.internalStatus==='report_projet';
 if(key==='partially_paid'&&financeEstPartielle(inv))return true;
 const statuses=PENNYLANE_TAB_STATUSES[key];
 if(!statuses||!statuses.includes(inv.status))return false;
@@ -768,6 +790,8 @@ for(const key of Object.keys(PENNYLANE_TAB_STATUSES)){
 counts[key]=list.filter((i)=>financeMatchesFilterKey(i,key)).length;
 }
 counts.douteux_manuel=list.filter((i)=>financeMatchesFilterKey(i,'douteux_manuel')).length;
+counts.litige_manuel=list.filter((i)=>financeMatchesFilterKey(i,'litige_manuel')).length;
+counts.report_projet=list.filter((i)=>financeMatchesFilterKey(i,'report_projet')).length;
 counts.a_verifier=list.filter((i)=>financeMatchesFilterKey(i,'a_verifier')).length;
 const chip=(key,label,title)=>{
 const active=financeActiveFilters.has(key);
@@ -781,10 +805,11 @@ ${chip('all','Toutes')}
 ${chip('upcoming','À venir')}
 ${chip('late','En retard')}
 ${chip('douteux_manuel','Douteux')}
+${chip('litige_manuel','Litige')}
+${chip('report_projet','Report projet')}
 ${chip('paid','Encaissée')}
 ${chip('partially_paid','Part. encaissée','Partiellement encaissée')}
 ${chip('cancelled','Annulée')}
-${chip('credit_note','Avoir')}
 ${chip('archived','Archivée')}
 ${chip('a_verifier','À vérifier','Pennylane, Trello et le dashboard ne disent pas la même chose : à trancher par les expertes-comptables')}
 `;
@@ -1121,6 +1146,7 @@ ${financeClientSnapshotHtml(inv)}
 <select class="form-select" style="max-width:200px;color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${id}',{internalStatus:this.value})">${statutOptionsHtml}</select>
 </div>
 </div>
+${financeAvoirsHtml(inv)}
 ${financeAVerifierHtml(inv)}
 <div class="finance-detail-section">
 <div class="form-label">Commentaires</div>
