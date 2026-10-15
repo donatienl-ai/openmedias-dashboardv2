@@ -185,6 +185,7 @@ function construireRapport(db) {
     numerosInconnus: [], scp: [], nouveauxDouteux: [],
     incoherences: [], classementsPrevus: [], expliquees: {},
   };
+  const carteDeFacture = new Map();
   const expliquee = (raison) => { rapport.expliquees[raison] = (rapport.expliquees[raison] || 0) + 1; };
 
   for (const carte of etat.cartes) {
@@ -218,11 +219,12 @@ function construireRapport(db) {
     }
     liees = [...new Map(liees.filter((f) => Number(f.amount) > 0).map((f) => [f.id, f])).values()];
     if (!liees.length) continue;
+    for (const f of liees) carteDeFacture.set(String(f.id), { carte, coms, labels, liste });
     if (carte.closed) { expliquee('carte archivée'); continue; }
 
     const ouvertes = liees.filter((f) => restant(f) > 1 && !['cancelled'].includes(f.status));
     const ligne = (f, raison, detail) => rapport.incoherences.push({
-      facture: f.invoice_number, client: f.client, montant: f.amount, restantPennylane: restant(f), statutPennylane: f.status,
+      id: f.id, facture: f.invoice_number, client: f.client, montant: f.amount, restantPennylane: restant(f), statutPennylane: f.status,
       carte: carte.name, liste, etiquettes: labels, raison, detail,
       dernierCommentaire: dernierCom ? `${dateFR(dernierCom.date)} : ${extrait(dernierCom.texte)}` : null, lien: carte.shortUrl,
     });
@@ -240,7 +242,7 @@ function construireRapport(db) {
         if (!citeExplicitement && String(f.date_emission) > poseLe.slice(0, 10)) { expliquee('« Soldée » posée avant l\'émission de cette facture'); continue; }
         const comFacture = coms.find((c) => numerosDans(c.texte).has(String(f.invoice_number).toUpperCase()) && /sold|trop[- ]?pay|trop[- ]?per[çc]u|r[ée]gl[ée]/i.test(c.texte));
         if (comFacture) {
-          rapport.classementsPrevus.push({ facture: f.invoice_number, client: f.client, restantPennylane: restant(f), nouveauClassement: 'Soldée', raison: `Trello plus récent : « ${extrait(comFacture.texte)} » (${dateFR(comFacture.date)})`, lien: carte.shortUrl });
+          rapport.classementsPrevus.push({ id: f.id, facture: f.invoice_number, client: f.client, restantPennylane: restant(f), nouveauClassement: 'Soldée', raison: `Trello plus récent : « ${extrait(comFacture.texte)} » (${dateFR(comFacture.date)})`, lien: carte.shortUrl });
           continue;
         }
         const solde = coms.find((c) => /sold[ée]e?\s+le\s+\d{1,2}\/\d{1,2}/i.test(c.texte));
@@ -265,8 +267,23 @@ function construireRapport(db) {
 
     // D. « client douteux » dans Trello, pas douteux dans le dashboard → à ajouter (2026)
     if (labels.includes('client douteux')) {
-      for (const f of ouvertes) if (f.internal_status !== 'douteux') rapport.nouveauxDouteux.push({ facture: f.invoice_number, client: f.client, restant: restant(f), emise: f.date_emission, lien: carte.shortUrl });
+      for (const f of ouvertes) if (!['douteux', 'solde'].includes(f.internal_status)) rapport.nouveauxDouteux.push({ id: f.id, facture: f.invoice_number, client: f.client, restant: restant(f), emise: f.date_emission, lien: carte.shortUrl });
     }
+  }
+  // E. « Soldée » dans le dashboard alors que Pennylane affiche encore un reste : on lit
+  // les commentaires Trello pour comprendre (paiement via Rubypayeur, avoir, virement…).
+  rapport.soldeesAvecReste = [];
+  for (const f of factures) {
+    if (!dansPerimetre(f) || Number(f.amount) <= 0) continue;
+    if (f.internal_status !== 'solde' || restant(f) <= 1 || ['cancelled', 'partially_cancelled'].includes(f.status)) continue;
+    const c = carteDeFacture.get(String(f.id));
+    const preuve = c && c.coms.find((x) => /sold[ée]e|virement|r[ée]gl|avoir|cl[ôo]ture|rubypayeur|pay[ée]/i.test(x.texte));
+    rapport.soldeesAvecReste.push({
+      id: f.id, facture: f.invoice_number, client: f.client, restant: restant(f), statutPennylane: f.status, lien: c ? c.carte.shortUrl : null,
+      raison: preuve
+        ? `Soldée selon Trello (${dateFR(preuve.date)} : « ${extrait(preuve.texte)} »), mais il reste ${restant(f).toFixed(2)} € dans Pennylane : paiement ou avoir à rapprocher dans Pennylane.`
+        : `Marquée Soldée dans le dashboard, mais il reste ${restant(f).toFixed(2)} € dans Pennylane et rien dans Trello ne l'explique.`,
+    });
   }
   rapport.resume = {
     incoherences: rapport.incoherences.length, classementsPrevus: rapport.classementsPrevus.length, numerosInconnus: rapport.numerosInconnus.length,
@@ -299,6 +316,22 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
     } catch (e) {
       etat.erreur = e.message;
       res.status(502).json({ error: e.message });
+    }
+  });
+
+  // Liste « À vérifier » (admin + finance) : une phrase claire par facture.
+  app.get('/api/finance/a-verifier', requireFinance, (req, res) => {
+    try {
+      if (!config() || !etat.board) return res.json({ pret: false, items: [] });
+      const r = construireRapport(db);
+      const items = [];
+      for (const x of r.incoherences) items.push({ id: x.id, facture: x.facture, raison: `${x.raison}.${x.detail ? ' ' + x.detail : ''}`, lien: x.lien });
+      for (const x of r.soldeesAvecReste) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
+      for (const x of r.classementsPrevus) items.push({ id: x.id, facture: x.facture, raison: `À passer en Soldée d'après Trello. ${x.raison}`, lien: x.lien });
+      for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
+      res.json({ pret: true, genereLe: r.genereLe, items });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
     }
   });
 
