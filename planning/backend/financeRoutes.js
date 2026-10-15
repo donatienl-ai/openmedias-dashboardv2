@@ -307,7 +307,7 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
     res.json(shapeInvoiceRow(r, installments));
   });
 
-  const FINANCE_STATUTS_NON_ACTIONABLES = ['litige', 'promesse_paiement', 'solde', 'douteux'];
+  const FINANCE_STATUTS_NON_ACTIONABLES = ['litige', 'report_projet', 'promesse_paiement', 'solde', 'douteux'];
 
   app.get('/api/finance/kpis', requireFinance, (req, res) => {
     const unpaid = db.prepare(`
