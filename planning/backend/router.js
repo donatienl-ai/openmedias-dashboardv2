@@ -550,6 +550,14 @@ app.post('/api/webhook/salesforce', async (req, res) => {
     }
   }
 
+  // Validation au planning seulement si l'opportunité est clôturée gagnée dans Salesforce
+  // (15/10/2026, demande Lina) ; sinon « en attente », revérifiée toutes les 20 s.
+  // Étape inconnue (relecture live échouée) : ancien comportement.
+  if (!isManual && !isBdc && b.sf_is_won === false) {
+    const att = mettreEnAttenteSalesforce(b);
+    console.log(`[SF-WEBHOOK] opp=${b.sf_opportunity_id || '-'} \"${b.entreprise || '?'}\" pas encore gagnée (étape : ${b.sf_stage || '?'}) → en attente (${att.error || 'id=' + att.id})`);
+    return res.status(att.status || 200).json(att);
+  }
   const result = insertEmission(b, isBdc);
   const issue = result.error ? result.error
     : result.ignored ? 'ignorée (média hors planning)'
@@ -559,6 +567,48 @@ app.post('/api/webhook/salesforce', async (req, res) => {
   console.log(`[SF-WEBHOOK] ${result.status} opp=${b.sf_opportunity_id || '-'} "${b.entreprise || '?'}" media="${b.media || '?'}"${result.mediaResolu ? ` → "${result.mediaResolu}"` : ''} — ${issue}`);
   res.status(result.status).json(result);
 });
+
+// ── BDC : VÉRIFIER SALESFORCE AVANT DE VALIDER AU PLANNING (15/10/2026, demande Lina) ──
+// Une opportunité reçue de Salesforce qui n'est pas encore clôturée gagnée est mise
+// « en attente » au planning (statut bdc_attente, rattachée au créneau BDC du commercial
+// s'il existe). Toutes les 20 s, on relit l'étape de toutes ces opportunités dans
+// Salesforce (une seule requête) : gagnée → validée au planning ; perdue → annulée.
+function mettreEnAttenteSalesforce(b) {
+  const result = insertEmission(b, false);
+  if (result.id && !result.error && !result.aProgrammer) {
+    db.prepare(`UPDATE emissions SET statut='bdc_attente',
+      notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=?`)
+      .run(`⏳ En attente de validation Salesforce (étape : ${b.sf_stage || '?'})`, result.id);
+  }
+  return { ...result, enAttenteSalesforce: !result.error && !result.aProgrammer };
+}
+let verifSfEnCours = false;
+async function verifierAttentesSalesforce() {
+  if (verifSfEnCours) return;
+  verifSfEnCours = true;
+  try {
+    const rows = db.prepare(`SELECT id, sf_opportunity_id, entreprise FROM emissions
+      WHERE statut='bdc_attente' AND sf_opportunity_id IS NOT NULL AND sf_opportunity_id != ''`).all();
+    if (!rows.length) return;
+    const etapes = await salesforce.getOpportunitiesEtape(rows.map((r) => r.sf_opportunity_id));
+    for (const r of rows) {
+      const e = etapes[r.sf_opportunity_id] || etapes[String(r.sf_opportunity_id).slice(0, 15)];
+      if (!e) continue;
+      if (e.won) {
+        db.prepare(`UPDATE emissions SET statut='confirme', notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=? AND statut='bdc_attente'`)
+          .run(`✅ Validée par Salesforce (clôturée gagnée) le ${new Date().toLocaleDateString('fr-FR')}`, r.id);
+        console.log(`[SF-VALIDATION] opp=${r.sf_opportunity_id} "${r.entreprise}" gagnée → validée au planning (id=${r.id})`);
+      } else if (e.closed) {
+        db.prepare(`UPDATE emissions SET statut='annule', notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=? AND statut='bdc_attente'`)
+          .run(`❌ Opportunité perdue dans Salesforce (${e.stage || 'clôturée'}) le ${new Date().toLocaleDateString('fr-FR')} : créneau libéré`, r.id);
+        console.log(`[SF-VALIDATION] opp=${r.sf_opportunity_id} "${r.entreprise}" perdue → créneau libéré (id=${r.id})`);
+      }
+    }
+  } catch (err) {
+    console.error('[SF-VALIDATION] ' + err.message);
+  } finally { verifSfEnCours = false; }
+}
+setInterval(() => { verifierAttentesSalesforce().catch(() => {}); }, 20 * 1000).unref();
 
 // ── RESYNCHRONISATION DEPUIS SALESFORCE (à la demande) ────────────────────────
 app.post('/api/emissions/:id/resync-sf', requireEdit, async (req, res) => {
@@ -641,6 +691,11 @@ app.post('/api/admin/import-sf-opportunity', requireEdit, async (req, res) => {
     return res.status(502).json({ error: `Salesforce injoignable: ${err.message}` });
   }
   if (!opp) return res.status(404).json({ error: "Opportunité introuvable côté Salesforce (Id invalide, ou droits d'accès insuffisants)" });
+  if (opp.sf_is_won === false) {
+    const att = mettreEnAttenteSalesforce(opp);
+    if (!att.error) return res.json({ ...att, message: `Opportunité pas encore clôturée gagnée (étape : ${opp.sf_stage || 'inconnue'}) : mise en attente, validée automatiquement à la clôture.` });
+    return res.status(409).json({ error: `Opportunité pas encore clôturée gagnée dans Salesforce (étape : ${opp.sf_stage || 'inconnue'}) : une diffusion n'entre au planning qu'une fois clôturée.` });
+  }
 
   const result = insertEmission(opp, false);
   console.log(`[IMPORT-SF] opp=${sfId} "${opp.entreprise}" — ${result.error || (result.reactivee ? 'réactivée' : result.convertie ? 'créneau BDC converti' : 'créée')} id=${result.id || '-'}`);
