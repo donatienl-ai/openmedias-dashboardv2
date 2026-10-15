@@ -1369,9 +1369,10 @@ async function loadAProgrammer(){
       <span id="aprogrammer-toggle" style="margin-left:auto;font-size:11px;font-weight:400">${collapsed?'▼ Voir':'▲ Réduire'}</span>
     </div>
     <div id="aprogrammer-cards-wrap" style="${collapsed?'display:none':''}">
-      ${items.map(e=>`<div class="a-programmer-card" draggable="true" ondragstart="dragStartAProgrammer(event,${e.id})" onclick="openEmission(${e.id})" title="Glisser vers une date, ou cliquer pour la saisir">
+      ${items.map(e=>`<div class="a-programmer-card" ${e.sf_attente?'draggable="false" style="opacity:.6;cursor:not-allowed"':`draggable="true" ondragstart="dragStartAProgrammer(event,${e.id})"`} onclick="openEmission(${e.id})" title="${e.sf_attente?'En attente de signature Salesforce : pas encore programmable':'Glisser vers une date, ou cliquer pour la saisir'}">
         <div class="adc-entreprise">${e.entreprise}</div>
         <div class="adc-media">${e.media}${e.format?' · '+e.format:''}</div>
+        ${e.sf_attente?`<div class="adc-media" style="color:#d97706;font-weight:600">⏳ En attente de signature Salesforce${e.sf_attente_etape?' (étape : '+e.sf_attente_etape+')':''}</div>`:''}
       </div>`).join('')}
     </div>`;
 }
@@ -2081,6 +2082,7 @@ async function openEmission(id){
   document.getElementById('modal-overlay').style.display='flex';
   document.getElementById('modal-body').innerHTML=`
     ${isBdc?'<div class="info-banner bdc">⏳ BDC en attente — diffusion réservée, contrat non signé</div>':''}
+    ${e.sf_attente?`<div class="info-banner bdc">⏳ En attente de signature Salesforce${e.sf_attente_etape?' (étape : '+e.sf_attente_etape+')':''} — impossible de la programmer avant la clôture gagnée</div>`:''}
     ${isDecale?`<div class="info-banner warning">⟳ Date décalée — originale : ${formatDateFR(e.date_diffusion_originale)}</div>`:''}
     ${canSeeBudget&&(e.montant||e.upsell)?`<div class="info-banner neutral">💰 <strong style="color:var(--accent)">${fmtCA((e.montant||0)+(e.upsell||0))}</strong>${e.upsell?' <span style="color:var(--text-muted);font-size:11px">(dont '+fmtCA(e.upsell)+' upsell)</span>':''}</div>`:''}
     <div class="form-row">
