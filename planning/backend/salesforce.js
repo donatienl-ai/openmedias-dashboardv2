@@ -57,7 +57,7 @@ async function getOpportunity(sfId) {
   const soql = encodeURIComponent(
     "SELECT Id, Account.Name, Secteur_diffusion__c, Format__c, M_dia__c, " +
     "Date_de_diffusion__c, Pas_de_date_de_diffusion_connue__c, Owner.FirstName, " +
-    "Homepage_Figaro__c, Homepage_Economie_Figaro__c, Amount " +
+    "Homepage_Figaro__c, Homepage_Economie_Figaro__c, Amount, StageName, IsWon, IsClosed " +
     "FROM Opportunity WHERE Id = '" + sfId + "'"
   );
   const res = await fetch(`${instanceUrl}/services/data/v59.0/query?q=${soql}`, {
@@ -78,7 +78,12 @@ async function getOpportunity(sfId) {
     commercial: opp.Owner ? opp.Owner.FirstName : null,
     homepage: !!opp.Homepage_Figaro__c,
     homepage_eco: !!opp.Homepage_Economie_Figaro__c,
-    montant: opp.Amount || 0
+    montant: opp.Amount || 0,
+    // Étape Salesforce (15/10/2026, demande Lina) : une diffusion n'entre dans le
+    // planning qu'une fois l'opportunité clôturée gagnée (IsWon).
+    sf_stage: opp.StageName || null,
+    sf_is_won: opp.IsWon === true,
+    sf_is_closed: opp.IsClosed === true
   };
 }
 
@@ -125,4 +130,25 @@ async function getLeadForBdc(rawIdOrUrl) {
   };
 }
 
-module.exports = { getCommerciaux, getOpportunity, getLeadForBdc, extractSalesforceId };
+// Étape de plusieurs opportunités en UNE requête (vérification des BDC en attente
+// toutes les 20 s, 15/10/2026) : { [Id]: { stage, won, closed } }.
+async function getOpportunitiesEtape(ids) {
+  const propres = [...new Set((ids || []).filter((x) => /^[a-zA-Z0-9]{15,18}$/.test(String(x))))];
+  if (!propres.length) return {};
+  const { accessToken, instanceUrl } = await getAuth();
+  const out = {};
+  for (let i = 0; i < propres.length; i += 100) {
+    const lot = propres.slice(i, i + 100).map((x) => "'" + x + "'").join(',');
+    const soql = encodeURIComponent('SELECT Id, StageName, IsWon, IsClosed FROM Opportunity WHERE Id IN (' + lot + ')');
+    const res = await fetch(`${instanceUrl}/services/data/v59.0/query?q=${soql}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const json = await res.json();
+    if (!res.ok) throw new Error(`Requête Salesforce échouée: ${JSON.stringify(json)}`);
+    for (const o of json.records || []) {
+      const e = { stage: o.StageName || null, won: o.IsWon === true, closed: o.IsClosed === true };
+      out[o.Id] = e; out[String(o.Id).slice(0, 15)] = e;
+    }
+  }
+  return out;
+}
+
+module.exports = { getCommerciaux, getOpportunity, getOpportunitiesEtape, getLeadForBdc, extractSalesforceId };
