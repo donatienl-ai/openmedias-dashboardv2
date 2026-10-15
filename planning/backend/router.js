@@ -573,14 +573,31 @@ app.post('/api/webhook/salesforce', async (req, res) => {
 // « en attente » au planning (statut bdc_attente, rattachée au créneau BDC du commercial
 // s'il existe). Toutes les 20 s, on relit l'étape de toutes ces opportunités dans
 // Salesforce (une seule requête) : gagnée → validée au planning ; perdue → annulée.
+// Diffusions parties dans « À programmer » (date inconnue, format manquant…) alors que
+// l'opportunité n'est pas encore gagnée : marquées ici, non programmables tant que
+// Salesforce ne l'a pas validée (15/10/2026, demande Lina).
+db.exec(`CREATE TABLE IF NOT EXISTS sf_validation_attente (
+  emission_id INTEGER PRIMARY KEY, sf_opportunity_id TEXT, etape TEXT,
+  depuis TEXT DEFAULT (datetime('now'))
+)`);
+function avecAttenteSf(rows) {
+  const att = new Map(db.prepare('SELECT emission_id, etape FROM sf_validation_attente').all().map((r) => [r.emission_id, r.etape]));
+  return rows.map((e) => (e && att.has(e.id) ? { ...e, sf_attente: true, sf_attente_etape: att.get(e.id) } : e));
+}
 function mettreEnAttenteSalesforce(b) {
   const result = insertEmission(b, false);
+  if (result.id && !result.error && result.aProgrammer && b.sf_opportunity_id) {
+    db.prepare(`INSERT INTO sf_validation_attente (emission_id, sf_opportunity_id, etape) VALUES (?,?,?)
+      ON CONFLICT(emission_id) DO UPDATE SET sf_opportunity_id=excluded.sf_opportunity_id, etape=excluded.etape`)
+      .run(result.id, b.sf_opportunity_id, b.sf_stage || null);
+    return { ...result, enAttenteSalesforce: true };
+  }
   if (result.id && !result.error && !result.aProgrammer) {
     db.prepare(`UPDATE emissions SET statut='bdc_attente',
       notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=?`)
       .run(`⏳ En attente de validation Salesforce (étape : ${b.sf_stage || '?'})`, result.id);
   }
-  return { ...result, enAttenteSalesforce: !result.error && !result.aProgrammer };
+  return { ...result, enAttenteSalesforce: !result.error };
 }
 let verifSfEnCours = false;
 async function verifierAttentesSalesforce() {
@@ -589,8 +606,28 @@ async function verifierAttentesSalesforce() {
   try {
     const rows = db.prepare(`SELECT id, sf_opportunity_id, entreprise FROM emissions
       WHERE statut='bdc_attente' AND sf_opportunity_id IS NOT NULL AND sf_opportunity_id != ''`).all();
-    if (!rows.length) return;
-    const etapes = await salesforce.getOpportunitiesEtape(rows.map((r) => r.sf_opportunity_id));
+    const aProg = db.prepare(`SELECT a.emission_id, a.sf_opportunity_id, e.entreprise, e.statut FROM sf_validation_attente a
+      LEFT JOIN emissions e ON e.id = a.emission_id`).all();
+    if (!rows.length && !aProg.length) return;
+    const etapes = await salesforce.getOpportunitiesEtape([...rows, ...aProg].map((r) => r.sf_opportunity_id));
+    for (const r of aProg) {
+      if (!r.statut || r.statut === 'annule') { db.prepare('DELETE FROM sf_validation_attente WHERE emission_id=?').run(r.emission_id); continue; }
+      const e = etapes[r.sf_opportunity_id] || etapes[String(r.sf_opportunity_id).slice(0, 15)];
+      if (!e) continue;
+      if (e.won) {
+        db.prepare('DELETE FROM sf_validation_attente WHERE emission_id=?').run(r.emission_id);
+        db.prepare(`UPDATE emissions SET notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=?`)
+          .run(`✅ Validée par Salesforce (clôturée gagnée) le ${new Date().toLocaleDateString('fr-FR')} : peut être programmée`, r.emission_id);
+        console.log(`[SF-VALIDATION] opp=${r.sf_opportunity_id} "${r.entreprise}" gagnée → programmable (id=${r.emission_id})`);
+      } else if (e.closed) {
+        db.prepare('DELETE FROM sf_validation_attente WHERE emission_id=?').run(r.emission_id);
+        db.prepare(`UPDATE emissions SET statut='annule', notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=? AND statut='a_programmer'`)
+          .run(`❌ Opportunité perdue dans Salesforce (${e.stage || 'clôturée'}) le ${new Date().toLocaleDateString('fr-FR')}`, r.emission_id);
+        console.log(`[SF-VALIDATION] opp=${r.sf_opportunity_id} "${r.entreprise}" perdue → retirée de À programmer (id=${r.emission_id})`);
+      } else {
+        db.prepare('UPDATE sf_validation_attente SET etape=? WHERE emission_id=?').run(e.stage || null, r.emission_id);
+      }
+    }
     for (const r of rows) {
       const e = etapes[r.sf_opportunity_id] || etapes[String(r.sf_opportunity_id).slice(0, 15)];
       if (!e) continue;
@@ -1058,7 +1095,7 @@ app.get('/api/a-programmer', (req, res) => {
     if (resp_edit !== '_none') params.push(resp_edit);
   }
   query += ' ORDER BY entreprise ASC';
-  res.json(db.prepare(query).all(...params));
+  res.json(avecAttenteSf(db.prepare(query).all(...params)));
 });
 
 app.get('/api/a-programmer/perso', (req, res) => {
@@ -1066,7 +1103,7 @@ app.get('/api/a-programmer/perso', (req, res) => {
   if (!nom) return res.status(400).json({ error: 'nom requis' });
   const assignees = db.prepare(`SELECT * FROM emissions WHERE statut='a_programmer' AND resp_edit=? ORDER BY entreprise ASC`).all(nom);
   const nonAssignees = db.prepare(`SELECT * FROM emissions WHERE statut='a_programmer' AND (resp_edit IS NULL OR resp_edit='') ORDER BY entreprise ASC`).all();
-  res.json({ assignees, nonAssignees });
+  res.json({ assignees: avecAttenteSf(assignees), nonAssignees: avecAttenteSf(nonAssignees) });
 });
 
 app.get('/api/a-programmer/clevel', (req, res) => {
@@ -1081,7 +1118,7 @@ app.get('/api/a-programmer/clevel', (req, res) => {
 app.get('/api/emissions/:id', (req, res) => {
   const e = db.prepare('SELECT * FROM emissions WHERE id=?').get(req.params.id);
   if (!e) return res.status(404).json({ error: 'Non trouvé' });
-  res.json(e);
+  res.json(avecAttenteSf([e])[0]);
 });
 
 app.get('/api/slots', (req, res) => {
@@ -1105,6 +1142,13 @@ app.patch('/api/emissions/:id', (req, res) => {
   if (!e) return res.status(404).json({ error: 'Non trouvé' });
   if (media && !MEDIAS.includes(media)) return res.status(400).json({ error: `Média inconnu: ${media}` });
   if (entreprise !== undefined && !entreprise.trim()) return res.status(400).json({ error: 'Entreprise ne peut pas être vide' });
+  // Pas de programmation tant que Salesforce n'a pas validé (clôturée gagnée) — 15/10/2026.
+  const attSf = db.prepare('SELECT etape FROM sf_validation_attente WHERE emission_id=?').get(e.id);
+  const versPlanning = (statut && !['annule', 'a_programmer', 'bdc_attente'].includes(statut)) || (date_diffusion && date_diffusion !== e.date_diffusion);
+  const valideAvantSf = statut && !['annule', 'a_programmer', 'bdc_attente'].includes(statut); // un BDC Salesforce en attente peut changer de date, pas être validé
+  if ((attSf && versPlanning) || (e.statut === 'bdc_attente' && e.sf_opportunity_id && valideAvantSf)) {
+    return res.status(409).json({ error: `En attente de signature Salesforce${attSf && attSf.etape ? ` (étape : ${attSf.etape})` : ''} : impossible de la programmer avant la clôture gagnée.` });
+  }
 
   const alertes = [];
   const newDate = date_diffusion || e.date_diffusion;
