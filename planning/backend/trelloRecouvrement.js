@@ -56,6 +56,24 @@ function pjInit(db) {
     lu_le TEXT DEFAULT (datetime('now'))
   )`);
 }
+
+// Avoirs ↔ factures d'après Pennylane (credited_invoice), relu au démarrage puis toutes
+// les 30 min (lecture seule). Complété par le contexte dans construireRapport (section H).
+const avoirsPl = { liens: new Map(), chargeLe: null };
+async function chargerLiensAvoirsPennylane() {
+  try {
+    const { getAllPaginated } = require('./pennylane');
+    const toutes = await getAllPaginated('customer_invoices');
+    const m = new Map();
+    for (const inv of toutes || []) {
+      const c = inv && (inv.credited_invoice || inv.credited_invoice_id);
+      const id = c && typeof c === 'object' ? c.id : c;
+      if (id) m.set(String(inv.id), String(id));
+    }
+    avoirsPl.liens = m; avoirsPl.chargeLe = new Date().toISOString();
+    console.log(`[avoirs] ${m.size} avoir(s) relié(s) à leur facture par Pennylane`);
+  } catch (e) { console.warn('[avoirs] lecture Pennylane :', e.message); }
+}
 function pjTextes() {
   const m = new Map();
   if (!pj.db) return m;
@@ -455,6 +473,44 @@ function construireRapport(db) {
     }
     if (total > 1 && total < restant(f) - 1) rapport.partielsTrello.push({ id: f.id, facture: f.invoice_number, montantTrello: total, details });
   }
+  // H. Avoirs ↔ factures (15/10/2026, demande Lina : « même raisonnement que F6336 pour
+  // tous les avoirs »). 1) lien Pennylane (credited_invoice) ; 2) sinon contexte : même
+  // client, avoir émis après la facture, montant égal sur une facture annulée, ou avoir
+  // partiel sur la seule facture encore ouverte qu'il peut réduire ; 3) facture émise pour
+  // annuler un avoir (cas F6336 qui annule l'avoir F6243) : facture annulée, même client,
+  // même montant qu'un avoir antérieur.
+  rapport.avoirs = [];
+  const parIdFacture = new Map(factures.map((f) => [String(f.id), f]));
+  const montantAbs = (f) => Math.abs(Number(f.amount) || 0);
+  const avoirsTous = factures.filter((f) => Number(f.amount) < 0 && dansPerimetre(f));
+  const avoirLie = new Set();
+  const facturesAvecAvoir = new Set();
+  const lier = (av, f, source, type) => {
+    rapport.avoirs.push({ avoirId: av.id, avoirNumero: av.invoice_number, factureId: f.id, factureNumero: f.invoice_number,
+      montant: montantAbs(av), date: type === 'annule_avoir' ? f.date_emission : av.date_emission, source, type: type || 'avoir' });
+    avoirLie.add(String(av.id)); facturesAvecAvoir.add(String(f.id));
+  };
+  for (const av of avoirsTous) {
+    const fid = avoirsPl.liens.get(String(av.id));
+    if (fid && parIdFacture.has(fid)) lier(av, parIdFacture.get(fid), 'Pennylane');
+  }
+  const plusRecente = (l) => l.slice().sort((a, b) => (a.date_emission < b.date_emission ? 1 : -1))[0];
+  for (const av of avoirsTous) {
+    if (avoirLie.has(String(av.id))) continue;
+    const cands = factures.filter((f) => Number(f.amount) > 0 && f.customer_id === av.customer_id
+      && String(f.date_emission) <= String(av.date_emission) && montantAbs(f) + 1 >= montantAbs(av) && !facturesAvecAvoir.has(String(f.id)));
+    if (!cands.length) continue;
+    const exacts = cands.filter((f) => Math.abs(montantAbs(f) - montantAbs(av)) <= 1 && ['cancelled', 'partially_cancelled'].includes(f.status));
+    const partiels = cands.filter((f) => f.status === 'partially_cancelled' || (montantAbs(f) - montantAbs(av) > 1 && restant(f) > 1));
+    const f = plusRecente(exacts) || (partiels.length === 1 ? partiels[0] : null);
+    if (f) lier(av, f, 'contexte (même client, montant, date)');
+  }
+  for (const f of factures) {
+    if (Number(f.amount) <= 0 || f.status !== 'cancelled' || !dansPerimetre(f) || facturesAvecAvoir.has(String(f.id))) continue;
+    const av = plusRecente(avoirsTous.filter((a) => a.customer_id === f.customer_id && !avoirLie.has(String(a.id))
+      && Math.abs(montantAbs(a) - montantAbs(f)) <= 1 && String(a.date_emission) <= String(f.date_emission)));
+    if (av) lier(av, f, 'contexte (facture émise pour annuler l\'avoir)', 'annule_avoir');
+  }
   rapport.resume = {
     incoherences: rapport.incoherences.length, classementsPrevus: rapport.classementsPrevus.length, numerosInconnus: rapport.numerosInconnus.length,
     nonRelieesRecouvrement: rapport.liens.nonRelieesRecouvrement.length, scp: rapport.scp.length, nouveauxDouteux: rapport.nouveauxDouteux.length,
@@ -476,6 +532,8 @@ function appliquerDouteuxTrello(db) {
 
 module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }) {
   pjInit(db);
+  setTimeout(() => { chargerLiensAvoirsPennylane(); }, 20000).unref();
+  setInterval(() => { chargerLiensAvoirsPennylane(); }, 30 * 60 * 1000).unref();
   if (config()) assurerCharge().catch((e) => console.warn('[trello] chargement initial :', e.message));
 
   // Mise à jour automatique : nouveautés Trello toutes les 20 secondes (lecture seule).
@@ -519,7 +577,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
       // scp : numéros des factures des cartes de la liste Trello « Projets SCP »,
       // retirées du dashboard et des calculs (15/10/2026, demande Lina).
-      res.json({ pret: true, genereLe: r.genereLe, items, partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
+      res.json({ pret: true, genereLe: r.genereLe, items, avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
