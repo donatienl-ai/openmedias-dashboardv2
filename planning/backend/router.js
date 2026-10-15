@@ -647,6 +647,44 @@ async function verifierAttentesSalesforce() {
 }
 setInterval(() => { verifierAttentesSalesforce().catch(() => {}); }, 20 * 1000).unref();
 
+// Rattrapage (15/10/2026, demande Lina) : les diffusions déjà dans « À programmer »
+// avec un numéro d'opportunité sont vérifiées une fois dans Salesforce au démarrage.
+// Pas gagnée → mention « en attente de signature » + bloquée ; perdue → simple note
+// (pas d'annulation automatique), liste consultable via GET /api/admin/sf-rattrapage.
+let dernierRattrapageSf = null;
+async function rattraperAProgrammerSf() {
+  const rows = db.prepare(`SELECT id, sf_opportunity_id, entreprise FROM emissions
+    WHERE statut='a_programmer' AND sf_opportunity_id IS NOT NULL AND sf_opportunity_id != ''
+      AND id NOT IN (SELECT emission_id FROM sf_validation_attente)`).all();
+  const bilan = { le: new Date().toISOString(), verifiees: rows.length, gagnees: [], enAttente: [], perdues: [], introuvables: [] };
+  if (rows.length) {
+    const etapes = await salesforce.getOpportunitiesEtape(rows.map((r) => r.sf_opportunity_id));
+    for (const r of rows) {
+      const e = etapes[r.sf_opportunity_id] || etapes[String(r.sf_opportunity_id).slice(0, 15)];
+      const ligne = { id: r.id, entreprise: r.entreprise, opp: r.sf_opportunity_id, etape: e ? e.stage : null };
+      if (!e) { bilan.introuvables.push(ligne); continue; }
+      if (e.won) { bilan.gagnees.push(ligne); continue; }
+      if (e.closed) {
+        bilan.perdues.push(ligne);
+        db.prepare(`UPDATE emissions SET notes=COALESCE(notes || char(10), '') || ?, updated_at=datetime('now') WHERE id=? AND COALESCE(notes,'') NOT LIKE '%perdue dans Salesforce%'`)
+          .run(`❌ Opportunité perdue dans Salesforce (${e.stage || 'clôturée'}) — vérifié le ${new Date().toLocaleDateString('fr-FR')}, à retirer ?`, r.id);
+        continue;
+      }
+      bilan.enAttente.push(ligne);
+      db.prepare(`INSERT INTO sf_validation_attente (emission_id, sf_opportunity_id, etape) VALUES (?,?,?)
+        ON CONFLICT(emission_id) DO UPDATE SET etape=excluded.etape`).run(r.id, r.sf_opportunity_id, e.stage || null);
+    }
+  }
+  dernierRattrapageSf = bilan;
+  console.log(`[SF-RATTRAPAGE] ${bilan.verifiees} vérifiées : ${bilan.gagnees.length} gagnées, ${bilan.enAttente.length} en attente, ${bilan.perdues.length} perdues, ${bilan.introuvables.length} introuvables`);
+  return bilan;
+}
+setTimeout(() => { rattraperAProgrammerSf().catch((err) => { dernierRattrapageSf = { erreur: err.message }; console.error('[SF-RATTRAPAGE] ' + err.message); }); }, 15 * 1000).unref();
+app.get('/api/admin/sf-rattrapage', (req, res) => {
+  if (req.headers.role !== 'edit') return res.status(403).json({ error: 'Accès refusé' });
+  res.json(dernierRattrapageSf || { enCours: true });
+});
+
 // ── RESYNCHRONISATION DEPUIS SALESFORCE (à la demande) ────────────────────────
 app.post('/api/emissions/:id/resync-sf', requireEdit, async (req, res) => {
   const e = db.prepare('SELECT * FROM emissions WHERE id=?').get(req.params.id);
