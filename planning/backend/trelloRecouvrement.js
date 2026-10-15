@@ -40,6 +40,66 @@ async function trelloGet(path, params = {}) {
 // ── Cache mémoire du tableau ─────────────────────────────────────────────────
 const etat = { board: null, cartes: [], actions: [], chargeLe: null, derniereAction: null, erreur: null, enCours: null };
 
+// ── Pièces jointes Trello (15/10/2026, demande Lina) ─────────────────────────
+// Les PDF joints aux cartes depuis 2025 sont téléchargés en lecture seule (jeton
+// Trello, jamais journalisé), leur texte est extrait (pdf-parse) et gardé en base,
+// puis lu comme un commentaire (numéros de facture, avis de virement, montants).
+// 15 fichiers par cycle de 20 s ; les images (captures) ne sont pas encore lues.
+let pdfParse = null;
+try { pdfParse = require('pdf-parse/lib/pdf-parse.js'); } catch (e) { console.warn('[trello-pj] pdf-parse absent : pièces jointes non lues'); }
+const pj = { db: null, enCours: false, lus: 0, erreurs: 0 };
+function pjInit(db) {
+  if (pj.db) return;
+  pj.db = db;
+  db.exec(`CREATE TABLE IF NOT EXISTS trello_pieces_jointes (
+    attachment_id TEXT PRIMARY KEY, card_id TEXT, nom TEXT, date TEXT, texte TEXT, erreur TEXT,
+    lu_le TEXT DEFAULT (datetime('now'))
+  )`);
+}
+function pjTextes() {
+  const m = new Map();
+  if (!pj.db) return m;
+  for (const r of pj.db.prepare("SELECT card_id, nom, date, texte FROM trello_pieces_jointes WHERE texte IS NOT NULL AND texte != ''").all()) {
+    if (!m.has(r.card_id)) m.set(r.card_id, []);
+    m.get(r.card_id).push({ date: r.date, texte: `[Pièce jointe « ${r.nom} »] ${r.texte}`, auteur: 'Pièce jointe', pj: true });
+  }
+  return m;
+}
+async function lirePiecesJointes() {
+  if (!pdfParse || !pj.db || pj.enCours || !etat.actions.length) return;
+  pj.enCours = true;
+  try {
+    const c = config();
+    const deja = new Set(pj.db.prepare('SELECT attachment_id FROM trello_pieces_jointes').all().map((r) => r.attachment_id));
+    const aLire = [];
+    for (const a of etat.actions) {
+      if (a.type !== 'addAttachmentToCard' || !a.data || !a.data.attachment || !a.data.card) continue;
+      const at = a.data.attachment;
+      if (!at.id || deja.has(at.id) || !/\.pdf$/i.test(at.name || '')) continue;
+      deja.add(at.id);
+      aLire.push({ id: at.id, nom: at.name, card: a.data.card.id, date: a.date });
+    }
+    aLire.sort((x, y) => (x.date < y.date ? 1 : -1));
+    for (const x of aLire.slice(0, 15)) {
+      let texte = null, erreur = null;
+      try {
+        const u = `${TRELLO_API}/cards/${x.card}/attachments/${x.id}/download/${encodeURIComponent(x.nom)}`;
+        const r = await fetch(u, { headers: { Authorization: `OAuth oauth_consumer_key="${c.key}", oauth_token="${c.token}"` } });
+        if (r.status === 429) break;
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 15 * 1024 * 1024) throw new Error('fichier trop gros');
+        const res = await pdfParse(buf);
+        texte = String(res.text || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
+        pj.lus++;
+      } catch (e) { erreur = String(e.message || e).slice(0, 200); pj.erreurs++; }
+      pj.db.prepare('INSERT OR REPLACE INTO trello_pieces_jointes (attachment_id, card_id, nom, date, texte, erreur) VALUES (?,?,?,?,?,?)')
+        .run(x.id, x.card, x.nom, x.date, texte, erreur);
+    }
+  } finally { pj.enCours = false; }
+}
+
+
 async function chargerActions(boardId, since, before) {
   const out = [];
   let avant = before || null;
@@ -163,6 +223,9 @@ function construireRapport(db) {
     if (a.type === 'addAttachmentToCard') ajouterNum(id, a.data.attachment && a.data.attachment.name);
   }
   for (const c of etat.cartes) { ajouterNum(c.id, c.name); ajouterNum(c.id, c.desc); }
+  // Pièces jointes lues (PDF) : leurs numéros de facture relient aussi la carte.
+  const textesPj = pjTextes();
+  for (const [id, l] of textesPj) for (const t of l) ajouterNum(id, t.texte);
   // Date à laquelle « Soldée » a été posée sur chaque carte (la plus récente)
   const idSoldee = new Set(b.labels.filter((l) => l.name === 'Soldée').map((l) => l.id));
   const soldeeLe = new Map();
@@ -302,6 +365,7 @@ function construireRapport(db) {
     if (!tousComms.has(id)) tousComms.set(id, []);
     tousComms.get(id).push({ date: a.date, texte: a.data.text || '', auteur: nomMembre.get(a.idMemberCreator) || '' });
   }
+  for (const [id, l] of textesPj) { if (!tousComms.has(id)) tousComms.set(id, []); tousComms.get(id).push(...l); }
   const cartesParNom = new Map();
   for (const c of etat.cartes) {
     const k = nomCarte(c.name);
@@ -311,7 +375,8 @@ function construireRapport(db) {
   }
   // Paiement annoncé : formulations positives seulement (« Soldée le », « virement reçu »…).
   const estPaiement = (t) => /sold[ée]e?\s+le|virement\b[^\n]{0,40}\b(re[çc]u|fait|effectu)|avis de virement|r[ée]gl[ée]e?\s+le|pay[ée]e?\s+le|encaiss[ée]e?\s+le/i.test(t)
-    && !/\bn['’]?\s?(est|a|ont)\s+(toujours\s+)?pas|pas\s+(encore\s+)?(r[ée]gl|pay|re[çc]u)|pourquoi|toujours pas/i.test(t);
+    && !/\bn['’]?\s?(est|a|ont)\s+(toujours\s+)?pas|pas\s+(encore\s+)?(r[ée]gl|pay|re[çc]u)|pourquoi|toujours pas/i.test(t)
+    && !/^\[Pièce jointe « [^»]*(facture|avoir|devis|bdc|bon de commande)/i.test(t);
   const montantDans = (t) => {
     const m = String(t).match(/(\d{1,3}(?:[ .  ]\d{3})*(?:,\d{1,2})?)\s?(?:€|euros?)/i);
     return m ? Number(m[1].replace(/[ .  ]/g, '').replace(',', '.')) : null;
@@ -360,6 +425,36 @@ function construireRapport(db) {
       lien: cs[0] ? cs[0].shortUrl : null, suiviPar: membres, paiementTrello: !!paiement,
     });
   }
+  // G. Paiements partiels connus de Trello (commentaires + pièces jointes, 15/10/2026) :
+  // paiements attribués à la facture (numéro cité, ou contexte) dont le total reste
+  // inférieur au reste dû Pennylane → onglet « Part. encaissée ».
+  rapport.partielsTrello = [];
+  for (const f of factures) {
+    if (!dansPerimetre(f) || Number(f.amount) <= 0 || restant(f) <= 1) continue;
+    if (['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'paid'].includes(f.status)) continue;
+    if (/groupe\s*scp/i.test(f.client || '')) continue;
+    const kc = normNom(f.client);
+    let parNomCarte = cartesParNom.get(kc) || [];
+    if (!parNomCarte.length && kc.length >= 3) {
+      const cands = [...cartesParNom.keys()].filter((k) => memeClient(k, kc));
+      if (cands.length === 1) parNomCarte = cartesParNom.get(cands[0]);
+    }
+    const cs = [...new Map([...(cartesDeFacture.get(String(f.id)) || []).map((x) => x.carte), ...parNomCarte].map((c) => [c.id, c])).values()];
+    const ouvertesClient = (parClient.get(kc) || []).filter((x) => restant(x) > 1 && !['cancelled', 'partially_cancelled', 'archived'].includes(x.status));
+    const num = String(f.invoice_number).toUpperCase();
+    const vus = new Set(); let total = 0; const details = [];
+    for (const c of cs.flatMap((x) => tousComms.get(x.id) || [])) {
+      if (!estPaiement(c.texte) || c.date.slice(0, 10) < String(f.date_emission)) continue;
+      const cite = numerosDans(c.texte);
+      if (!(cite.has(num) || (!cite.size && ouvertesClient.filter((x) => String(x.date_emission) <= c.date.slice(0, 10)).length === 1))) continue;
+      const m = montantDans(c.texte);
+      if (!m || m >= restant(f) - 1) continue;
+      const cle = `${m}|${c.date.slice(0, 10)}`;
+      if (vus.has(cle)) continue;
+      vus.add(cle); total += m; details.push(`${dateFR(c.date)} : ${eur(m)}${c.pj ? ' (pièce jointe)' : ''}`);
+    }
+    if (total > 1 && total < restant(f) - 1) rapport.partielsTrello.push({ id: f.id, facture: f.invoice_number, montantTrello: total, details });
+  }
   rapport.resume = {
     incoherences: rapport.incoherences.length, classementsPrevus: rapport.classementsPrevus.length, numerosInconnus: rapport.numerosInconnus.length,
     nonRelieesRecouvrement: rapport.liens.nonRelieesRecouvrement.length, scp: rapport.scp.length, nouveauxDouteux: rapport.nouveauxDouteux.length,
@@ -367,7 +462,20 @@ function construireRapport(db) {
   return rapport;
 }
 
+// « client douteux » en étiquette Trello → Douteux dans le dashboard (15/10/2026, Lina).
+// Statut interne du dashboard seulement (rien n'est écrit dans Pennylane ni Trello).
+function appliquerDouteuxTrello(db) {
+  const r = construireRapport(db);
+  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='douteux' WHERE id=? AND COALESCE(internal_status,'') NOT IN ('douteux','solde')");
+  for (const x of r.nouveauxDouteux || []) {
+    const res = maj.run(x.id);
+    if (res.changes) console.log(`[trello] ${x.facture} ${x.client || ''} → Douteux (étiquette « client douteux » dans Trello)`);
+  }
+  return r;
+}
+
 module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }) {
+  pjInit(db);
   if (config()) assurerCharge().catch((e) => console.warn('[trello] chargement initial :', e.message));
 
   // Mise à jour automatique : nouveautés Trello toutes les 20 secondes (lecture seule).
@@ -376,7 +484,11 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
     setInterval(async () => {
       if (occupe || !etat.board) return;
       occupe = true;
-      try { await rafraichir(); etat.erreur = null; } catch (e) { etat.erreur = e.message; } finally { occupe = false; }
+      try {
+        await rafraichir(); etat.erreur = null;
+        try { appliquerDouteuxTrello(db); } catch (e) { console.warn('[trello] douteux :', e.message); }
+        await lirePiecesJointes();
+      } catch (e) { etat.erreur = e.message; } finally { occupe = false; }
     }, 20000).unref();
   }
 
@@ -407,7 +519,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
       // scp : numéros des factures des cartes de la liste Trello « Projets SCP »,
       // retirées du dashboard et des calculs (15/10/2026, demande Lina).
-      res.json({ pret: true, genereLe: r.genereLe, items, scp: r.scp.map((x) => x.facture) });
+      res.json({ pret: true, genereLe: r.genereLe, items, partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
