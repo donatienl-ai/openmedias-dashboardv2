@@ -60,7 +60,7 @@ async function chargerTout() {
   const board = await trelloGet(`/boards/${c.board}`, {
     fields: 'name', lists: 'all', list_fields: 'name,closed', labels: 'all', label_fields: 'name,color', members: 'all', member_fields: 'username,fullName',
   });
-  const cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl' });
+  const cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl,idMembers' });
   const actions = await chargerActions(c.board, DEPUIS);
   etat.board = board; etat.cartes = cartes; etat.actions = actions;
   etat.derniereAction = actions.length ? actions[0].date : DEPUIS;
@@ -77,7 +77,7 @@ async function rafraichir() {
   if (ajout.length) {
     etat.actions = ajout.concat(etat.actions);
     etat.derniereAction = etat.actions[0].date;
-    etat.cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl' });
+    etat.cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl,idMembers' });
   }
   etat.chargeLe = new Date().toISOString();
   return ajout.length;
@@ -186,6 +186,7 @@ function construireRapport(db) {
     incoherences: [], classementsPrevus: [], expliquees: {},
   };
   const carteDeFacture = new Map();
+  const cartesDeFacture = new Map(); // toutes les cartes liées à une facture (pas seulement la dernière)
   const expliquee = (raison) => { rapport.expliquees[raison] = (rapport.expliquees[raison] || 0) + 1; };
 
   for (const carte of etat.cartes) {
@@ -220,6 +221,7 @@ function construireRapport(db) {
     liees = [...new Map(liees.filter((f) => Number(f.amount) > 0).map((f) => [f.id, f])).values()];
     if (!liees.length) continue;
     for (const f of liees) carteDeFacture.set(String(f.id), { carte, coms, labels, liste });
+    for (const f of liees) { const k = String(f.id); if (!cartesDeFacture.has(k)) cartesDeFacture.set(k, []); cartesDeFacture.get(k).push({ carte, liste }); }
     if (carte.closed) { expliquee('carte archivée'); continue; }
 
     const ouvertes = liees.filter((f) => restant(f) > 1 && !['cancelled'].includes(f.status));
@@ -285,6 +287,79 @@ function construireRapport(db) {
         : `Marquée Soldée dans le dashboard, mais il reste ${restant(f).toFixed(2)} € dans Pennylane et rien dans Trello ne l'explique.`,
     });
   }
+  // F. Vieilles factures (émises il y a plus de 90 jours) encore impayées → « À vérifier »
+  // (15/10/2026, demande Lina). On lit TOUS les commentaires des cartes du client (pas
+  // seulement Ariane/Compta). Un commentaire de paiement sans numéro est attribué d'après le
+  // contexte : daté après l'émission, quand c'est la seule facture du client encore ouverte
+  // à cette date. Sinon on le signale comme « à attribuer ». « Suivi par » = membres de la carte.
+  rapport.vieillesFactures = [];
+  const limite90 = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+  const nomMembre = new Map(b.members.map((m) => [m.id, m.fullName || m.username]));
+  const tousComms = new Map();
+  for (const a of etat.actions) {
+    if (a.type !== 'commentCard' || !a.data || !a.data.card) continue;
+    const id = a.data.card.id;
+    if (!tousComms.has(id)) tousComms.set(id, []);
+    tousComms.get(id).push({ date: a.date, texte: a.data.text || '', auteur: nomMembre.get(a.idMemberCreator) || '' });
+  }
+  const cartesParNom = new Map();
+  for (const c of etat.cartes) {
+    const k = nomCarte(c.name);
+    if (k.length < 3) continue;
+    if (!cartesParNom.has(k)) cartesParNom.set(k, []);
+    cartesParNom.get(k).push(c);
+  }
+  // Paiement annoncé : formulations positives seulement (« Soldée le », « virement reçu »…).
+  const estPaiement = (t) => /sold[ée]e?\s+le|virement\b[^\n]{0,40}\b(re[çc]u|fait|effectu)|avis de virement|r[ée]gl[ée]e?\s+le|pay[ée]e?\s+le|encaiss[ée]e?\s+le/i.test(t)
+    && !/\bn['’]?\s?(est|a|ont)\s+(toujours\s+)?pas|pas\s+(encore\s+)?(r[ée]gl|pay|re[çc]u)|pourquoi|toujours pas/i.test(t);
+  const montantDans = (t) => {
+    const m = String(t).match(/(\d{1,3}(?:[ .  ]\d{3})*(?:,\d{1,2})?)\s?(?:€|euros?)/i);
+    return m ? Number(m[1].replace(/[ .  ]/g, '').replace(',', '.')) : null;
+  };
+  const eur = (n) => `${Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} €`;
+  for (const f of factures) {
+    if (!dansPerimetre(f) || Number(f.amount) <= 0 || restant(f) <= 1) continue;
+    if (['solde', 'douteux'].includes(f.internal_status)) continue;
+    if (['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'paid'].includes(f.status)) continue;
+    if (String(f.date_emission || '') >= limite90) continue;
+    if (/groupe\s*scp/i.test(f.client || '')) continue;
+    const kc = normNom(f.client);
+    let parNomCarte = cartesParNom.get(kc) || [];
+    if (!parNomCarte.length && kc.length >= 3) {
+      const cands = [...cartesParNom.keys()].filter((k) => memeClient(k, kc));
+      if (cands.length === 1) parNomCarte = cartesParNom.get(cands[0]);
+    }
+    const cs = [...new Map([...(cartesDeFacture.get(String(f.id)) || []).map((x) => x.carte), ...parNomCarte].map((c) => [c.id, c])).values()];
+    const ouvertesClient = (parClient.get(kc) || []).filter((x) => restant(x) > 1 && !['cancelled', 'partially_cancelled', 'archived'].includes(x.status));
+    const coms = cs.flatMap((c) => tousComms.get(c.id) || []).sort((a, b) => (a.date < b.date ? 1 : -1));
+    const membres = [...new Set(cs.flatMap((c) => (c.idMembers || []).map((m) => nomMembre.get(m)).filter(Boolean)))];
+    const num = String(f.invoice_number).toUpperCase();
+    const candidats = coms.filter((c) => estPaiement(c.texte) && c.date.slice(0, 10) >= String(f.date_emission)
+      && (!numerosDans(c.texte).size || numerosDans(c.texte).has(num)));
+    const ouvertesA = (c) => ouvertesClient.filter((x) => String(x.date_emission) <= c.date.slice(0, 10)).length;
+    const paiement = candidats.find((c) => numerosDans(c.texte).has(num) || ouvertesA(c) === 1);
+    const ambigu = !paiement && candidats[0];
+
+    const listesCartes = [...new Set(cs.map((c) => listes.get(c.idList) || ''))];
+    const parties = [`Impayée depuis le ${dateFR(String(f.date_emission))} (plus de 90 jours).`];
+    if (!cs.length) parties.push('Aucune carte Trello trouvée : personne ne semble la suivre.');
+    else if (!listesCartes.some((l) => l === 'RECOUVREMENT' || l === 'STAND BY TRESORERIE / PROBLEMATIQUES')) parties.push(`Carte Trello dans « ${listesCartes.join(' », « ')} », pas en RECOUVREMENT.`);
+    if (paiement) {
+      const m = montantDans(paiement.texte);
+      const ecart = m && Math.abs(m - restant(f)) > 1 && Math.abs(m - Number(f.amount)) > 1;
+      parties.push(`Trello indique un paiement le ${dateFR(paiement.date)} : « ${extrait(paiement.texte)} »`
+        + (ecart ? ` (${eur(m)} pour un reste de ${eur(restant(f))} : paiement partiel ou autre facture).` : ' → à rapprocher dans Pennylane.'));
+    } else if (ambigu) {
+      parties.push(`Trello indique « ${extrait(ambigu.texte)} » le ${dateFR(ambigu.date)}, mais ${ouvertesA(ambigu)} factures de ce client étaient ouvertes : à attribuer.`);
+    } else if (coms[0]) {
+      parties.push(`Dernier commentaire le ${dateFR(coms[0].date)}${coms[0].auteur ? ' par ' + coms[0].auteur : ''} : « ${extrait(coms[0].texte)} ».`);
+    }
+    if (membres.length) parties.push(`Suivi par : ${membres.join(', ')}.`);
+    rapport.vieillesFactures.push({
+      id: f.id, facture: f.invoice_number, client: f.client, restant: restant(f), raison: parties.join(' '),
+      lien: cs[0] ? cs[0].shortUrl : null, suiviPar: membres, paiementTrello: !!paiement,
+    });
+  }
   rapport.resume = {
     incoherences: rapport.incoherences.length, classementsPrevus: rapport.classementsPrevus.length, numerosInconnus: rapport.numerosInconnus.length,
     nonRelieesRecouvrement: rapport.liens.nonRelieesRecouvrement.length, scp: rapport.scp.length, nouveauxDouteux: rapport.nouveauxDouteux.length,
@@ -328,6 +403,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       for (const x of r.incoherences) items.push({ id: x.id, facture: x.facture, raison: `${x.raison}.${x.detail ? ' ' + x.detail : ''}`, lien: x.lien });
       for (const x of r.soldeesAvecReste) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.classementsPrevus) items.push({ id: x.id, facture: x.facture, raison: `À passer en Soldée d'après Trello. ${x.raison}`, lien: x.lien });
+      for (const x of r.vieillesFactures) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
       // scp : numéros des factures des cartes de la liste Trello « Projets SCP »,
       // retirées du dashboard et des calculs (15/10/2026, demande Lina).
