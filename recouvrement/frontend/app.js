@@ -343,6 +343,7 @@ const d=await r.json();
 const m=new Map();
 for(const it of (d.items||[])){ if(it.id==null)continue; const k=String(it.id); if(!m.has(k))m.set(k,[]); m.get(k).push(it); }
 financeAVerifier=m;
+financePartielsTrello=new Map((d.partiels||[]).map((p)=>[String(p.id),p]));
 if(Array.isArray(d.scp)){
 financeScpNumeros=new Set(d.scp.map(String));
 const avant=financeInvoicesCache.length;
@@ -352,9 +353,24 @@ if(financeInvoicesCache.length!==avant){ renderFinanceInvoices(); renderFinanceK
 renderFinanceTabs();
 }catch(e){ /* Trello indisponible : l'onglet reste vide */ }
 }
+// Paiements partiels (15/10/2026, Lina : « impossible qu'il n'y ait que 2 partiellement réglées ») :
+// Pennylane (reste < montant), acomptes en partie réglés, ou paiement partiel lu dans Trello
+// (commentaires et pièces jointes, cf. trelloRecouvrement.js section G).
+let financePartielsTrello=new Map();
+function financeEstPartielle(inv){
+if(!inv||['cancelled','draft','credit_note','archived','paid'].includes(inv.status)||inv.internalStatus==='solde')return false;
+const reste=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+const total=inv.amountTtc!=null?inv.amountTtc:(inv.amount||0);
+if(reste>1&&total-reste>1)return true;
+const ac=(inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[];
+if(ac.some((a)=>(a.regle||0)>0)&&ac.some((a)=>(a.resteAPayer||0)>0))return true;
+return financePartielsTrello.has(String(inv.id));
+}
 function financeAVerifierHtml(inv){
-const items=financeAVerifier.get(String(inv&&inv.id));
-if(!items||!items.length)return '';
+const items=(financeAVerifier.get(String(inv&&inv.id))||[]).slice();
+const partiel=financePartielsTrello.get(String(inv&&inv.id));
+if(partiel)items.unshift({raison:`Paiement partiel selon Trello : ${(partiel.details||[]).join(', ')} (total ${Number(partiel.montant).toLocaleString('fr-FR')} €), pas encore rapproché dans Pennylane.`});
+if(!items.length)return '';
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const lien=items.find(i=>i.lien);
 return '<div class="finance-detail-section" style="border-left:3px solid #f59e0b;padding-left:10px"><div class="form-label">À vérifier</div>'+items.map(i=>'<div style="font-size:12px;margin:2px 0">'+esc(i.raison)+'</div>').join('')+(lien?'<a href="'+esc(lien.lien)+'" target="_blank" rel="noopener" style="font-size:12px">Ouvrir la carte Trello ↗</a>':'')+'</div>';
@@ -712,6 +728,7 @@ if(key==='all')return true;
 // autre système, non lié).
 if(key==='douteux_manuel')return inv.internalStatus==='douteux';
 if(key==='a_verifier')return financeAVerifier.has(String(inv.id));
+if(key==='partially_paid'&&financeEstPartielle(inv))return true;
 const statuses=PENNYLANE_TAB_STATUSES[key];
 if(!statuses||!statuses.includes(inv.status))return false;
 if((key==='upcoming'||key==='late')&&FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE.includes(inv.internalStatus))return false;
