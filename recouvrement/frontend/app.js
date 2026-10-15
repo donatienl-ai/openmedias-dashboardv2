@@ -326,6 +326,15 @@ async function loadFinance(){ await refreshFinanceInvoices(); loadFinanceAVerifi
 // disent pas la même chose. Calculé côté serveur (lecture seule), une phrase
 // claire par facture pour les expertes-comptables. Admin + finance uniquement.
 let financeAVerifier=new Map();
+// Factures SCP retirées du dashboard ET des calculs (15/10/2026, demande Lina) :
+// client « Groupe SCP » + factures des cartes Trello de la liste « Projets SCP »
+// (numéros renvoyés par /finance/a-verifier).
+let financeScpNumeros=new Set();
+function financeEstScp(inv){
+if(!inv)return false;
+if(/groupe\s*scp/i.test(inv.customerName||inv.customer_name||''))return true;
+return financeScpNumeros.has(String(inv.invoiceNumber||inv.invoice_number||''));
+}
 async function loadFinanceAVerifier(){
 try{
 const r=await fetch(`${API}/finance/a-verifier`,{headers:financeHeaders()});
@@ -334,6 +343,12 @@ const d=await r.json();
 const m=new Map();
 for(const it of (d.items||[])){ if(it.id==null)continue; const k=String(it.id); if(!m.has(k))m.set(k,[]); m.get(k).push(it); }
 financeAVerifier=m;
+if(Array.isArray(d.scp)){
+financeScpNumeros=new Set(d.scp.map(String));
+const avant=financeInvoicesCache.length;
+financeInvoicesCache=financeInvoicesCache.filter((inv)=>!financeEstScp(inv));
+if(financeInvoicesCache.length!==avant){ renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache()); }
+}
 renderFinanceTabs();
 }catch(e){ /* Trello indisponible : l'onglet reste vide */ }
 }
@@ -349,7 +364,7 @@ const [kpis,invoices]=await Promise.all([
 fetch(`${API}/finance/kpis`,{headers:financeHeaders()}).then(r=>r.json()),
 fetch(`${API}/finance/invoices`,{headers:financeHeaders()}).then(r=>r.json()),
 ]);
-financeInvoicesCache=Array.isArray(invoices)?invoices:[];
+financeInvoicesCache=(Array.isArray(invoices)?invoices:[]).filter((inv)=>!financeEstScp(inv)); // SCP retirés (15/10/2026)
 // La syncOverview (répartition brute Pennylane, tous statuts confondus) est
 // la seule chose qu'on garde du backend telle quelle : c'est un repère de
 // cohérence de synchro globale, jamais borné à une période. Les KPI
@@ -425,6 +440,9 @@ const unpaid=list.filter(inv=>{
 const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
 // Une facture Soldée (statut interne) ne compte plus dans l'encours, même si
 // Pennylane affiche encore un reste (paiement non rapproché) — 14/10/2026.
+// Douteux : suivis dans l'onglet Douteux, hors encours/DSO/retard sauf quand
+// cet onglet est sélectionné (15/10/2026, demande Lina).
+if(inv.internalStatus==='douteux' && !(filters && filters.has('douteux_manuel')))return false;
 return remaining>0 && inv.internalStatus!=='solde' && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
 });
 let totalEncours=0,montantEnRetard=0,nbEnRetard=0,montantActionable=0,nbActionable=0;
