@@ -627,10 +627,13 @@ const LISTE_FORBES = 'clients forbes - stand by';
 const ALIAS_FORBES = { 'ila consulting': 'international links & audit consulting' };
 const STATUTS_PL_FERMES = ['paid', 'cancelled', 'partially_cancelled', 'archived', 'credit_note'];
 const STATUTS_INTERNES_REMPLACABLES = ['', 'a_relancer', 'en_cours'];
-function candidatsLitigeForbes(db) {
+function candidatsLitigeForbes(db) { return candidatsListeTrello(db, LISTE_FORBES); }
+// Cartes ouvertes d'une liste Trello → factures ouvertes de ces clients (n° cité sur la
+// carte, sinon nom de la carte ≈ nom du client). Partagé Forbes / Reports projets.
+function candidatsListeTrello(db, nomListe) {
   const b = etat.board;
   if (!b || !etat.cartes) return { cartes: [], factures: [] };
-  const idsListe = new Set(b.lists.filter((l) => String(l.name || '').trim().toLowerCase() === LISTE_FORBES).map((l) => l.id));
+  const idsListe = new Set(b.lists.filter((l) => String(l.name || '').trim().toLowerCase() === nomListe).map((l) => l.id));
   const cartes = etat.cartes.filter((c) => !c.closed && idsListe.has(c.idList));
   const factures = db.prepare(`
     SELECT i.id, i.invoice_number, i.amount, i.remaining_amount, i.status, i.internal_status, c.name AS client
@@ -652,6 +655,22 @@ function candidatsLitigeForbes(db) {
     for (const f of liees) if (STATUTS_INTERNES_REMPLACABLES.includes(f.internal_status || '')) aPasser.push({ id: f.id, facture: f.invoice_number, client: f.client, reste: Number(f.remaining_amount) || 0, carte: carte.name });
   }
   return { cartes: resume, factures: aPasser };
+}
+// ── LISTE TRELLO « Reports projets » → Report projet (20/10/2026, demande Lina) ──
+// Même logique que Forbes : facture ouverte d'un client dont la carte est dans la liste
+// « Reports projets » → statut « Report projet ». Ne touche qu'aux factures À relancer /
+// Relancé (jamais Douteux, Litige, Soldée, Promesse). Sens unique : une carte qui sort
+// de la liste laisse la facture telle quelle (reclassement manuel).
+const LISTE_REPORTS = 'reports projets';
+function appliquerReportsProjets(db) {
+  const r = candidatsListeTrello(db, LISTE_REPORTS);
+  if (r.factures.length > 10) { console.warn(`[trello] Reports projets : ${r.factures.length} factures candidates, au-delà du garde-fou (10) — rien n'est appliqué`); return r; }
+  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='report_projet' WHERE id=? AND COALESCE(internal_status,'') IN ('','a_relancer','en_cours')");
+  for (const x of r.factures) {
+    const res = maj.run(x.id);
+    if (res.changes) console.log(`[trello] ${x.facture} ${x.client || ''} → Report projet (carte « ${x.carte} » dans Reports projets)`);
+  }
+  return r;
 }
 function appliquerLitigeForbes(db) {
   const r = candidatsLitigeForbes(db);
@@ -682,6 +701,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
         await rafraichir(); etat.erreur = null;
         try { appliquerDouteuxTrello(db); } catch (e) { console.warn('[trello] douteux :', e.message); }
         try { appliquerLitigeForbes(db); } catch (e) { console.warn('[trello] Forbes :', e.message); }
+        try { appliquerReportsProjets(db); } catch (e) { console.warn('[trello] Reports projets :', e.message); }
         await lirePiecesJointes();
       } catch (e) { etat.erreur = e.message; } finally { occupe = false; }
     }, 20000).unref();
@@ -689,6 +709,9 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
 
   // Bouton « Synchroniser » du recouvrement : lit les nouveautés Trello maintenant.
   // Contrôle : ce que la règle « Clients Forbes - Stand By » voit et fait passer en Litige.
+  app.get('/api/finance/trello/reports', requireFinance, (req, res) => {
+    try { res.json(candidatsListeTrello(db, LISTE_REPORTS)); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
   app.get('/api/finance/trello/forbes', requireFinance, (req, res) => {
     try { res.json(candidatsLitigeForbes(db)); } catch (e) { res.status(500).json({ error: e.message }); }
   });
