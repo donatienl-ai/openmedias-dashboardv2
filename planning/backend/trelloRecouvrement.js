@@ -494,6 +494,43 @@ function construireRapport(db) {
     const fid = avoirsPl.liens.get(String(av.id));
     if (fid && parIdFacture.has(fid)) lier(av, parIdFacture.get(fid), 'Pennylane');
   }
+  // 1 bis) Mentions écrites SUR les PDF joints aux cartes Trello (20/10/2026, demande
+  // Lina : « lire tous les PDF »). Les factures et avoirs Pennylane portent une
+  // « Mention spéciale » tapée à la main : « Avoir concernant la facture F6336 »,
+  // « Facture annule avoir F6243 du 20/10/2025 »… Quand Pennylane n'a pas fait le
+  // lien (credited_invoice vide), c'est le document lui-même qui fait foi. Si
+  // Pennylane et le PDF se contredisent, on garde Pennylane et on le signale.
+  rapport.avoirsConflits = [];
+  const facParNum = (n) => { const l = parNumero.get(String(n || '').toUpperCase().replace(/\s|-/g, '')); return l && l.length ? l[0] : null; };
+  const mentionsPdf = [];
+  for (const [, l] of textesPj) for (const x of l) {
+    const nomPj = (String(x.texte).match(/« ([^»]+) »/) || [])[1] || '';
+    const propres = [...numerosDans(nomPj)];
+    if (propres.length !== 1) continue;
+    const txt = String(x.texte).replace(/\s+/g, ' ');
+    const mAv = txt.match(/avoir concernant (?:la )?facture\s*(?:n°\s*)?(F\s?-?\d{4,5})/i);
+    if (mAv) mentionsPdf.push({ type: 'avoir', avoir: propres[0], facture: mAv[1].replace(/\s|-/g, '').toUpperCase() });
+    const mAn = txt.match(/facture annule (?:l')?avoir\s*(?:n°\s*)?(F\s?-?\d{4,5})/i);
+    if (mAn) mentionsPdf.push({ type: 'annule_avoir', avoir: mAn[1].replace(/\s|-/g, '').toUpperCase(), facture: propres[0] });
+  }
+  const dejaPaire = new Set();
+  for (const m of mentionsPdf) {
+    const av = facParNum(m.avoir), f = facParNum(m.facture);
+    if (!av || !f || Number(av.amount) >= 0 || Number(f.amount) <= 0) continue;
+    const cle = av.id + '>' + f.id + '>' + m.type;
+    if (dejaPaire.has(cle)) continue;
+    dejaPaire.add(cle);
+    if (m.type === 'annule_avoir') {
+      if (!rapport.avoirs.some((x) => x.avoirId === av.id && x.factureId === f.id)) lier(av, f, 'PDF (mention « Facture annule avoir »)', 'annule_avoir');
+      continue;
+    }
+    const dejaLie = rapport.avoirs.find((x) => x.avoirId === av.id && x.type !== 'annule_avoir');
+    if (dejaLie) {
+      if (dejaLie.factureId !== f.id) rapport.avoirsConflits.push({ avoir: av.invoice_number, avoirId: av.id, selonPennylane: dejaLie.factureNumero, factureIdPl: dejaLie.factureId, selonPdf: f.invoice_number, factureIdPdf: f.id });
+      continue;
+    }
+    lier(av, f, 'PDF (mention « Avoir concernant la facture »)');
+  }
   const plusRecente = (l) => l.slice().sort((a, b) => (a.date_emission < b.date_emission ? 1 : -1))[0];
   for (const av of avoirsTous) {
     if (avoirLie.has(String(av.id))) continue;
@@ -510,6 +547,52 @@ function construireRapport(db) {
     const av = plusRecente(avoirsTous.filter((a) => a.customer_id === f.customer_id && !avoirLie.has(String(a.id))
       && Math.abs(montantAbs(a) - montantAbs(f)) <= 1 && String(a.date_emission) <= String(f.date_emission)));
     if (av) lier(av, f, 'contexte (facture émise pour annuler l\'avoir)', 'annule_avoir');
+  }
+  // I. CONTRÔLE DE CALCUL facture par facture (20/10/2026, demande Lina : « si il y a une
+  // erreur dans Pennylane ou Trello, mentionne-le sur la facture »). Chaque écart
+  // part dans « À vérifier » ET s'affiche sur la fiche de la facture concernée.
+  // 1) Conflit Pennylane ↔ PDF sur un avoir : si la facture que Pennylane désigne est
+  //    déjà entièrement couverte par d'autres avoirs, Pennylane se trompe → le
+  //    dashboard suit le PDF (cas F7435 : Pennylane → F6241, déjà annulée par F6243 ;
+  //    PDF → F6336). Sinon on garde Pennylane et on signale.
+  rapport.anomaliesCalcul = [];
+  const lienCarte = (fid) => { const l = cartesDeFacture.get(String(fid)) || []; return l[0] && l[0].carte ? l[0].carte.shortUrl : null; };
+  const anomalie = (f, raison) => { if (f) rapport.anomaliesCalcul.push({ id: f.id, facture: f.invoice_number, client: f.client, raison, lien: lienCarte(f.id) }); };
+  const couvertPar = (fid, saufAvoirId) => rapport.avoirs.filter((x) => x.factureId === fid && x.type !== 'annule_avoir' && x.avoirId !== saufAvoirId).reduce((s, x) => s + (x.montant || 0), 0);
+  for (const c of rapport.avoirsConflits || []) {
+    const fPl = parIdFacture.get(String(c.factureIdPl)), fPdf = parIdFacture.get(String(c.factureIdPdf)), av = parIdFacture.get(String(c.avoirId));
+    if (!fPl || !fPdf || !av) continue;
+    const plDejaCouverte = couvertPar(fPl.id, av.id) >= montantAbs(fPl) - 1;
+    if (plDejaCouverte) {
+      const e = rapport.avoirs.find((x) => x.avoirId === av.id && x.type !== 'annule_avoir');
+      if (e) { e.factureId = fPdf.id; e.factureNumero = fPdf.invoice_number; e.source = 'PDF (lien Pennylane corrigé par le calcul)'; }
+      c.resolu = true;
+      const msg = `Pennylane rattache l'avoir ${av.invoice_number} (${montantAbs(av).toFixed(2)} €) à ${fPl.invoice_number}, déjà entièrement couverte par un autre avoir ; le PDF de l'avoir indique ${fPdf.invoice_number}. Le dashboard suit le PDF — rattachement à corriger dans Pennylane.`;
+      anomalie(fPl, msg); anomalie(fPdf, msg);
+    } else {
+      const msg = `Pennylane rattache l'avoir ${av.invoice_number} à ${fPl.invoice_number}, mais le PDF de l'avoir indique ${fPdf.invoice_number} : à trancher.`;
+      anomalie(fPl, msg); anomalie(fPdf, msg);
+    }
+  }
+  // 2) Écarts de calcul : avoirs liés vs montant de la facture vs reste dû Pennylane.
+  for (const f of factures) {
+    if (Number(f.amount) <= 0 || !dansPerimetre(f)) continue;
+    const lies = rapport.avoirs.filter((x) => x.factureId === f.id && x.type !== 'annule_avoir');
+    if (!lies.length) continue;
+    const totAv = lies.reduce((s, x) => s + (x.montant || 0), 0);
+    const ttc = montantAbs(f), reste = restant(f);
+    const nums = lies.map((x) => x.avoirNumero).join(', ');
+    if (totAv > ttc + 1) {
+      anomalie(f, `Avoirs liés (${nums} : ${totAv.toFixed(2)} €) supérieurs au montant de la facture (${ttc.toFixed(2)} €) : un avoir est rattaché à la mauvaise facture.`);
+    } else if (totAv >= ttc - 1 && reste > 1) {
+      anomalie(f, `Facture entièrement annulée par ${nums} (${totAv.toFixed(2)} €) mais Pennylane affiche encore ${reste.toFixed(2)} € dû : lettrage de l'avoir à corriger dans Pennylane. Reste dû réel : 0 €.`);
+    } else if (reste > ttc - totAv + 1) {
+      anomalie(f, `Reste dû Pennylane (${reste.toFixed(2)} €) supérieur au maximum possible après avoir (${ttc.toFixed(2)} − ${totAv.toFixed(2)} = ${(ttc - totAv).toFixed(2)} €) : l'avoir ${nums} n'est pas lettré dans Pennylane.`);
+    }
+  }
+  // 3) Avoir rattaché à aucune facture (ni Pennylane, ni PDF, ni contexte).
+  for (const av of avoirsTous) {
+    if (!rapport.avoirs.some((x) => x.avoirId === av.id)) anomalie(av, `Avoir ${av.invoice_number} (${montantAbs(av).toFixed(2)} €) rattaché à aucune facture : ni Pennylane, ni la mention du PDF, ni le contexte ne permettent de le lier.`);
   }
   rapport.resume = {
     incoherences: rapport.incoherences.length, classementsPrevus: rapport.classementsPrevus.length, numerosInconnus: rapport.numerosInconnus.length,
@@ -633,6 +716,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       for (const x of r.soldeesAvecReste) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.classementsPrevus) items.push({ id: x.id, facture: x.facture, raison: `À passer en Soldée d'après Trello. ${x.raison}`, lien: x.lien });
       for (const x of r.vieillesFactures) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
+      for (const x of r.anomaliesCalcul || []) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
       // scp : numéros des factures des cartes de la liste Trello « Projets SCP »,
       // retirées du dashboard et des calculs (15/10/2026, demande Lina).
