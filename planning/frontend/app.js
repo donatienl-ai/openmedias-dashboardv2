@@ -1408,6 +1408,17 @@ async function dropOnDay(event,dateStr){
   event.currentTarget.classList.remove('drag-over');
   if(!draggedItem)return;
   const {id,fromAProgrammer}=draggedItem;
+
+  // Restriction "Figaro HP Eco" : limiter à 1 place par jour max
+  if (currentMedia.includes('Figaro HP Eco') || currentMedia.includes('Figaro HP + HP Eco')) {
+    const existing = emissions.filter(e => e.date_diffusion === dateStr && e.statut !== 'annule' && e.id !== id);
+    if (existing.length >= 1) {
+      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      draggedItem = null;
+      return;
+    }
+  }
+
   const payload={date_diffusion:dateStr};
   if(fromAProgrammer)payload.statut='confirme';
   const r=await fetch(`${API}/emissions/${id}`,{
@@ -1703,8 +1714,9 @@ function renderCalendar(){
             </div>
           </div>`;
         });
+        const isFigaroEco = currentMedia.includes('Figaro HP Eco') || currentMedia.includes('Figaro HP + HP Eco');
         if(role==='edit'&&!isFerie&&!isNonDiff&&!complet)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}')">+ Ajouter</button>`;
-        if(role==='edit'&&!isNonDiff&&complet)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}',true)" style="font-size:10px">⚙ Forcer</button>`;
+        if(role==='edit'&&!isNonDiff&&complet&&!isFigaroEco)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}',true)" style="font-size:10px">⚙ Forcer</button>`;
       }
       html+='</div>';
     });
@@ -2204,6 +2216,16 @@ async function saveEmission(id){
   };
   if(!payload.entreprise){showToast('Entreprise ne peut pas être vide','warning');return;}
   if(showFigaro){payload.homepage=document.getElementById('edit-hp').checked;payload.homepage_eco=document.getElementById('edit-hpeco').checked;}
+  
+  // Checking limit for Figaro HP Eco in save
+  if ((media.includes('Figaro HP Eco') || media.includes('Figaro HP + HP Eco')) && payload.date_diffusion) {
+    const existing = emissions.filter(e => e.date_diffusion === payload.date_diffusion && e.statut !== 'annule' && e.id !== id);
+    if (existing.length >= 1) {
+      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      return;
+    }
+  }
+
   const r=await fetch(`${API}/emissions/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json','role':'edit'},body:JSON.stringify(payload)});
   const d=await r.json();
   if(!r.ok){showToast(d.error||'Erreur','warning');return;}
@@ -2711,6 +2733,16 @@ async function submitBdcModal(){
   const format=document.getElementById('bdc-format').value;
   const sous_media=media==='Médias spécialisés'?(document.getElementById('bdc-sousmedia').value||null):null;
   if(!entreprise||!date_diffusion){showToast('Entreprise et date obligatoires','warning');return;}
+
+  // Checking limit for Figaro HP Eco in BDC submission
+  if (media.includes('Figaro HP Eco') || media.includes('Figaro HP + HP Eco')) {
+    const existing = emissions.filter(e => e.date_diffusion === date_diffusion && e.statut !== 'annule');
+    if (existing.length >= 1) {
+      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      return;
+    }
+  }
+
   const r=await fetch(`${API}/emissions/bdc`,{method:'POST',headers:{'Content-Type':'application/json','x-commercial-id':commercialId},body:JSON.stringify({entreprise,media,sous_media,date_diffusion,format})});
   const d=await r.json();
   if(!r.ok){showToast(d.error||'Erreur','warning');return;}
@@ -2793,6 +2825,16 @@ async function submitAdd(){
   const date=document.getElementById('add-date').value;
   const statut=document.getElementById('add-statut').value;
   if(!entreprise)return showToast('Entreprise obligatoire','warning');
+
+  // Checking limit for Figaro HP Eco in add
+  if ((media.includes('Figaro HP Eco') || media.includes('Figaro HP + HP Eco')) && date) {
+    const existing = emissions.filter(e => e.date_diffusion === date && e.statut !== 'annule');
+    if (existing.length >= 1) {
+      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      return;
+    }
+  }
+
   const payload={
     entreprise,media,date_diffusion:date,
     sous_media:media==='Médias spécialisés'?(document.getElementById('add-sousmedia').value||null):null,
