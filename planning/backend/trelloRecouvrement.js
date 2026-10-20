@@ -526,7 +526,7 @@ function construireRapport(db) {
     }
     const dejaLie = rapport.avoirs.find((x) => x.avoirId === av.id && x.type !== 'annule_avoir');
     if (dejaLie) {
-      if (dejaLie.factureId !== f.id) rapport.avoirsConflits.push({ avoir: av.invoice_number, avoirId: av.id, selonPennylane: dejaLie.factureNumero, factureIdPl: dejaLie.factureId, selonPdf: f.invoice_number, factureIdPdf: f.id });
+      if (dejaLie.factureId !== f.id && dejaLie.factureNumero !== f.invoice_number) rapport.avoirsConflits.push({ avoir: av.invoice_number, avoirId: av.id, selonPennylane: dejaLie.factureNumero, factureIdPl: dejaLie.factureId, selonPdf: f.invoice_number, factureIdPdf: f.id });
       continue;
     }
     lier(av, f, 'PDF (mention « Avoir concernant la facture »)');
@@ -569,10 +569,10 @@ function construireRapport(db) {
       c.resolu = true;
       const msg = `Pennylane rattache l'avoir ${av.invoice_number} (${montantAbs(av).toFixed(2)} €) à ${fPl.invoice_number}, déjà entièrement couverte par un autre avoir ; le PDF de l'avoir indique ${fPdf.invoice_number}. Le dashboard suit le PDF — rattachement à corriger dans Pennylane.`;
       anomalie(fPl, msg); anomalie(fPdf, msg);
-    } else {
-      const msg = `Pennylane rattache l'avoir ${av.invoice_number} à ${fPl.invoice_number}, mais le PDF de l'avoir indique ${fPdf.invoice_number} : à trancher.`;
-      anomalie(fPl, msg); anomalie(fPdf, msg);
     }
+    // Sinon : le lien Pennylane est cohérent avec les montants (ex. SIAL : l'avoir F7268
+    // annule la refacture F7281, la mention du PDF cite la facture d'origine F7233) —
+    // on garde Pennylane sans alerter : c'est le lettrage comptable qui fait foi.
   }
   // 2) Écarts de calcul : avoirs liés vs montant de la facture vs reste dû Pennylane.
   for (const f of factures) {
