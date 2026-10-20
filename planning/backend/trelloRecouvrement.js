@@ -530,6 +530,59 @@ function appliquerDouteuxTrello(db) {
   return r;
 }
 
+// ── LISTE TRELLO « Clients Forbes - Stand By » → Litige (20/10/2026, demande Lina) ──
+// Toute facture OUVERTE d'un client qui a une carte dans cette liste passe en
+// « Litige ». Rapprochement : n° de facture cité sur la carte (titre ou
+// description) en priorité, sinon nom de la carte ≈ nom du client Pennylane
+// (+ alias quand le nom Trello diffère du nom Pennylane).
+// Sens unique : si la carte sort de la liste, la facture GARDE son statut
+// (reclassement manuel par les expertes) — une carte déplacée par erreur ne doit
+// pas relancer un client en litige.
+// Ne touche qu'aux factures « À relancer » / « Relancé » (ou sans statut) : jamais
+// à une facture déjà Douteux, Soldée, en Report projet ou en Promesse de paiement.
+const LISTE_FORBES = 'clients forbes - stand by';
+const ALIAS_FORBES = { 'ila consulting': 'international links & audit consulting' };
+const STATUTS_PL_FERMES = ['paid', 'cancelled', 'partially_cancelled', 'archived', 'credit_note'];
+const STATUTS_INTERNES_REMPLACABLES = ['', 'a_relancer', 'en_cours'];
+function candidatsLitigeForbes(db) {
+  const b = etat.board;
+  if (!b || !etat.cartes) return { cartes: [], factures: [] };
+  const idsListe = new Set(b.lists.filter((l) => String(l.name || '').trim().toLowerCase() === LISTE_FORBES).map((l) => l.id));
+  const cartes = etat.cartes.filter((c) => !c.closed && idsListe.has(c.idList));
+  const factures = db.prepare(`
+    SELECT i.id, i.invoice_number, i.amount, i.remaining_amount, i.status, i.internal_status, c.name AS client
+    FROM pennylane_invoices i LEFT JOIN pennylane_customers c ON c.id = i.customer_id
+  `).all().filter((f) => Number(f.amount) > 0 && !STATUTS_PL_FERMES.includes(f.status) && (Number(f.remaining_amount) || 0) > 0);
+  const resume = [];
+  const aPasser = [];
+  for (const carte of cartes) {
+    const nums = numerosDans(`${carte.name || ''} ${carte.desc || ''}`);
+    const nomC = nomCarte(carte.name);
+    const nomAlias = ALIAS_FORBES[nomC] ? normNom(ALIAS_FORBES[nomC]) : null;
+    const liees = factures.filter((f) => {
+      const num = String(f.invoice_number || '').toUpperCase().replace(/\s|-/g, '');
+      if (nums.size) return nums.has(num);
+      const nomF = normNom(f.client);
+      return memeClient(nomC, nomF) || (nomAlias && memeClient(nomAlias, nomF));
+    });
+    resume.push({ carte: carte.name, url: carte.shortUrl || null, factures: liees.map((f) => ({ facture: f.invoice_number, client: f.client, reste: Number(f.remaining_amount) || 0, statut: f.internal_status || 'a_relancer' })) });
+    for (const f of liees) if (STATUTS_INTERNES_REMPLACABLES.includes(f.internal_status || '')) aPasser.push({ id: f.id, facture: f.invoice_number, client: f.client, reste: Number(f.remaining_amount) || 0, carte: carte.name });
+  }
+  return { cartes: resume, factures: aPasser };
+}
+function appliquerLitigeForbes(db) {
+  const r = candidatsLitigeForbes(db);
+  // Garde-fou : un rapprochement anormalement large (mauvais nom de liste,
+  // carte au nom trop court…) ne doit pas basculer des dizaines de factures.
+  if (r.factures.length > 10) { console.warn(`[trello] Forbes : ${r.factures.length} factures candidates, au-delà du garde-fou (10) — rien n'est appliqué`); return r; }
+  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='litige' WHERE id=? AND COALESCE(internal_status,'') IN ('','a_relancer','en_cours')");
+  for (const x of r.factures) {
+    const res = maj.run(x.id);
+    if (res.changes) console.log(`[trello] ${x.facture} ${x.client || ''} → Litige (carte « ${x.carte} » dans Clients Forbes - Stand By)`);
+  }
+  return r;
+}
+
 module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }) {
   pjInit(db);
   setTimeout(() => { chargerLiensAvoirsPennylane(); }, 20000).unref();
@@ -545,12 +598,18 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       try {
         await rafraichir(); etat.erreur = null;
         try { appliquerDouteuxTrello(db); } catch (e) { console.warn('[trello] douteux :', e.message); }
+        try { appliquerLitigeForbes(db); } catch (e) { console.warn('[trello] Forbes :', e.message); }
         await lirePiecesJointes();
       } catch (e) { etat.erreur = e.message; } finally { occupe = false; }
     }, 20000).unref();
   }
 
   // Bouton « Synchroniser » du recouvrement : lit les nouveautés Trello maintenant.
+  // Contrôle : ce que la règle « Clients Forbes - Stand By » voit et fait passer en Litige.
+  app.get('/api/finance/trello/forbes', requireFinance, (req, res) => {
+    try { res.json(candidatsLitigeForbes(db)); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   app.post('/api/finance/trello/sync', requireFinance, async (req, res) => {
     try {
       if (!config()) return res.status(503).json({ error: 'Trello non configuré' });
