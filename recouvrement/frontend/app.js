@@ -352,8 +352,66 @@ const avant=financeInvoicesCache.length;
 financeInvoicesCache=financeInvoicesCache.filter((inv)=>!financeEstScp(inv));
 if(financeInvoicesCache.length!==avant){ renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache()); }
 }
-renderFinanceTabs();
+financeAppliquerRestesReels();
+renderFinanceTabs(); renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache());
 }catch(e){ /* Trello indisponible : l'onglet reste vide */ }
+}
+
+// ── RESTE DÛ RÉEL (20/10/2026, demande Lina : « tout doit être carré ») ─────────
+// Pennylane ne déduit un avoir du reste dû qu'une fois l'avoir rapproché. Tant que
+// ce n'est pas fait, le dashboard calcule lui-même le reste dû réel :
+//   reste réel = reste Pennylane − avoirs liés pas encore déduits par Pennylane.
+// Un avoir est « pas encore déduit » quand le reste Pennylane dépasse montant − avoirs.
+//  • reste réel ≈ 0 € → la facture est soldée dans le dashboard (affichage seulement,
+//    rien n'est écrit en base), avec la mention « avoir à rapprocher dans Pennylane » ;
+//  • reste réel < 0 € → trop réglé : à vérifier (paiement ou avoir en trop) ;
+//  • reste réel > 0 € → c'est ce montant qui compte dans l'encours et le retard.
+// Et l'inverse : une facture marquée Soldée qui garde un reste dû n'est pas soldée —
+// elle reste comptée dans l'encours, avec la mention, tant que le reste n'est pas à 0 €.
+const FINANCE_STATUTS_SOLDABLES_AUTO=['','a_relancer','en_cours'];
+function financeArrondi(v){ return Math.round((Number(v)||0)*100)/100; }
+function financeAppliquerRestesReels(){
+  const ajout=(inv,raison)=>{ const k=String(inv.id); if(!financeAVerifier.has(k))financeAVerifier.set(k,[]); const l=financeAVerifier.get(k); if(!l.some(x=>x.raison===raison))l.push({id:inv.id,facture:inv.invoiceNumber,raison,lien:null,calcul:true}); };
+  for(const [k,l] of financeAVerifier){ const r=l.filter(x=>!x.calcul); if(r.length)financeAVerifier.set(k,r); else financeAVerifier.delete(k); }
+  for(const inv of financeInvoicesCache){
+    if(inv._restePennylane===undefined)inv._restePennylane=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
+    if(inv._statutOrigine===undefined)inv._statutOrigine=inv.internalStatus||'';
+    const pl=Number(inv._restePennylane)||0;
+    inv.remainingAmountTtc=pl; inv.internalStatus=inv._statutOrigine||null; inv._resteReel=null;
+    const ttc=Number(inv.amountTtc!=null?inv.amountTtc:inv.amount)||0;
+    // Factures annulées / archivées : hors recouvrement, Pennylane y laisse parfois un reste.
+    if(ttc<=0||(inv.status&&FINANCE_HORS_RECOUVREMENT.includes(inv.status)))continue;
+    const lies=(financeAvoirsParFacture.get(String(inv.id))||[]).filter(a=>a.type!=='annule_avoir');
+    const totAv=financeArrondi(lies.reduce((s,a)=>s+(Number(a.montant)||0),0));
+    const nums=lies.map(a=>a.avoirNumero).join(', ');
+    if(totAv>0 && pl>ttc-totAv+1){
+      const reel=financeArrondi(pl-totAv);
+      inv._resteReel={pennylane:pl,avoirs:totAv,reel,nums};
+      inv.remainingAmountTtc=Math.max(0,reel);
+      if(Math.abs(reel)<=1){
+        if(FINANCE_STATUTS_SOLDABLES_AUTO.includes(inv._statutOrigine||''))inv.internalStatus='solde';
+        ajout(inv,`Reste dû réel : 0 € — Pennylane affiche ${fmtCA(pl)} mais l'avoir ${nums} (${fmtCA(totAv)}) n'y est pas encore rapproché. Soldée dans le dashboard ; avoir à rapprocher dans Pennylane.`);
+      }else if(reel<-1){
+        ajout(inv,`Trop réglé de ${fmtCA(-reel)} : Pennylane affiche ${fmtCA(pl)} encore dû, mais l'avoir ${nums} (${fmtCA(totAv)}) dépasse ce reste — paiement ou avoir en trop, à vérifier dans Pennylane.`);
+      }else{
+        ajout(inv,`Reste dû réel : ${fmtCA(reel)} (Pennylane ${fmtCA(pl)} − avoir ${nums} ${fmtCA(totAv)} pas encore rapproché dans Pennylane).`);
+      }
+    }
+    if((inv.internalStatus||'')==='solde' && (Number(inv.remainingAmountTtc)||0)>1){
+      // Soldée d'après Trello (paiement / avoir / clôture notés sur la carte, plus récents
+      // que Pennylane) : la mise à jour la plus récente l'emporte → reste dû réel 0 €, et
+      // Pennylane est signalé comme pas encore rapproché. Sans preuve Trello : pas soldée.
+      const preuveTrello=(financeAVerifier.get(String(inv.id))||[]).find(x=>!x.calcul&&/^Soldée selon Trello/.test(x.raison||''));
+      if(preuveTrello){
+        inv._resteReel={pennylane:Number(inv.remainingAmountTtc)||0,avoirs:totAv,reel:0,nums,trello:true};
+        ajout(inv,`Reste dû réel : 0 € — soldée d'après Trello ; Pennylane affiche encore ${fmtCA(inv.remainingAmountTtc)} : paiement saisi mais pas rapproché (lettré) sur cette facture dans Pennylane.`);
+        inv.remainingAmountTtc=0;
+        continue;
+      }
+      inv.internalStatus='a_relancer';
+      ajout(inv,`Marquée Soldée mais il reste ${fmtCA(inv.remainingAmountTtc)} dû${totAv?` (avoir ${nums} de ${fmtCA(totAv)} déjà déduit par Pennylane)`:''} : comptée dans l'encours tant que le reste n'est pas à 0 €. Paiement à rapprocher dans Pennylane ou statut à corriger.`);
+    }
+  }
 }
 // Paiements partiels (15/10/2026, Lina : « impossible qu'il n'y ait que 2 partiellement réglées ») :
 // Pennylane (reste < montant), acomptes en partie réglés, ou paiement partiel lu dans Trello
@@ -399,6 +457,7 @@ fetch(`${API}/finance/kpis`,{headers:financeHeaders()}).then(r=>r.json()),
 fetch(`${API}/finance/invoices`,{headers:financeHeaders()}).then(r=>r.json()),
 ]);
 financeInvoicesCache=(Array.isArray(invoices)?invoices:[]).filter((inv)=>!financeEstScp(inv)); // SCP retirés (15/10/2026)
+financeAppliquerRestesReels();
 // La syncOverview (répartition brute Pennylane, tous statuts confondus) est
 // la seule chose qu'on garde du backend telle quelle : c'est un repère de
 // cohérence de synchro globale, jamais borné à une période. Les KPI
@@ -421,6 +480,7 @@ if(!r.ok)return;
 const updated=await r.json();
 const idx=financeInvoicesCache.findIndex(i=>i.id===updated.id);
 if(idx>=0)financeInvoicesCache[idx]=updated; else financeInvoicesCache.push(updated);
+financeAppliquerRestesReels();
 renderFinanceTabs();
 renderFinanceInvoices();
 renderFinanceKpis(computeFinanceKpisFromCache());
@@ -469,14 +529,21 @@ function computeFinanceKpisFromCache(boundsOverride,filtersOverride){
 const from=boundsOverride?boundsOverride.from:financePeriodFrom;
 const to=boundsOverride?boundsOverride.to:financePeriodTo;
 const filters=filtersOverride||financeActiveFilters;
-const list=financeInvoicesCache.filter(inv=>invoiceInRange(inv,from,to)&&financeMatchesFilters(inv,filters));
+// Les KPI suivent exactement ce qui est affiché : période + onglet + recherche (20/10/2026).
+const qnK=filtersOverride?'':financeNormTxt(document.getElementById('finance-search')?.value||'');
+const statutsK=financeStatutsPourRecherche(qnK);
+const list=financeInvoicesCache.filter(inv=>{
+  if(!invoiceInRange(inv,from,to))return false;
+  if(!qnK)return financeMatchesFilters(inv,filters);
+  return financeNormTxt([inv.invoiceNumber,inv.customerName,inv.contactName].join(' ')).includes(qnK)||statutsK.some(k=>financeMatchesFilterKey(inv,k));
+});
 const unpaid=list.filter(inv=>{
 const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
 // Une facture Soldée (statut interne) ne compte plus dans l'encours, même si
 // Pennylane affiche encore un reste (paiement non rapproché) — 14/10/2026.
 // Douteux : suivis dans l'onglet Douteux, hors encours/DSO/retard sauf quand
 // cet onglet est sélectionné (15/10/2026, demande Lina).
-if(inv.internalStatus==='douteux' && !(filters && filters.has('douteux_manuel')))return false;
+if(inv.internalStatus==='douteux' && !(filters && filters.has('douteux_manuel')) && !statutsK.includes('douteux_manuel'))return false;
 return remaining>0 && inv.internalStatus!=='solde' && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
 });
 let totalEncours=0,montantEnRetard=0,nbEnRetard=0,montantActionable=0,nbActionable=0;
@@ -629,9 +696,9 @@ const prevK=prevBounds?computeFinanceKpisFromCache(prevBounds):null;
 const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMontant}};
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
 wrap.innerHTML=`
-<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div>${k.nbDouteux>0?`<div class="kpi-lbl" style="color:#f97316;font-weight:600" title="Suivis dans l'onglet Douteux, non comptés dans l'encours">+ ${fmtCA(k.montantDouteux)} en douteux (${k.nbDouteux} facture(s), hors encours)</div>`:''}</div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige/promesse/report (suivi à part)`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">${k.tauxDeRetard} % de l'encours est en retard (${k.nbFacturesEnRetard} facture${k.nbFacturesEnRetard>1?'s':''}), dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div><div class="kpi-lbl" style="margin-top:4px">Suivis à part, hors encours : ${k.nbDouteux||0} douteux (${fmtCACompact(k.montantDouteux||0)}).</div></div>
+<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div>${k.nbDouteux>0?`<div class="kpi-lbl" style="color:#f97316;font-weight:600" title="Suivis dans l'onglet Douteux, non comptés dans l'encours">Non compris dans ce total : ${fmtCA(k.montantDouteux)} de douteux (${k.nbDouteux} facture(s))</div>`:''}</div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige / promesse / report`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">${k.tauxDeRetard} % de l'encours est en retard (${k.nbFacturesEnRetard} facture${k.nbFacturesEnRetard>1?'s':''}), dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div></div>
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
 <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
