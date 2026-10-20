@@ -139,7 +139,7 @@ Bouton à part plutôt qu'un 4e en-tête cliquable : ce n'est pas une
 colonne du tableau, c'est un mode de tri transversal. -->
 <button type="button" class="finance-priority-btn" id="finance-priority-btn" onclick="setFinanceSort('priority')" title="Trier par urgence réelle : montant restant dû × jours de retard">⚡ Priorité<span id="finance-priority-arrow"></span></button>
 <div class="finance-search-inline">
-<input class="form-input" type="text" id="finance-search" placeholder="N° facture, entreprise ou contact…" oninput="renderFinanceInvoices()">
+<input class="form-input" type="text" id="finance-search" placeholder="Client, n° facture, contact ou statut (encaissée, douteux, à vérifier…)" list="finance-statuts" oninput="renderFinanceInvoices()" title="Recherche sur toutes les factures de la période, quel que soit l'onglet"><datalist id="finance-statuts"><option value="Encaissée"><option value="Partiellement encaissée"><option value="Douteux"><option value="Annulée"><option value="Archivée"><option value="À vérifier"><option value="Litige"><option value="Report projet"><option value="En retard"><option value="À venir"><option value="Avoir"></datalist>
 </div>
 </div>
 <div class="media-table-card" id="finance-invoices-table" style="overflow-x:auto"></div>
@@ -157,6 +157,6 @@ colonne du tableau, c'est un mode de tri transversal. -->
 </div>
 </div>
 
-<script src="app.js?v=20261015av"></script>
+<script src="app.js?v=20261020rech"></script>
 </body>
 </html>
