@@ -377,7 +377,9 @@ function financeAppliquerRestesReels(){
     if(inv._restePennylane===undefined)inv._restePennylane=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
     if(inv._statutOrigine===undefined)inv._statutOrigine=inv.internalStatus||'';
     const pl=Number(inv._restePennylane)||0;
-    inv.remainingAmountTtc=pl; inv.internalStatus=inv._statutOrigine||null; inv._resteReel=null;
+    if(inv._resteHtPennylane===undefined)inv._resteHtPennylane=inv.remainingAmountHt;
+    inv.remainingAmountTtc=pl; inv.remainingAmountHt=inv._resteHtPennylane; inv.internalStatus=inv._statutOrigine||null; inv._resteReel=null;
+    const setReste=(v)=>{ inv.remainingAmountTtc=v; const a=Number(inv.amountTtc)||0, h=Number(inv.amountHt)||0; inv.remainingAmountHt=financeArrondi(v*(a?h/a:1/1.2)); };
     const ttc=Number(inv.amountTtc!=null?inv.amountTtc:inv.amount)||0;
     // Factures annulées / archivées : hors recouvrement, Pennylane y laisse parfois un reste.
     if(ttc<=0||(inv.status&&FINANCE_HORS_RECOUVREMENT.includes(inv.status)))continue;
@@ -387,7 +389,7 @@ function financeAppliquerRestesReels(){
     if(totAv>0 && pl>ttc-totAv+1){
       const reel=financeArrondi(pl-totAv);
       inv._resteReel={pennylane:pl,avoirs:totAv,reel,nums};
-      inv.remainingAmountTtc=Math.max(0,reel);
+      setReste(Math.max(0,reel));
       if(Math.abs(reel)<=1){
         if(FINANCE_STATUTS_SOLDABLES_AUTO.includes(inv._statutOrigine||''))inv.internalStatus='solde';
         ajout(inv,`Reste dû réel : 0 € — Pennylane affiche ${fmtCA(pl)} mais l'avoir ${nums} (${fmtCA(totAv)}) n'y est pas encore rapproché. Soldée dans le dashboard ; avoir à rapprocher dans Pennylane.`);
@@ -405,7 +407,7 @@ function financeAppliquerRestesReels(){
       if(preuveTrello){
         inv._resteReel={pennylane:Number(inv.remainingAmountTtc)||0,avoirs:totAv,reel:0,nums,trello:true};
         ajout(inv,`Reste dû réel : 0 € — soldée d'après Trello ; Pennylane affiche encore ${fmtCA(inv.remainingAmountTtc)} : paiement saisi mais pas rapproché (lettré) sur cette facture dans Pennylane.`);
-        inv.remainingAmountTtc=0;
+        setReste(0);
         continue;
       }
       inv.internalStatus='a_relancer';
@@ -425,10 +427,10 @@ const fr=(n)=>Number(n||0).toLocaleString('fr-FR',{minimumFractionDigits:0,maxim
 const dfr=(s)=>s?String(s).slice(8,10)+'/'+String(s).slice(5,7)+'/'+String(s).slice(0,4):'';
 const lignes=[];
 for(const a of financeAvoirsParFacture.get(String(inv.id))||[]){
-lignes.push(a.type==='annule_avoir'?`Cette facture annule l'avoir ${a.avoirNumero} (−${fr(a.montant)}).`:`Avoir ${a.avoirNumero} du ${dfr(a.date)} : −${fr(a.montant)}.`);
+lignes.push(a.type==='annule_avoir'?`Cette facture annule l'avoir ${a.avoirNumero} (${fr(a.montant)}).`:`Avoir ${a.avoirNumero} du ${dfr(a.date)} : ${fr(a.montant)} déduits.`);
 }
 for(const a of financeAvoirsParAvoir.get(String(inv.id))||[]){
-lignes.push(a.type==='annule_avoir'?`Avoir annulé par la facture ${a.factureNumero} du ${dfr(a.date)}.`:`Avoir de la facture ${a.factureNumero} (−${fr(a.montant)}).`);
+lignes.push(a.type==='annule_avoir'?`Avoir annulé par la facture ${a.factureNumero} du ${dfr(a.date)}.`:`Avoir de la facture ${a.factureNumero} (${fr(a.montant)}).`);
 }
 if(!lignes.length)return '';
 return '<div class="finance-detail-section" style="border-left:3px solid var(--accent);padding-left:10px"><div class="form-label">Avoir lié</div>'+lignes.map((l)=>'<div style="font-size:12px;margin:2px 0">'+l+'</div>').join('')+'</div>';
@@ -1200,7 +1202,7 @@ async function openFinanceInvoiceDetail(id){
 financeSelectedInvoiceId=id;
 const inv=financeInvoicesCache.find(i=>i.id===id);
 if(!inv)return;
-document.getElementById('modal-title').textContent=`Facture ${inv.invoiceNumber||inv.id}`;
+document.getElementById('modal-title').textContent=`${(Number(inv.amountTtc!=null?inv.amountTtc:inv.amount)||0)<0?'Avoir':'Facture'} ${inv.invoiceNumber||inv.id}`;
 document.getElementById('modal-overlay').style.display='flex';
 document.getElementById('modal-body').innerHTML='<div style="font-size:12px;color:var(--text-muted)">Chargement…</div>';
 document.getElementById('modal-footer').innerHTML=`<button class="btn-secondary" onclick="closeModal()">Fermer</button>`;
@@ -1224,10 +1226,10 @@ ${financeClientSnapshotHtml(inv)}
 </div>
 <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;margin-bottom:10px">
 <div><div class="form-label">Émission</div>${formatDateFR(inv.dateEmission)}</div>
-<div><div class="form-label">Montant HT</div>${fmtCA(inv.amountHt)}</div>
-<div><div class="form-label">Montant TTC</div>${fmtCA(inv.amountTtc)}</div>
-<div><div class="form-label">Restant dû HT</div>${fmtCA(inv.remainingAmountHt)}</div>
-<div><div class="form-label">Restant dû TTC</div><strong style="color:var(--accent)">${fmtCA(inv.remainingAmountTtc)}</strong></div>
+<div><div class="form-label">Montant HT</div>${fmtCA(Math.abs(Number(inv.amountHt)||0))}</div>
+<div><div class="form-label">Montant TTC</div>${fmtCA(Math.abs(Number(inv.amountTtc)||0))}</div>
+<div><div class="form-label">Restant dû HT</div>${fmtCA(Math.abs(Number(inv.remainingAmountHt)||0))}</div>
+<div><div class="form-label">Restant dû TTC</div><strong style="color:var(--accent)">${fmtCA(Math.abs(Number(inv.remainingAmountTtc)||0))}</strong></div>
 </div>
 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
 <button class="btn-secondary" onclick="viewFinanceInvoicePdf('${id}')">📄 Voir le PDF</button>
