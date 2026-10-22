@@ -1409,11 +1409,12 @@ async function dropOnDay(event,dateStr){
   if(!draggedItem)return;
   const {id,fromAProgrammer}=draggedItem;
 
-  // Restriction "Figaro HP Eco" : limiter à 1 place par jour max
-  if (currentMedia.includes('Figaro HP Eco') || currentMedia.includes('Figaro HP + HP Eco')) {
+  // Restriction « Le Figaro HP + HP Eco » : 1 place par jour max (22/10/2026 : HP Eco seul
+// n'est plus bloqué ici, il garde ses 3 places/jour côté serveur).
+  if (currentMedia.includes('Figaro HP + HP Eco')) {
     const existing = emissions.filter(e => e.date_diffusion === dateStr && e.statut !== 'annule' && e.id !== id);
     if (existing.length >= 1) {
-      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      showToast('Une seule place par jour est autorisée pour Le Figaro HP + HP Eco.', 'warning');
       draggedItem = null;
       return;
     }
@@ -1714,7 +1715,7 @@ function renderCalendar(){
             </div>
           </div>`;
         });
-        const isFigaroEco = currentMedia.includes('Figaro HP Eco') || currentMedia.includes('Figaro HP + HP Eco');
+        const isFigaroEco = currentMedia.includes('Figaro HP + HP Eco');
         if(role==='edit'&&!isFerie&&!isNonDiff&&!complet)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}')">+ Ajouter</button>`;
         if(role==='edit'&&!isNonDiff&&complet&&!isFigaroEco)html+=`<button class="add-slot-btn" onclick="openAddModal('${dateStr}',true)" style="font-size:10px">⚙ Forcer</button>`;
       }
@@ -2218,10 +2219,10 @@ async function saveEmission(id){
   if(showFigaro){payload.homepage=document.getElementById('edit-hp').checked;payload.homepage_eco=document.getElementById('edit-hpeco').checked;}
   
   // Checking limit for Figaro HP Eco in save
-  if ((media.includes('Figaro HP Eco') || media.includes('Figaro HP + HP Eco')) && payload.date_diffusion) {
+  if ((media.includes('Figaro HP + HP Eco')) && payload.date_diffusion) {
     const existing = emissions.filter(e => e.date_diffusion === payload.date_diffusion && e.statut !== 'annule' && e.id !== id);
     if (existing.length >= 1) {
-      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      showToast('Une seule place par jour est autorisée pour Le Figaro HP + HP Eco.', 'warning');
       return;
     }
   }
@@ -2735,10 +2736,10 @@ async function submitBdcModal(){
   if(!entreprise||!date_diffusion){showToast('Entreprise et date obligatoires','warning');return;}
 
   // Checking limit for Figaro HP Eco in BDC submission
-  if (media.includes('Figaro HP Eco') || media.includes('Figaro HP + HP Eco')) {
+  if (media.includes('Figaro HP + HP Eco')) {
     const existing = emissions.filter(e => e.date_diffusion === date_diffusion && e.statut !== 'annule');
     if (existing.length >= 1) {
-      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      showToast('Une seule place par jour est autorisée pour Le Figaro HP + HP Eco.', 'warning');
       return;
     }
   }
@@ -2827,10 +2828,10 @@ async function submitAdd(){
   if(!entreprise)return showToast('Entreprise obligatoire','warning');
 
   // Checking limit for Figaro HP Eco in add
-  if ((media.includes('Figaro HP Eco') || media.includes('Figaro HP + HP Eco')) && date) {
+  if ((media.includes('Figaro HP + HP Eco')) && date) {
     const existing = emissions.filter(e => e.date_diffusion === date && e.statut !== 'annule');
     if (existing.length >= 1) {
-      showToast('Une seule place par jour est autorisée pour Figaro HP Eco.', 'warning');
+      showToast('Une seule place par jour est autorisée pour Le Figaro HP + HP Eco.', 'warning');
       return;
     }
   }
