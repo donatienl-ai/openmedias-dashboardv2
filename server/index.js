@@ -31,6 +31,7 @@ import { buildReportHtml } from './reportHtml.js';
 import { startScheduler, getSchedulerState } from './scheduler.js';
 import { createDashboardCache } from './dashboardCache.js';
 import { scopeDataToCommercial, resolveDisplayName, resolveTeamDisplayNames } from './scopeByCommercial.js';
+import { registerCoachApi } from './coachApi.js';
 
 dotenv.config();
 
@@ -217,6 +218,9 @@ const dashboardCache = createDashboardCache({
   resolveRange,
   warmPresets: ['last_month', 'this_month', 'this_week', 'today'],
 });
+
+// API lecture seule pour le coach (n8n → bot Examinateur), protégée par COACH_API_KEY.
+registerCoachApi(app, { dashboardCache, resolveRange, getRoster, listSalesTeams, getTeamMembers, resolveDisplayName, planningDb });
 
 // « Où j'en suis » (demande Thomas Durand, validée par Lina le 30/09/2026) :
 // chaque commercial se situe par rapport à la moyenne de TOUS les commerciaux
