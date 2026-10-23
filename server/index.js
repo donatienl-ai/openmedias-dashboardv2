@@ -220,7 +220,7 @@ const dashboardCache = createDashboardCache({
 });
 
 // API lecture seule pour le coach (n8n → bot Examinateur), protégée par COACH_API_KEY.
-registerCoachApi(app, { dashboardCache, resolveRange, getRoster, listSalesTeams, getTeamMembers, resolveDisplayName, planningDb });
+registerCoachApi(app, { resolveRange, getRoster, listSalesTeams, getTeamMembers, resolveDisplayName, planningDb, getReportSettings, sources: { getCalls, getRdvInRange, getRdvBookedInRange, getPropals, getPropalsComptes, getSignatures, getBdc } });
 
 // « Où j'en suis » (demande Thomas Durand, validée par Lina le 30/09/2026) :
 // chaque commercial se situe par rapport à la moyenne de TOUS les commerciaux
