@@ -139,14 +139,42 @@ async function renderBdcHtml(templateKey, fields = {}) {
   return compileBdcHtml(templateKey, fields);
 }
 
-async function renderBdcPdf(templateKey, fields = {}) {
+// Lancement de Chromium fiabilisé (23/10/2026). Panne constatée : deux BDC générés en
+// même temps décompressent Chromium dans /tmp au même moment → « spawn ETXTBSY », puis
+// binaire à moitié écrit et TOUS les BDC suivants en « Failed to launch the browser
+// process! » jusqu'au redémarrage du service. Désormais :
+//  1) un seul PDF à la fois (file d'attente) — évite la course et les pics de mémoire
+//     (le service est limité à 512 Mo) ;
+//  2) le chemin du binaire est calculé une seule fois ;
+//  3) si le lancement échoue, on efface le binaire de /tmp et on réessaie une fois.
+let cheminChromium = null;
+let fileBdc = Promise.resolve();
+function cheminNavigateur() {
+  if (!cheminChromium) cheminChromium = chromium.executablePath().catch((e) => { cheminChromium = null; throw e; });
+  return cheminChromium;
+}
+async function lancerNavigateur() {
+  const options = async () => ({ args: chromium.args, executablePath: await cheminNavigateur(), headless: chromium.headless });
+  try {
+    return await puppeteer.launch(await options());
+  } catch (e) {
+    console.warn(`[BDC] lancement de Chromium échoué (${e.message}) — binaire réinstallé, nouvel essai`);
+    cheminChromium = null;
+    for (const f of ['/tmp/chromium', '/tmp/chromium-pack', '/tmp/swiftshader', '/tmp/al2', '/tmp/al2023']) {
+      try { fs.rmSync(f, { recursive: true, force: true }); } catch (_) { /* rien */ }
+    }
+    return puppeteer.launch(await options());
+  }
+}
+function renderBdcPdf(templateKey, fields = {}) {
+  const tache = fileBdc.then(() => produireBdcPdf(templateKey, fields));
+  fileBdc = tache.catch(() => {});
+  return tache;
+}
+async function produireBdcPdf(templateKey, fields = {}) {
   const html = compileBdcHtml(templateKey, fields);
 
-  const browser = await puppeteer.launch({
-    args: chromium.args,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-  });
+  const browser = await lancerNavigateur();
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
