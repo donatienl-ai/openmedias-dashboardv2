@@ -335,11 +335,14 @@ if(!inv)return false;
 if(/groupe\s*scp/i.test(inv.customerName||inv.customer_name||''))return true;
 return financeScpNumeros.has(String(inv.invoiceNumber||inv.invoice_number||''));
 }
+let financeTrelloInfo=null;
 async function loadFinanceAVerifier(){
 try{
 const r=await fetch(`${API}/finance/a-verifier`,{headers:financeHeaders()});
 if(!r.ok)return;
 const d=await r.json();
+financeTrelloInfo={genereLe:d.genereLe||null,pj:d.piecesJointes||null,etat:null};
+fetch(`${API}/finance/trello/etat`,{headers:financeHeaders()}).then(x=>x.ok?x.json():null).then(e=>{ if(financeTrelloInfo)financeTrelloInfo.etat=e; renderFinanceSyncOverview(); }).catch(()=>{});
 const m=new Map();
 for(const it of (d.items||[])){ if(it.id==null)continue; const k=String(it.id); if(!m.has(k))m.set(k,[]); m.get(k).push(it); }
 financeAVerifier=m;
@@ -652,7 +655,11 @@ const parts=Object.entries(overview.byStatus||{})
 .map(([status,n])=>`${PENNYLANE_STATUS_LABEL[status]||status} ${n}`)
 .join(' · ');
 wrap.style.display='';
-wrap.innerHTML=`Synchro Pennylane — Toutes ${overview.total} · ${parts}`;
+const tri=financeTrelloInfo, et=tri&&tri.etat;
+const heureTr=et&&et.chargeLe?new Date(et.chargeLe).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):null;
+const nbAVerif=[...financeAVerifier.keys()].length;
+const ligneTrello=tri?`Synchro Trello — ${et&&et.erreur?`⚠️ erreur : ${et.erreur}`:(heureTr?`dernière lecture ${heureTr}`:'lecture en cours')}${et&&et.cartes?` · ${et.cartes} cartes`:''}${et&&et.actions?` · ${et.actions} actions d'historique`:''}${tri.pj?` · ${tri.pj.lues} PDF lus depuis le dernier redémarrage${tri.pj.erreurs?` (${tri.pj.erreurs} illisibles)`:''}`:''} · ${nbAVerif} facture(s) à vérifier`:'Synchro Trello — pas encore chargée';
+wrap.innerHTML=`Synchro Pennylane — Toutes ${overview.total} · ${parts}<br>${ligneTrello}`;
 }
 // Barre de répartition empilée (remplace l'ancien donut SVG, jugé "pas
 // terrible" à l'usage) — chaque statut est un segment coloré dont la largeur
@@ -701,7 +708,7 @@ wrap.innerHTML=`
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div>${k.nbDouteux>0?`<div class="kpi-lbl" style="color:#f97316;font-weight:600" title="Suivis dans l'onglet Douteux, non comptés dans l'encours">Non compris dans ce total : ${fmtCA(k.montantDouteux)} de douteux (${k.nbDouteux} facture(s))</div>`:''}</div>
 <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige / promesse / report`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
 <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">${k.tauxDeRetard} % de l'encours est en retard (${k.nbFacturesEnRetard} facture${k.nbFacturesEnRetard>1?'s':''}), dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div></div>
-<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${k.dso!=null?k.dso+'j':'—'}</div><div class="kpi-lbl">Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
+<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${(k.dso!=null&&financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?k.dso+'j':'—'}</div><div class="kpi-lbl">${(financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?'':'Calculé sur l\'onglet Toutes uniquement · '}Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
 <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
 <div class="finance-statut-bar-row">
@@ -878,6 +885,7 @@ ${chip('upcoming','À venir')}
 ${chip('late','En retard')}
 ${chip('litige_manuel','Litige')}
 ${chip('report_projet','Report projet')}
+${chip('a_verifier','À vérifier','Pennylane, Trello et le dashboard ne disent pas la même chose : à trancher par les expertes-comptables')}
 `;
 }
 // Filtrage complet (période + onglets + recherche) — factorisé pour être
@@ -1266,7 +1274,11 @@ ${newInstallmentStatusPillHtml}
 // pour ne pas polluer la fiche d'un encadré vide/inutile.
 function financeClientSnapshotHtml(inv){
 if(!inv.customerId)return '';
-const others=financeInvoicesCache.filter(i=>i.customerId===inv.customerId&&i.id!==inv.id&&(!i.status||!FINANCE_HORS_RECOUVREMENT.includes(i.status)));
+// Masqué quand la facture affichée est réglée (soldée, payée, reste à 0) ou est un avoir ;
+// et seules les factures réellement ouvertes du client comptent (02/11/2026).
+const resteDe=(i)=>Number(i.remainingAmountTtc!=null?i.remainingAmountTtc:(i.remainingAmount||0))||0;
+if((Number(inv.amountTtc!=null?inv.amountTtc:inv.amount)||0)<=0||resteDe(inv)<=1||inv.internalStatus==='solde'||inv.status==='paid')return '';
+const others=financeInvoicesCache.filter(i=>i.customerId===inv.customerId&&i.id!==inv.id&&(!i.status||!FINANCE_HORS_RECOUVREMENT.includes(i.status))&&resteDe(i)>1&&i.internalStatus!=='solde');
 if(!others.length)return '';
 const nbEnRetard=others.filter(i=>(i.daysLate||0)>0).length;
 const nbLitige=others.filter(i=>i.internalStatus==='litige').length;
