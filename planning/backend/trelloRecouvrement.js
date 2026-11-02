@@ -634,6 +634,56 @@ function construireRapport(db) {
     return null;
   };
   const listeReports = new Set(b.lists.filter((l) => /^reports? projets?$/i.test(String(l.name || '').trim())).map((l) => l.id));
+  // Répartition PAR CARTE (02/11/2026, règles Lina) : une carte peut porter plusieurs
+  // factures (acomptes). On ne met plus rien « à vérifier » pour ça, on classe :
+  //  • étiquette « 1/2 payé », « règlement 20 % »… = part payée du PROJET (somme des
+  //    factures de la carte) ; on l'impute aux factures dans l'ordre d'émission (la 1re
+  //    facture est soldée d'abord) ;
+  //  • paiement noté en commentaire (« virement de 1 000 € reçu ») : attribué à la facture
+  //    dont le n° est cité ; sinon à celle dont le PDF a été joint en dernier sur la carte
+  //    (30 jours avant le paiement) ; sinon à celle dont le reste dû vaut ce montant ;
+  //    sinon à la plus ancienne encore ouverte. Seule la part que Pennylane n'a pas déjà
+  //    enregistrée est déduite.
+  const allocationCarte = new Map();
+  {
+    const facturesDeCarte = new Map();
+    for (const [fid, ents] of cartesDeFacture) for (const { carte } of ents) {
+      if (carte.closed) continue;
+      const f = parIdFacture.get(String(fid)); if (!f || Number(f.amount) <= 0) continue;
+      if (!facturesDeCarte.has(carte.id)) facturesDeCarte.set(carte.id, { carte, fs: new Map() });
+      facturesDeCarte.get(carte.id).fs.set(String(f.id), f);
+    }
+    for (const { carte, fs } of facturesDeCarte.values()) {
+      const invs = [...fs.values()].sort((a, c) => String(a.date_emission).localeCompare(String(c.date_emission)));
+      const noms = (carte.idLabels || []).map((id) => String(etiquettes.get(id) || '').trim()).filter(Boolean);
+      const fr = noms.map((x) => ({ x, p: fractionEtiquette(x) })).filter((y) => y.p != null && y.p > 0 && y.p < 1);
+      const part = fr.length ? Math.max(...fr.map((y) => y.p)) : null;
+      const etiq = part != null ? fr.find((y) => y.p === part).x : null;
+      const res = new Map(invs.map((f) => [String(f.id), { frac: null, etiq, paye: 0, details: [] }]));
+      if (part != null) {
+        let paye = invs.reduce((s, f) => s + Number(f.amount), 0) * part;
+        for (const f of invs) { const a = Math.min(Number(f.amount), paye); paye -= a; res.get(String(f.id)).frac = Math.round((Number(f.amount) - a) * 100) / 100; }
+      }
+      const coms = (tousComms.get(carte.id) || []).slice().sort((a, c) => (a.date < c.date ? -1 : 1));
+      const ouvertes = invs.filter((f) => restant(f) > 1);
+      for (const c of coms) {
+        if (!c.date || !estPaiement(c.texte || '')) continue;
+        const m = montantDans(c.texte); if (!m) continue;
+        const dispo = ouvertes.filter((f) => String(f.date_emission) <= c.date.slice(0, 10)); if (!dispo.length) continue;
+        const numF = (f) => String(f.invoice_number || '').toUpperCase().replace(/\s|-/g, '');
+        let cible = dispo.find((f) => numerosDans(c.texte).has(numF(f)));
+        if (!cible) {
+          const limite = new Date(new Date(c.date).getTime() - 30 * 86400000).toISOString();
+          const pjs = coms.filter((x) => /^\[Pièce jointe/.test(x.texte || '') && x.date <= c.date && x.date >= limite).sort((a, b2) => (a.date < b2.date ? 1 : -1));
+          for (const x of pjs) { cible = dispo.find((f) => numerosDans(String(x.texte).slice(0, 250)).has(numF(f))); if (cible) break; }
+        }
+        if (!cible) cible = dispo.find((f) => Math.abs(restant(f) - m) <= 1);
+        if (!cible) cible = dispo[0];
+        const r = res.get(String(cible.id)); r.paye += m; r.details.push(`${m.toLocaleString('fr-FR')} € le ${dateFR(c.date)}`);
+      }
+      for (const [fid, r] of res) allocationCarte.set(fid, r);
+    }
+  }
   for (const f of factures) {
     if (Number(f.amount) <= 0 || !dansPerimetre(f)) continue;
     const num = String(f.invoice_number || '').toUpperCase().replace(/\s|-/g, '');
@@ -662,12 +712,20 @@ function construireRapport(db) {
       if (statut !== 'solde' && (bas.includes('report projet') || listeReports.has(carte.idList))) {
         statut = 'report_projet'; lien = carte.shortUrl; notes.push(bas.includes('report projet') ? 'Trello : étiquette « report projet »' : 'Trello : carte dans la liste « Reports projets »');
       }
-      if (statut !== 'solde') {
-        const fr = noms.map((x) => ({ x, p: fractionEtiquette(x) })).filter((y) => y.p != null && y.p > 0 && y.p < 1);
-        if (fr.length) {
-          const p = Math.max(...fr.map((y) => y.p));
-          const calc = Math.round(ttc * (1 - p) * 100) / 100;
-          if (calc < reste - 1) { resteReel = calc; notes.push(`Trello : étiquette « ${fr.find((y) => y.p === p).x} » → ${Math.round(p * 100)} % déjà payés, reste dû ${calc.toFixed(2)} € (Pennylane : ${reste.toFixed(2)} €)`); }
+      // (fractions et paiements : calculés par carte, voir allocationCarte ci-dessus)
+    }
+    if (statut !== 'solde') {
+      const al = allocationCarte.get(String(f.id));
+      if (al) {
+        const cands = [];
+        if (al.frac != null && al.frac < reste - 1) cands.push({ v: al.frac, n: `Trello : étiquette « ${al.etiq} » (part payée du projet, imputée aux factures dans l'ordre) → reste dû ${al.frac.toFixed(2)} €` });
+        const dejaPl = Math.max(0, ttc - reste);
+        const nonEnregistre = Math.max(0, al.paye - dejaPl);
+        if (nonEnregistre > 1) cands.push({ v: Math.max(0, Math.round((reste - nonEnregistre) * 100) / 100), n: `Trello : paiement(s) ${al.details.join(', ')} attribué(s) à cette facture → reste dû ${Math.max(0, reste - nonEnregistre).toFixed(2)} €` });
+        if (cands.length) {
+          const best = cands.sort((a, c) => a.v - c.v)[0];
+          resteReel = best.v; notes.push(best.n + ` (Pennylane : ${reste.toFixed(2)} €)`);
+          if (best.v <= 1) { statut = 'solde'; resteReel = 0; }
         }
       }
     }
