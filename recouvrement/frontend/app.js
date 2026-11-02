@@ -388,6 +388,7 @@ function financeAppliquerRestesReels(){
     const setReste=(v)=>{ inv.remainingAmountTtc=v; const a=Number(inv.amountTtc)||0, h=Number(inv.amountHt)||0; inv.remainingAmountHt=financeArrondi(v*(a?h/a:1/1.2)); };
     const ttc=Number(inv.amountTtc!=null?inv.amountTtc:inv.amount)||0;
     // Factures annulées / archivées : hors recouvrement, Pennylane y laisse parfois un reste.
+    { const d0=financeDecisionsTrello.get(String(inv.id)); if(d0&&d0.statut==='solde'&&(ttc<=0||(inv.status&&FINANCE_HORS_RECOUVREMENT.includes(inv.status)))){ inv.internalStatus='solde'; inv._noteTrello=d0.note||''; if(pl>0.5)setReste(0); continue; } }
     if(ttc<=0||(inv.status&&FINANCE_HORS_RECOUVREMENT.includes(inv.status)))continue;
     const lies=(financeAvoirsParFacture.get(String(inv.id))||[]).filter(a=>a.type!=='annule_avoir');
     const totAv=financeArrondi(lies.reduce((s,a)=>s+(Number(a.montant)||0),0));
