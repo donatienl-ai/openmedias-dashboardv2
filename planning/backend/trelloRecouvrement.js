@@ -918,14 +918,18 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       const r = construireRapport(db);
       const items = [];
       for (const x of r.incoherences) items.push({ id: x.id, facture: x.facture, raison: `${x.raison}.${x.detail ? ' ' + x.detail : ''}`, lien: x.lien });
-      for (const x of r.soldeesAvecReste) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
-      for (const x of r.classementsPrevus) items.push({ id: x.id, facture: x.facture, raison: `À passer en Soldée d'après Trello. ${x.raison}`, lien: x.lien });
       for (const x of r.vieillesFactures) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.anomaliesCalcul || []) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
       // scp : numéros des factures des cartes de la liste Trello « Projets SCP »,
       // retirées du dashboard et des calculs (15/10/2026, demande Lina).
-      res.json({ pret: true, genereLe: r.genereLe, items, avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
+      // Trello prioritaire (02/11/2026) : une facture déjà classée d'après Trello (Soldée, Report
+      // projet, reste dû recalculé) ne va plus dans « À vérifier » ; F5885 (avoir de 2022) exclue.
+      const decisions = (r.decisionsTrello || []).filter((d) => d.statut === 'solde' || d.statut === 'report_projet' || d.resteReel != null)
+        .map((d) => ({ id: d.id, statut: d.statut, resteReel: d.resteReel, note: d.note }));
+      const classees = new Set(decisions.map((d) => String(d.id)));
+      const aVerifier = items.filter((x) => x.facture !== 'F5885' && !classees.has(String(x.id)));
+      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
