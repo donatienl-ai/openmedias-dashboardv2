@@ -700,14 +700,18 @@ if(!knownKeys.has(key)){ autreMontant+=v.montant||0; autreCount+=v.count||0; }
 if(autreCount>0)statutSegs.push({key:'__autre',label:'Autre',color:'var(--text-muted)'});
 const statutTotal=Object.values(parStatut).reduce((s,v)=>s+(v.montant||0),0);
 const nonActionable=(k.montantEnRetard||0)-(k.montantActionable||0);
+// Design 02/11/2026 : comparaisons, taux de retard et douteux n'ont de sens que sur
+// l'ensemble (onglet Toutes, sans recherche) — sur un onglet filtré ils affolaient
+// (« ▲ 2155 % », « 100 % »).
+const vueGlobale=financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim();
 const prevBounds=financePreviousPeriodBounds();
 const prevK=prevBounds?computeFinanceKpisFromCache(prevBounds):null;
 const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMontant}};
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
 wrap.innerHTML=`
-<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null)}</div>${k.nbDouteux>0?`<div class="kpi-lbl" style="color:#f97316;font-weight:600" title="Suivis dans l'onglet Douteux, non comptés dans l'encours">Non compris dans ce total : ${fmtCA(k.montantDouteux)} de douteux (${k.nbDouteux} facture(s))</div>`:''}</div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:#dc2626" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige / promesse / report`:''} ${financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null)}</div></div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${k.tauxDeRetard}%</div><div class="kpi-lbl">${k.tauxDeRetard} % de l'encours est en retard (${k.nbFacturesEnRetard} facture${k.nbFacturesEnRetard>1?'s':''}), dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div></div>
+<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} facture(s) non soldée(s) ${vueGlobale?financeKpiDeltaHtml(k.totalEncours,prevK?prevK.totalEncours:null):''}</div>${vueGlobale&&k.nbDouteux>0?`<div class="kpi-lbl" style="color:#f97316;font-weight:600" title="Suivis dans l'onglet Douteux, non comptés dans l'encours">Non compris dans ce total : ${fmtCA(k.montantDouteux)} de douteux (${k.nbDouteux} facture(s))</div>`:''}</div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:${(k.montantActionable||0)>0?'#dc2626':'var(--text-muted)'}" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} facture(s) en retard${nonActionable>0?` · ${fmtCA(nonActionable)} en litige / promesse / report`:''} ${vueGlobale?financeKpiDeltaHtml(k.montantActionable,prevK?prevK.montantActionable:null):''}</div></div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${vueGlobale?k.tauxDeRetard+'%':'—'}</div><div class="kpi-lbl">${vueGlobale?'':'Calculé sur l\'onglet Toutes uniquement · '}${k.tauxDeRetard} % de l'encours est en retard (${k.nbFacturesEnRetard} facture${k.nbFacturesEnRetard>1?'s':''}), dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div></div>
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${(k.dso!=null&&financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?k.dso+'j':'—'}</div><div class="kpi-lbl">${(financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?'':'Calculé sur l\'onglet Toutes uniquement · '}Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
 <div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
@@ -770,8 +774,9 @@ pct=Math.max(0,Math.min(100,((Date.now()-emission)/(deadline-emission))*100));
 }
 return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:var(--accent)"></div></div><div class="finance-retard-label">${echPrefix}${-daysLate}j avant échéance</div></div>`;
 }
-const pct=Math.max(6,Math.min(100,(daysLate/90)*100));
-return `<div class="finance-retard-wrap"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:#dc2626"></div></div><div class="finance-retard-label" style="color:#dc2626;font-weight:700">${echPrefix}${daysLate}j de retard</div></div>`;
+const pct=Math.max(6,Math.min(100,(daysLate/365)*100));
+const coulRetard=daysLate<=30?'#f59e0b':daysLate<=90?'#f97316':'#dc2626';
+return `<div class="finance-retard-wrap" title="Barre pleine = 1 an de retard · orange clair ≤ 30 j, orange ≤ 90 j, rouge au-delà"><div class="finance-retard-bar"><div class="finance-retard-fill" style="width:${pct}%;background:${coulRetard}"></div></div><div class="finance-retard-label" style="color:${coulRetard};font-weight:700">${echPrefix}${daysLate}j de retard</div></div>`;
 }
 // Barre d'onglets = calque du classement Pennylane, chaque onglet testant le
 // champ `status` BRUT tel que renvoyé par Pennylane sur la facture (pas notre
@@ -969,7 +974,7 @@ return 0;
 }
 const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
 wrap.innerHTML=`<table>
-<thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Éch. 1${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th class="sortable-th" onclick="setFinanceSort('montant')">Montant TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
+<thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Éch. 1${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th class="sortable-th" onclick="setFinanceSort('montant')" title="Ce qu'il reste à payer sur la facture (le montant total est dans la fiche)">Reste dû TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
 <tbody>${list.map(inv=>`<tr class="finance-invoice-row" onclick="financeRowClick(event,'${inv.id}')">
 <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeEmissionDateHtml(inv)}</td>
 <td>${inv.customerName||'—'}</td>
@@ -1164,7 +1169,7 @@ function csvField(v){ return `"${String(v==null?'':v).replace(/"/g,'""')}"`; }
 function exportFinanceCsv(){
 const list=currentFilteredFinanceInvoices();
 if(!list.length){ showToast('Rien à exporter avec les filtres actuels','error'); return; }
-const header=['Facture','Entreprise','Nom Prénom','Mail','Téléphone','Éch. 1','Éch. 2','Éch. 3','Éch. 4','Retard (j)','Montant TTC','Statut'];
+const header=['Facture','Entreprise','Nom Prénom','Mail','Téléphone','Éch. 1','Éch. 2','Éch. 3','Éch. 4','Retard (j)','Reste dû TTC','Statut'];
 const echDate=(inv,idx)=>{ const i=(inv.installments||[])[idx]; return i?formatDateFR(i.dueDate):''; };
 const lines=[header.map(csvField).join(';')];
 for(const inv of list){
@@ -1535,3 +1540,21 @@ document.getElementById('pin-screen').style.display='flex';
 document.getElementById('commercial-email')?.focus();
 }
 })();
+
+// ── Colonnes vides masquées (design 02/11/2026) ─────────────────────────────────
+// Après chaque affichage du tableau, une colonne entièrement vide (« — » partout,
+// ex. Nom Prénom, Téléphone, Éch. 2/3/4) est masquée pour les lignes affichées ;
+// elle réapparaît dès qu'une ligne a une valeur. Aucune donnée n'est supprimée.
+function financeMasquerColonnesVides(){
+  const table=document.querySelector('#finance-invoices-table table');
+  if(!table||!table.tHead||!table.tBodies[0])return;
+  const rows=[...table.tBodies[0].rows].filter(r=>r.cells.length>1);
+  const ths=[...table.tHead.rows[0].cells];
+  ths.forEach((th,idx)=>{
+    const vide=rows.length>0&&rows.every(r=>{ const c=r.cells[idx]; if(!c)return true; if(c.querySelector('input,select,button,a'))return false; const tx=c.innerText.trim(); return tx===''||tx==='—'||tx==='-'; });
+    th.style.display=vide?'none':'';
+    for(const r of rows){ if(r.cells[idx])r.cells[idx].style.display=vide?'none':''; }
+  });
+}
+const financeRenderInvoicesSansMasque=renderFinanceInvoices;
+renderFinanceInvoices=function(){ financeRenderInvoicesSansMasque.apply(this,arguments); try{ financeMasquerColonnesVides(); }catch(_){ } };
