@@ -8,6 +8,7 @@ import cors from 'cors';
 import compression from 'compression';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 import { getCalls, prewarmCalls, refreshRecent, getCacheStats as getAircallCacheStats } from './aircall.js';
@@ -554,6 +555,65 @@ app.get('*', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
+// ── SUIVI DE LA MÉMOIRE + MAIL HEBDOMADAIRE (02/11/2026, demande Lina) ──────────
+// Le service est limité à 512 Mo sur Render. Toutes les minutes on relève la mémoire
+// utilisée ; chaque lundi vers 8 h (Paris) un mail récapitulatif part à MEMORY_REPORT_TO
+// (par défaut lina.e@openmedias.fr) : pic de la semaine, moyenne, nombre de démarrages
+// du service (un démarrage hors déploiement = un plantage, souvent par manque de
+// mémoire). Les compteurs sont gardés dans un petit fichier sur le disque persistant
+// pour survivre aux redémarrages. Vue en direct : GET /api/admin/memoire (admin).
+const suiviMemoire = (() => {
+  const dossier = process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : null;
+  const fichier = dossier ? path.join(dossier, 'suivi-memoire.json') : null;
+  let etat = { depuis: new Date().toISOString(), picMo: 0, picLe: null, sommeMo: 0, mesures: 0, demarrages: 0, au_dessus_450: 0, dernierEnvoi: null };
+  try { if (fichier && fs.existsSync(fichier)) etat = { ...etat, ...JSON.parse(fs.readFileSync(fichier, 'utf8')) }; } catch (_) { /* fichier illisible : on repart à zéro */ }
+  etat.demarrages += 1;
+  const sauver = () => { try { if (fichier) fs.writeFileSync(fichier, JSON.stringify(etat)); } catch (_) { /* disque indisponible */ } };
+  sauver();
+  const mo = (o) => Math.round(o / 1048576);
+  function mesurer() {
+    const m = process.memoryUsage();
+    const rss = mo(m.rss);
+    etat.mesures += 1; etat.sommeMo += rss;
+    if (rss > etat.picMo) { etat.picMo = rss; etat.picLe = new Date().toISOString(); }
+    if (rss > 450) etat.au_dessus_450 += 1;
+    return { rssMo: rss, heapMo: mo(m.heapUsed), externeMo: mo(m.external) };
+  }
+  function parisMaintenant() {
+    const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', weekday: 'short', hour12: false }).formatToParts(new Date());
+    const g = (k) => p.find((x) => x.type === k)?.value;
+    return { cle: `${g('year')}-${g('month')}-${g('day')}`, jour: g('weekday'), heure: parseInt(g('hour'), 10) };
+  }
+  async function envoyerSiDu() {
+    const n = parisMaintenant();
+    if (n.jour !== 'Mon' || n.heure !== 8 || etat.dernierEnvoi === n.cle) return;
+    etat.dernierEnvoi = n.cle; sauver();
+    const moyenne = etat.mesures ? Math.round(etat.sommeMo / etat.mesures) : 0;
+    const plantages = Math.max(0, etat.demarrages - 1);
+    const html = `<h2>Mémoire du service Dashboard Sales — semaine du ${new Date(etat.depuis).toLocaleDateString('fr-FR')}</h2>
+<table cellpadding="6" style="border-collapse:collapse;font-family:Arial,sans-serif">
+<tr><td>Limite du plan Render</td><td><b>512 Mo</b></td></tr>
+<tr><td>Pic de la semaine</td><td><b>${etat.picMo} Mo</b>${etat.picLe ? ' le ' + new Date(etat.picLe).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : ''}</td></tr>
+<tr><td>Moyenne</td><td>${moyenne} Mo</td></tr>
+<tr><td>Minutes au-dessus de 450 Mo</td><td>${etat.au_dessus_450}</td></tr>
+<tr><td>Redémarrages du service</td><td><b>${plantages}</b> (déploiements compris ; le détail des manques de mémoire est dans Render → Dashboard Sales → Events)</td></tr>
+</table>
+<p>${etat.picMo >= 480 || etat.au_dessus_450 > 60 ? '⚠️ La mémoire frôle la limite : risque de plantages et de BDC en échec.' : '✅ Mémoire sous contrôle cette semaine.'}</p>`;
+    try {
+      await sendEmail({ to: [process.env.MEMORY_REPORT_TO || 'lina.e@openmedias.fr'], subject: `Mémoire Dashboard Sales : pic ${etat.picMo} Mo, ${plantages} redémarrage(s)`, html });
+      console.log('[memoire] récapitulatif hebdomadaire envoyé');
+    } catch (e) { console.warn('[memoire] envoi du récapitulatif impossible :', e.message); }
+    etat = { depuis: new Date().toISOString(), picMo: 0, picLe: null, sommeMo: 0, mesures: 0, demarrages: 1, au_dessus_450: 0, dernierEnvoi: n.cle };
+    sauver();
+  }
+  setInterval(() => { mesurer(); envoyerSiDu(); }, 60 * 1000).unref();
+  setInterval(sauver, 10 * 60 * 1000).unref();
+  return { mesurer, etat: () => ({ ...etat }) };
+})();
+app.get('/api/admin/memoire', requireAdmin, (req, res) => {
+  res.json({ maintenant: suiviMemoire.mesurer(), semaine: suiviMemoire.etat(), limiteMo: 512 });
+});
+
 startScheduler(async () => {
   const s = getReportSettings();
   const to = parseRecipients(s.reportTo);
