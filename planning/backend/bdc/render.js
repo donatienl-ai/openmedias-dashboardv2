@@ -139,16 +139,25 @@ async function renderBdcHtml(templateKey, fields = {}) {
   return compileBdcHtml(templateKey, fields);
 }
 
-// Lancement de Chromium fiabilisé (23/10/2026). Panne constatée : deux BDC générés en
-// même temps décompressent Chromium dans /tmp au même moment → « spawn ETXTBSY », puis
-// binaire à moitié écrit et TOUS les BDC suivants en « Failed to launch the browser
-// process! » jusqu'au redémarrage du service. Désormais :
-//  1) un seul PDF à la fois (file d'attente) — évite la course et les pics de mémoire
-//     (le service est limité à 512 Mo) ;
-//  2) le chemin du binaire est calculé une seule fois ;
-//  3) si le lancement échoue, on efface le binaire de /tmp et on réessaie une fois.
+// Génération des PDF de BDC (Chromium partagé, 02/11/2026).
+// Historique des pannes : le 23/10/2026, deux BDC lancés en même temps ont décompressé
+// Chromium dans /tmp au même moment (« spawn ETXTBSY ») → binaire abîmé → tous les BDC
+// suivants en « Failed to launch the browser process! » jusqu'au redémarrage ; et le
+// service tombait en manque de mémoire (512 Mo) car chaque BDC lançait SON Chromium.
+// Désormais :
+//  • UN seul Chromium, lancé à la première demande et partagé : chaque BDC n'ouvre
+//    qu'un onglet → plusieurs BDC en même temps (3 en parallèle, les suivants attendent
+//    quelques secondes), sans relancer Chromium à chaque fois ;
+//  • le chemin du binaire n'est calculé qu'une fois (plus de décompression concurrente) ;
+//  • si Chromium ne démarre pas : binaire effacé de /tmp, réinstallé, nouvel essai ;
+//  • si Chromium s'est arrêté entre deux BDC : relancé automatiquement ;
+//  • Chromium est fermé après 60 s sans BDC pour rendre la mémoire au reste du service.
+const BDC_EN_PARALLELE = 3;
 let cheminChromium = null;
-let fileBdc = Promise.resolve();
+let navigateurPartage = null;
+let minuterieFermeture = null;
+let bdcEnCours = 0;
+const bdcEnAttente = [];
 function cheminNavigateur() {
   if (!cheminChromium) cheminChromium = chromium.executablePath().catch((e) => { cheminChromium = null; throw e; });
   return cheminChromium;
@@ -166,26 +175,52 @@ async function lancerNavigateur() {
     return puppeteer.launch(await options());
   }
 }
-function renderBdcPdf(templateKey, fields = {}) {
-  const tache = fileBdc.then(() => produireBdcPdf(templateKey, fields));
-  fileBdc = tache.catch(() => {});
-  return tache;
+function obtenirNavigateur() {
+  if (!navigateurPartage) {
+    navigateurPartage = lancerNavigateur()
+      .then((b) => { b.on('disconnected', () => { navigateurPartage = null; }); return b; })
+      .catch((e) => { navigateurPartage = null; throw e; });
+  }
+  return navigateurPartage;
 }
-async function produireBdcPdf(templateKey, fields = {}) {
+function prendrePlace() {
+  if (bdcEnCours < BDC_EN_PARALLELE) { bdcEnCours += 1; return Promise.resolve(); }
+  return new Promise((ok) => bdcEnAttente.push(ok));
+}
+function libererPlace() {
+  const suivant = bdcEnAttente.shift();
+  if (suivant) suivant(); else bdcEnCours -= 1;
+  clearTimeout(minuterieFermeture);
+  minuterieFermeture = setTimeout(async () => {
+    if (bdcEnCours > 0 || !navigateurPartage) return;
+    const p = navigateurPartage; navigateurPartage = null;
+    try { (await p).close(); } catch (_) { /* déjà fermé */ }
+  }, 60 * 1000);
+  if (minuterieFermeture.unref) minuterieFermeture.unref();
+}
+async function renderBdcPdf(templateKey, fields = {}) {
   const html = compileBdcHtml(templateKey, fields);
-
-  const browser = await lancerNavigateur();
+  await prendrePlace();
+  clearTimeout(minuterieFermeture);
+  let page = null;
   try {
-    const page = await browser.newPage();
+    try {
+      page = await (await obtenirNavigateur()).newPage();
+    } catch (e) {
+      // Chromium mort entre deux BDC : on le relance une fois.
+      console.warn(`[BDC] Chromium indisponible (${e.message}) — relance`);
+      navigateurPartage = null;
+      page = await (await obtenirNavigateur()).newPage();
+    }
     await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdf = await page.pdf({
+    return await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: { top: 0, bottom: 0, left: 0, right: 0 },
     });
-    return pdf;
   } finally {
-    await browser.close();
+    if (page) { try { await page.close(); } catch (_) { /* rien */ } }
+    libererPlace();
   }
 }
 
