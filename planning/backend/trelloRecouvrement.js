@@ -98,15 +98,21 @@ async function lirePiecesJointes() {
       aLire.push({ id: at.id, nom: at.name, card: a.data.card.id, date: a.date });
     }
     aLire.sort((x, y) => (x.date < y.date ? 1 : -1));
-    for (const x of aLire.slice(0, 15)) {
+    // Seules les pièces jointes JAMAIS lues sont téléchargées (table trello_pieces_jointes) :
+    // une fois le stock historique traité, chaque passage ne lit que les nouveaux PDF.
+    // 3 au maximum par passage (au lieu de 15) pour ne pas saturer la mémoire (512 Mo).
+    for (const x of aLire.slice(0, 3)) {
       let texte = null, erreur = null;
       try {
         const u = `${TRELLO_API}/cards/${x.card}/attachments/${x.id}/download/${encodeURIComponent(x.nom)}`;
         const r = await fetch(u, { headers: { Authorization: `OAuth oauth_consumer_key="${c.key}", oauth_token="${c.token}"` } });
         if (r.status === 429) break;
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        // Taille vérifiée AVANT de charger le fichier en mémoire (5 Mo max).
+        const taille = Number(r.headers.get('content-length') || 0);
+        if (taille > 5 * 1024 * 1024) { try { r.body && r.body.destroy && r.body.destroy(); } catch (_) { /* rien */ } throw new Error('fichier trop gros'); }
         const buf = Buffer.from(await r.arrayBuffer());
-        if (buf.length > 15 * 1024 * 1024) throw new Error('fichier trop gros');
+        if (buf.length > 5 * 1024 * 1024) throw new Error('fichier trop gros');
         const res = await pdfParse(buf);
         texte = String(res.text || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
         pj.lus++;
