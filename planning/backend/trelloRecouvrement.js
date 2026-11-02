@@ -274,6 +274,7 @@ function construireRapport(db) {
   };
   const carteDeFacture = new Map();
   const cartesDeFacture = new Map(); // toutes les cartes liées à une facture (pas seulement la dernière)
+  const tousNumerosCites = new Set(); for (const s of nums.values()) for (const n of s) tousNumerosCites.add(n);
   const expliquee = (raison) => { rapport.expliquees[raison] = (rapport.expliquees[raison] || 0) + 1; };
 
   for (const carte of etat.cartes) {
@@ -293,12 +294,17 @@ function construireRapport(db) {
     }
     if (liees.length) rapport.liens.parNumero++;
     else {
+      // (02/11/2026) Une facture dont le n° est cité sur une AUTRE carte (commentaire, PDF
+      // joint…) appartient à cette carte-là : on ne la rattache plus ici par le seul nom
+      // (cas F7515 : carte « ICARE » ≠ carte « ICARE SERVICES » qui porte le PDF F7515).
+      const citeeAilleurs = (f) => tousNumerosCites.has(String(f.invoice_number || '').toUpperCase().replace(/\s|-/g, ''));
       const k = nomCarte(carte.name);
       let fs = k.length >= 3 ? parClient.get(k) : null;
       if (!fs && k.length >= 3) {
         const cands = [...parClient.keys()].filter((c) => memeClient(k, c));
         if (cands.length === 1) fs = parClient.get(cands[0]);
       }
+      if (fs && fs.length) fs = fs.filter((f) => !citeeAilleurs(f));
       if (fs && fs.length) { liees = fs.slice(); rapport.liens.parNom++; }
       else if (enRecouvrement && !carte.closed) {
         if (liste === 'ANNULATIONS' && !cites.length) expliquee('projet annulé sans facture (ANNULATIONS)');
@@ -418,7 +424,7 @@ function construireRapport(db) {
       const cands = [...cartesParNom.keys()].filter((k) => memeClient(k, kc));
       if (cands.length === 1) parNomCarte = cartesParNom.get(cands[0]);
     }
-    const cs = [...new Map([...(cartesDeFacture.get(String(f.id)) || []).map((x) => x.carte), ...parNomCarte].map((c) => [c.id, c])).values()];
+    const cs = [...new Map([...(cartesDeFacture.get(String(f.id)) || []).map((x) => x.carte), ...((cartesDeFacture.get(String(f.id)) || []).length ? [] : parNomCarte)].map((c) => [c.id, c])).values()];
     const ouvertesClient = (parClient.get(kc) || []).filter((x) => restant(x) > 1 && !['cancelled', 'partially_cancelled', 'archived'].includes(x.status));
     const coms = cs.flatMap((c) => tousComms.get(c.id) || []).sort((a, b) => (a.date < b.date ? 1 : -1));
     const membres = [...new Set(cs.flatMap((c) => (c.idMembers || []).map((m) => nomMembre.get(m)).filter(Boolean)))];
@@ -473,7 +479,7 @@ function construireRapport(db) {
       const cands = [...cartesParNom.keys()].filter((k) => memeClient(k, kc));
       if (cands.length === 1) parNomCarte = cartesParNom.get(cands[0]);
     }
-    const cs = [...new Map([...(cartesDeFacture.get(String(f.id)) || []).map((x) => x.carte), ...parNomCarte].map((c) => [c.id, c])).values()];
+    const cs = [...new Map([...(cartesDeFacture.get(String(f.id)) || []).map((x) => x.carte), ...((cartesDeFacture.get(String(f.id)) || []).length ? [] : parNomCarte)].map((c) => [c.id, c])).values()];
     const ouvertesClient = (parClient.get(kc) || []).filter((x) => restant(x) > 1 && !['cancelled', 'partially_cancelled', 'archived'].includes(x.status));
     const num = String(f.invoice_number).toUpperCase();
     const vus = new Set(); let total = 0; const details = [];
@@ -610,6 +616,64 @@ function construireRapport(db) {
   for (const av of avoirsTous) {
     if (!rapport.avoirs.some((x) => x.avoirId === av.id)) anomalie(av, `Avoir ${av.invoice_number} (${montantAbs(av).toFixed(2)} €) rattaché à aucune facture : ni Pennylane, ni la mention du PDF, ni le contexte ne permettent de le lier.`);
   }
+  // J. ÉTIQUETTES ET MENTIONS TRELLO → STATUT ET RESTE DÛ (02/11/2026, règles Lina)
+  // Trello l'emporte sur Pennylane : ce qui est écrit sur la carte met le dashboard à jour.
+  //  • « Soldée » (étiquette, ou écrit dans un commentaire), « clôture dossier »,
+  //    « ANNULATION DANS LES DELAIS », « annulation projet » → Soldée, reste dû 0 €.
+  //  • Facture annulée dans Pennylane → Soldée, reste dû 0 €.
+  //  • Étiquette « report projet » ou carte dans la liste « Reports projets » → Report projet.
+  //  • « 1/2 payé », « 1/3 payé », « 2/3 payé », « 1/4 payé », « 3/4 payé », « règlement 20 % »,
+  //    « règlement 35 % »… = part DÉJÀ payée → reste dû = TTC × (1 − part), noté sur la facture.
+  // Une étiquette « Soldée » posée AVANT l'émission de la facture concerne une facture
+  // précédente (sauf si la carte cite ce n° de facture) : elle n'est pas appliquée.
+  rapport.decisionsTrello = [];
+  const fractionEtiquette = (nom) => {
+    const n = String(nom || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    let m = n.match(/^(\d)\s*\/\s*(\d)\s+pay/); if (m && Number(m[2]) > 0) return Number(m[1]) / Number(m[2]);
+    m = n.match(/r[èe]glement\s+(\d{1,3})\s*%/); if (m) return Number(m[1]) / 100;
+    return null;
+  };
+  const listeReports = new Set(b.lists.filter((l) => /^reports? projets?$/i.test(String(l.name || '').trim())).map((l) => l.id));
+  for (const f of factures) {
+    if (Number(f.amount) <= 0 || !dansPerimetre(f)) continue;
+    const num = String(f.invoice_number || '').toUpperCase().replace(/\s|-/g, '');
+    const entrees = cartesDeFacture.get(String(f.id)) || [];
+    const ttc = Number(f.amount) || 0, reste = restant(f);
+    let statut = null, resteReel = null; const notes = []; let lien = entrees[0] ? entrees[0].carte.shortUrl : null;
+    if (f.status === 'cancelled') { statut = 'solde'; resteReel = 0; notes.push('Annulée dans Pennylane → Soldée'); }
+    for (const { carte } of entrees) {
+      if (carte.closed) continue;
+      const noms = (carte.idLabels || []).map((id) => String(etiquettes.get(id) || '').trim()).filter(Boolean);
+      const bas = noms.map((x) => x.toLowerCase());
+      const citeLaFacture = (nums.get(carte.id) || new Set()).has(num);
+      const pose = soldeeLe.get(carte.id);
+      const soldeeValable = citeLaFacture || !pose || pose.slice(0, 10) >= String(f.date_emission || '');
+      const comSoldee = (tousComms.get(carte.id) || []).find((c) => c.date && c.date.slice(0, 10) >= String(f.date_emission || '')
+        && /\bsold[ée]e?s?\b/i.test(c.texte || '') && !/\b(pas|non|plus|jamais)\s+(encore\s+)?sold/i.test(c.texte || '')
+        && (!numerosDans(c.texte).size || numerosDans(c.texte).has(num)));
+      if ((bas.includes('soldée') || bas.includes('soldee') || bas.includes('clôture dossier') || bas.includes('cloture dossier')) && soldeeValable) {
+        statut = 'solde'; resteReel = 0; lien = carte.shortUrl; notes.push(`Trello : étiquette « ${noms.find((x) => /sold|cl[ôo]ture/i.test(x))} »${pose ? ' (posée le ' + dateFR(pose) + ')' : ''} → Soldée${reste > 1 ? ', Pennylane affiche encore ' + reste.toFixed(2) + ' € (à rapprocher)' : ''}`);
+      } else if (comSoldee) {
+        statut = 'solde'; resteReel = 0; lien = carte.shortUrl; notes.push(`Trello le ${dateFR(comSoldee.date)} : « ${extrait(comSoldee.texte)} » → Soldée${reste > 1 ? ', Pennylane affiche encore ' + reste.toFixed(2) + ' € (à rapprocher)' : ''}`);
+      }
+      if (statut !== 'solde' && bas.some((x) => /annulation dans les d[ée]lais|annulation projet/.test(x))) {
+        statut = 'solde'; resteReel = 0; lien = carte.shortUrl; notes.push(`Trello : étiquette « ${noms.find((x) => /annulation/i.test(x))} » → plus rien à encaisser (avoir à établir dans Pennylane si ce n'est pas fait)`);
+      }
+      if (statut !== 'solde' && (bas.includes('report projet') || listeReports.has(carte.idList))) {
+        statut = 'report_projet'; lien = carte.shortUrl; notes.push(bas.includes('report projet') ? 'Trello : étiquette « report projet »' : 'Trello : carte dans la liste « Reports projets »');
+      }
+      if (statut !== 'solde') {
+        const fr = noms.map((x) => ({ x, p: fractionEtiquette(x) })).filter((y) => y.p != null && y.p > 0 && y.p < 1);
+        if (fr.length) {
+          const p = Math.max(...fr.map((y) => y.p));
+          const calc = Math.round(ttc * (1 - p) * 100) / 100;
+          if (calc < reste - 1) { resteReel = calc; notes.push(`Trello : étiquette « ${fr.find((y) => y.p === p).x} » → ${Math.round(p * 100)} % déjà payés, reste dû ${calc.toFixed(2)} € (Pennylane : ${reste.toFixed(2)} €)`); }
+        }
+      }
+    }
+    if (statut || resteReel != null) rapport.decisionsTrello.push({ id: f.id, facture: f.invoice_number, client: f.client, statutActuel: f.internal_status || 'a_relancer', statut, resteReel, restePennylane: reste, note: notes.join(' · '), lien });
+  }
+
   rapport.resume = {
     incoherences: rapport.incoherences.length, classementsPrevus: rapport.classementsPrevus.length, numerosInconnus: rapport.numerosInconnus.length,
     nonRelieesRecouvrement: rapport.liens.nonRelieesRecouvrement.length, scp: rapport.scp.length, nouveauxDouteux: rapport.nouveauxDouteux.length,
@@ -619,6 +683,22 @@ function construireRapport(db) {
 
 // « client douteux » en étiquette Trello → Douteux dans le dashboard (15/10/2026, Lina).
 // Statut interne du dashboard seulement (rien n'est écrit dans Pennylane ni Trello).
+
+// ── Application des décisions Trello (statuts) ───────────────────────────────────
+// APPLIQUER_DECISIONS_TRELLO = false : simulation seule, consultable sur
+// /api/finance/trello/decisions. Passer à true après validation de la liste.
+const APPLIQUER_DECISIONS_TRELLO = false;
+function decisionsAChanger(r) {
+  return (r.decisionsTrello || []).filter((d) => d.statut && d.statut !== d.statutActuel
+    && (d.statut === 'solde' || ['a_relancer', 'en_cours', 'litige', ''].includes(d.statutActuel)));
+}
+function appliquerDecisionsTrello(db) {
+  if (!APPLIQUER_DECISIONS_TRELLO) return;
+  const aChanger = decisionsAChanger(construireRapport(db));
+  if (aChanger.length > 80) { console.warn(`[trello] décisions : ${aChanger.length} changements, au-delà du garde-fou (80) — rien n'est appliqué`); return; }
+  const maj = db.prepare('UPDATE pennylane_invoices SET internal_status=? WHERE id=?');
+  for (const d of aChanger) { maj.run(d.statut, d.id); console.log(`[trello] ${d.facture} ${d.client || ''} : ${d.statutActuel} → ${d.statut} (${d.note})`); }
+}
 function appliquerDouteuxTrello(db) {
   const r = construireRapport(db);
   const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='douteux' WHERE id=? AND COALESCE(internal_status,'') NOT IN ('douteux','solde')");
@@ -718,6 +798,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
         try { appliquerDouteuxTrello(db); } catch (e) { console.warn('[trello] douteux :', e.message); }
         try { appliquerLitigeForbes(db); } catch (e) { console.warn('[trello] Forbes :', e.message); }
         try { appliquerReportsProjets(db); } catch (e) { console.warn('[trello] Reports projets :', e.message); }
+        try { appliquerDecisionsTrello(db); } catch (e) { console.warn('[trello] décisions :', e.message); }
         await lirePiecesJointes();
       } catch (e) { etat.erreur = e.message; } finally { occupe = false; }
     }, 20000).unref();
@@ -725,6 +806,10 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
 
   // Bouton « Synchroniser » du recouvrement : lit les nouveautés Trello maintenant.
   // Contrôle : ce que la règle « Clients Forbes - Stand By » voit et fait passer en Litige.
+  // Simulation / contrôle des décisions tirées des étiquettes et mentions Trello.
+  app.get('/api/finance/trello/decisions', requireFinance, (req, res) => {
+    try { const r = construireRapport(db); res.json({ applique: APPLIQUER_DECISIONS_TRELLO, decisions: r.decisionsTrello || [], aChanger: decisionsAChanger(r) }); } catch (e) { res.status(500).json({ error: e.message }); }
+  });
   app.get('/api/finance/trello/reports', requireFinance, (req, res) => {
     try { res.json(candidatsListeTrello(db, LISTE_REPORTS)); } catch (e) { res.status(500).json({ error: e.message }); }
   });
