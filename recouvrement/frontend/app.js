@@ -336,6 +336,7 @@ if(/groupe\s*scp/i.test(inv.customerName||inv.customer_name||''))return true;
 return financeScpNumeros.has(String(inv.invoiceNumber||inv.invoice_number||''));
 }
 let financeTrelloInfo=null;
+let financeDecisionsTrello=new Map(); // statut + reste dû décidés d'après Trello (serveur, Trello prioritaire)
 async function loadFinanceAVerifier(){
 try{
 const r=await fetch(`${API}/finance/a-verifier`,{headers:financeHeaders()});
@@ -346,6 +347,7 @@ fetch(`${API}/finance/trello/etat`,{headers:financeHeaders()}).then(x=>x.ok?x.js
 const m=new Map();
 for(const it of (d.items||[])){ if(it.id==null)continue; const k=String(it.id); if(!m.has(k))m.set(k,[]); m.get(k).push(it); }
 financeAVerifier=m;
+financeDecisionsTrello=new Map((d.decisions||[]).map((x)=>[String(x.id),x]));
 financePartielsTrello=new Map((d.partiels||[]).map((p)=>[String(p.id),p]));
 financeAvoirsParFacture=new Map();financeAvoirsParAvoir=new Map();
 for(const a of (d.avoirs||[])){const kf=String(a.factureId),ka=String(a.avoirId);if(!financeAvoirsParFacture.has(kf))financeAvoirsParFacture.set(kf,[]);financeAvoirsParFacture.get(kf).push(a);if(!financeAvoirsParAvoir.has(ka))financeAvoirsParAvoir.set(ka,[]);financeAvoirsParAvoir.get(ka).push(a);}
@@ -374,6 +376,7 @@ renderFinanceTabs(); renderFinanceInvoices(); renderFinanceKpis(computeFinanceKp
 const FINANCE_STATUTS_SOLDABLES_AUTO=['','a_relancer','en_cours'];
 function financeArrondi(v){ return Math.round((Number(v)||0)*100)/100; }
 function financeAppliquerRestesReels(){
+  financeInvoicesCache=financeInvoicesCache.filter((i)=>i.invoiceNumber!=='F5885'); // avoir de 2022 : exclu du dashboard (Lina)
   const ajout=(inv,raison)=>{ const k=String(inv.id); if(!financeAVerifier.has(k))financeAVerifier.set(k,[]); const l=financeAVerifier.get(k); if(!l.some(x=>x.raison===raison))l.push({id:inv.id,facture:inv.invoiceNumber,raison,lien:null,calcul:true}); };
   for(const [k,l] of financeAVerifier){ const r=l.filter(x=>!x.calcul); if(r.length)financeAVerifier.set(k,r); else financeAVerifier.delete(k); }
   for(const inv of financeInvoicesCache){
@@ -389,6 +392,16 @@ function financeAppliquerRestesReels(){
     const lies=(financeAvoirsParFacture.get(String(inv.id))||[]).filter(a=>a.type!=='annule_avoir');
     const totAv=financeArrondi(lies.reduce((s,a)=>s+(Number(a.montant)||0),0));
     const nums=lies.map(a=>a.avoirNumero).join(', ');
+    // Trello prioritaire : statut et reste dû décidés côté serveur (étiquettes, « soldée », paiements, fractions).
+    const dec=financeDecisionsTrello.get(String(inv.id));
+    inv._noteTrello=dec&&dec.note?dec.note:'';
+    if(dec&&(dec.statut==='solde'||dec.statut==='report_projet'||dec.resteReel!=null)){
+      if(dec.statut==='solde'||dec.statut==='report_projet')inv.internalStatus=dec.statut;
+      let rr=dec.statut==='solde'?0:(dec.resteReel!=null?Number(dec.resteReel):pl);
+      if(dec.statut!=='solde'&&totAv>0&&pl>ttc-totAv+1)rr=Math.min(rr,financeArrondi(pl-totAv));
+      if(Math.abs(rr-pl)>0.5){ inv._resteReel={pennylane:pl,avoirs:totAv,reel:rr,nums,trello:true}; setReste(Math.max(0,rr)); }
+      continue;
+    }
     if(totAv>0 && pl>ttc-totAv+1){
       const reel=financeArrondi(pl-totAv);
       inv._resteReel={pennylane:pl,avoirs:totAv,reel,nums};
@@ -451,10 +464,12 @@ function financeAVerifierHtml(inv){
 const items=(financeAVerifier.get(String(inv&&inv.id))||[]).slice();
 const partiel=financePartielsTrello.get(String(inv&&inv.id));
 if(partiel)items.unshift({raison:`Paiement partiel selon Trello : ${(partiel.details||[]).join(', ')} (total ${Number(partiel.montant).toLocaleString('fr-FR')} €), pas encore rapproché dans Pennylane.`});
-if(!items.length)return '';
+const noteTrello=inv&&inv._noteTrello?inv._noteTrello:((financeInvoicesCache.find((i)=>String(i.id)===String(inv&&inv.id))||{})._noteTrello||'');
+const infoTrello=noteTrello?'<div class="finance-detail-section" style="border-left:3px solid #94a3b8;padding-left:10px"><div class="form-label">D\'après Trello</div><div style="font-size:12px;margin:2px 0">'+String(noteTrello).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))+'</div></div>':'';
+if(!items.length)return infoTrello;
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const lien=items.find(i=>i.lien);
-return '<div class="finance-detail-section" style="border-left:3px solid #f59e0b;padding-left:10px"><div class="form-label">À vérifier</div>'+items.map(i=>'<div style="font-size:12px;margin:2px 0">'+esc(i.raison)+'</div>').join('')+(lien?'<a href="'+esc(lien.lien)+'" target="_blank" rel="noopener" style="font-size:12px">Ouvrir la carte Trello ↗</a>':'')+'</div>';
+return infoTrello+'<div class="finance-detail-section" style="border-left:3px solid #f59e0b;padding-left:10px"><div class="form-label">À vérifier</div>'+items.map(i=>'<div style="font-size:12px;margin:2px 0">'+esc(i.raison)+'</div>').join('')+(lien?'<a href="'+esc(lien.lien)+'" target="_blank" rel="noopener" style="font-size:12px">Ouvrir la carte Trello ↗</a>':'')+'</div>';
 }
 async function refreshFinanceInvoices(){
 const [kpis,invoices]=await Promise.all([
@@ -521,7 +536,7 @@ return `<span class="finance-hors-encours-badge" title="Reste-dû Pennylane non 
 // cours ou une promesse de paiement obtenue n'attend pas une relance du jour.
 // 'douteux' ajouté le 24/09/2026 (demande Lina) — même liste que côté back
 // (financeRoutes.js), à garder synchronisée.
-const FINANCE_STATUTS_NON_ACTIONABLES=['litige','report_projet','promesse_paiement','solde','douteux'];
+const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde','douteux']; // report projet compté dans « À relancer » (02/11/2026)
 // Recalcule les KPI de recouvrement (encours, montant actionable, taux de
 // retard, aging, répartition par statut, DSO) côté front, à partir du cache
 // local déjà filtré par la période ET les chips de filtre actifs — reproduit
@@ -710,7 +725,7 @@ const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMont
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
 wrap.innerHTML=`
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} factures </div>${vueGlobale&&k.nbDouteux>0?`<div class="kpi-lbl" style="color:var(--text-muted)" title="Tapez « douteux » dans la recherche pour les voir">+ ${fmtCACompact(k.montantDouteux)} de douteux non inclus (${k.nbDouteux})</div>`:''}</div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:${(k.montantActionable||0)>0?'#dc2626':'var(--text-muted)'}" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} factures en retard à relancer </div></div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:${(k.montantActionable||0)>0?'#dc2626':'var(--text-muted)'}" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} factures en retard à relancer${((k.retardParStatut||{}).report_projet||{}).count?` · dont ${k.retardParStatut.report_projet.count} en report projet (${fmtCACompact(k.retardParStatut.report_projet.montant)})`:''}</div></div>
 <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${vueGlobale?k.tauxDeRetard+'%':'—'}</div><div class="kpi-lbl">${vueGlobale?'':'Calculé sur l\'onglet Toutes uniquement · '}${k.nbFacturesEnRetard} factures en retard, dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div></div>
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${(k.dso!=null&&financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?k.dso+'j':'—'}</div><div class="kpi-lbl">${(financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?'':'Calculé sur l\'onglet Toutes uniquement · '}Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
@@ -819,7 +834,7 @@ archived: {bg:'var(--surface2)', fg:'var(--text-muted)'},
 // onglets "À venir" et "En retard" : une facture déjà suivie autrement que
 // par une relance active n'a plus besoin d'apparaître dans ces deux vues-là.
 // Mêmes valeurs que FINANCE_STATUTS_NON_ACTIONABLES ci-dessus, + en_cours.
-const FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE=['litige','report_projet','promesse_paiement','solde','en_cours','douteux'];
+const FINANCE_TAB_EXCLURE_DEJA_PRISE_EN_CHARGE=['litige','promesse_paiement','solde','en_cours','douteux'];
 // Test d'UNE facture contre UN chip donné (utilisé pour les compteurs par
 // chip, et comme brique de financeMatchesFilters ci-dessous).
 function financeMatchesFilterKey(inv,key){
