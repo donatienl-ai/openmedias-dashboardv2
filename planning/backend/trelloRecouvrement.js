@@ -398,8 +398,8 @@ function construireRapport(db) {
     cartesParNom.get(k).push(c);
   }
   // Paiement annoncé : formulations positives seulement (« Soldée le », « virement reçu »…).
-  const estPaiement = (t) => /sold[ée]e?\s+le|virement\b[^\n]{0,40}\b(re[çc]u|fait|effectu)|avis de virement|r[ée]gl[ée]e?\s+le|pay[ée]e?\s+le|encaiss[ée]e?\s+le/i.test(t)
-    && !/\bn['’]?\s?(est|a|ont)\s+(toujours\s+)?pas|pas\s+(encore\s+)?(r[ée]gl|pay|re[çc]u)|pourquoi|toujours pas/i.test(t)
+  const estPaiement = (t) => /sold[ée]e?\s+le|virement\b[^\n]{0,40}\b(re[çc]u|fait|effectu)|r[ée]gl[ée]e?\s+le|pay[ée]e?\s+le|encaiss[ée]e?\s+le/i.test(t)
+    && !/\bn['’]?\s?(est|a|ont)\s+(toujours\s+)?pas|pas\s+(encore\s+)?(r[ée]gl|pay|re[çc]u)|pourquoi|toujours pas|\b(demand|relanc|attend|en attente|pr[ée]vu|promet|promesse|va\s+(payer|r[ée]gler|faire|envoyer))/i.test(t)
     && !/^\[Pièce jointe « [^»]*(facture|avoir|devis|bdc|bon de commande)/i.test(t);
   const montantDans = (t) => {
     const m = String(t).match(/(\d{1,3}(?:[ .  ]\d{3})*(?:,\d{1,2})?)\s?(?:€|euros?)/i);
@@ -428,6 +428,14 @@ function construireRapport(db) {
     const ouvertesA = (c) => ouvertesClient.filter((x) => String(x.date_emission) <= c.date.slice(0, 10)).length;
     const paiement = candidats.find((c) => numerosDans(c.texte).has(num) || ouvertesA(c) === 1);
     const ambigu = !paiement && candidats[0];
+    // Règle Lina (02/11/2026) : une vieille facture n'est « à vérifier » que s'il s'est
+    // passé quelque chose que Pennylane doit refléter — paiement reçu, avoir, nouvelle
+    // facture, annulation. Une relance ou un virement simplement attendu / promis ne
+    // compte pas : la facture reste en retard, à relancer, sans encombrer « À vérifier ».
+    const faitNouveau = coms.find((c) => c.date.slice(0, 10) >= String(f.date_emission)
+      && (/\b(avoir|refactur|nouvelle facture|annul)/i.test(c.texte)
+        || (/^\[Pièce jointe « [^»]*(avoir|facture)/i.test(c.texte) && !numerosDans(String(c.texte).slice(0, 200)).has(num))));
+    if (!paiement && !ambigu && !faitNouveau) continue;
 
     const listesCartes = [...new Set(cs.map((c) => listes.get(c.idList) || ''))];
     const parties = [`Impayée depuis le ${dateFR(String(f.date_emission))} (plus de 90 jours).`];
@@ -440,6 +448,8 @@ function construireRapport(db) {
         + (ecart ? ` (${eur(m)} pour un reste de ${eur(restant(f))} : paiement partiel ou autre facture).` : ' → à rapprocher dans Pennylane.'));
     } else if (ambigu) {
       parties.push(`Trello indique « ${extrait(ambigu.texte)} » le ${dateFR(ambigu.date)}, mais ${ouvertesA(ambigu)} factures de ce client étaient ouvertes : à attribuer.`);
+    } else if (faitNouveau) {
+      parties.push(`Fait nouveau le ${dateFR(faitNouveau.date)} : « ${extrait(faitNouveau.texte)} » → avoir, facture ou annulation à répercuter dans Pennylane.`);
     } else if (coms[0]) {
       parties.push(`Dernier commentaire le ${dateFR(coms[0].date)}${coms[0].auteur ? ' par ' + coms[0].auteur : ''} : « ${extrait(coms[0].texte)} ».`);
     }
