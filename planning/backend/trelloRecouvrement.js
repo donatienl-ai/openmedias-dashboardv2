@@ -101,8 +101,11 @@ async function lirePiecesJointes() {
     // Seules les pièces jointes JAMAIS lues sont téléchargées (table trello_pieces_jointes) :
     // une fois le stock historique traité, chaque passage ne lit que les nouveaux PDF.
     // 3 au maximum par passage (au lieu de 15) pour ne pas saturer la mémoire (512 Mo).
-    for (const x of aLire.slice(0, 3)) {
+    for (const x of aLire.slice(0, 1)) {
       let texte = null, erreur = null;
+      // Noté AVANT la lecture : si ce PDF fait tomber le serveur (mémoire), il n'est jamais relu.
+      pj.db.prepare('INSERT OR REPLACE INTO trello_pieces_jointes (attachment_id, card_id, nom, date, texte, erreur) VALUES (?,?,?,?,?,?)')
+        .run(x.id, x.card, x.nom, x.date, null, 'lecture interrompue (PDF trop lourd)');
       try {
         const u = `${TRELLO_API}/cards/${x.card}/attachments/${x.id}/download/${encodeURIComponent(x.nom)}`;
         const r = await fetch(u, { headers: { Authorization: `OAuth oauth_consumer_key="${c.key}", oauth_token="${c.token}"` } });
@@ -113,7 +116,7 @@ async function lirePiecesJointes() {
         if (taille > 5 * 1024 * 1024) { try { r.body && r.body.destroy && r.body.destroy(); } catch (_) { /* rien */ } throw new Error('fichier trop gros'); }
         const buf = Buffer.from(await r.arrayBuffer());
         if (buf.length > 5 * 1024 * 1024) throw new Error('fichier trop gros');
-        const res = await pdfParse(buf);
+        const res = await pdfParse(buf, { max: 5 }); // 5 premières pages : n° et montants y sont
         texte = String(res.text || '').replace(/\s+/g, ' ').trim().slice(0, 4000);
         pj.lus++;
       } catch (e) { erreur = String(e.message || e).slice(0, 200); pj.erreurs++; }
@@ -124,6 +127,17 @@ async function lirePiecesJointes() {
 }
 
 
+// Seuls les champs réellement utilisés sont gardés en mémoire (≈ 66 000 actions).
+function allegerAction(a) {
+  const d = a.data || {}, o = {};
+  if (d.card) o.card = d.card.idLabels ? { id: d.card.id, idLabels: d.card.idLabels } : { id: d.card.id };
+  if (d.text != null) o.text = d.text;
+  if (d.label) o.label = { id: d.label.id, name: d.label.name };
+  if (d.old && 'idLabels' in d.old) o.old = { idLabels: d.old.idLabels };
+  if (d.attachment) o.attachment = { id: d.attachment.id, name: d.attachment.name };
+  return { id: a.id, type: a.type, date: a.date, idMemberCreator: a.idMemberCreator, data: o };
+}
+
 async function chargerActions(boardId, since, before) {
   const out = [];
   let avant = before || null;
@@ -132,7 +146,7 @@ async function chargerActions(boardId, since, before) {
       limit: 1000, since, before: avant, filter: FILTRE_ACTIONS,
       fields: 'type,date,data,idMemberCreator', memberCreator: 'false', member: 'false',
     });
-    out.push(...lot);
+    for (const a of lot) out.push(allegerAction(a));
     if (lot.length < 1000) break;
     avant = lot[lot.length - 1].id;
   }
@@ -203,7 +217,16 @@ const extrait = (t) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, 160)
 const dateFR = (iso) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
 
 // ── Croisement Trello × Pennylane (simulation, ne change rien) ───────────────
+// Rapport gardé en cache : recalculé seulement si Trello a bougé (ou toutes les 10 min pour Pennylane).
+const cacheRapport = { cle: null, le: 0, r: null };
 function construireRapport(db) {
+  const cle = `${etat.actions.length}|${etat.derniereAction}|${etat.cartes.length}|${pj.lus}`;
+  if (cacheRapport.r && cacheRapport.cle === cle && Date.now() - cacheRapport.le < 10 * 60 * 1000) return cacheRapport.r;
+  const r = construireRapportComplet(db);
+  cacheRapport.cle = cle; cacheRapport.le = Date.now(); cacheRapport.r = r;
+  return r;
+}
+function construireRapportComplet(db) {
   const b = etat.board;
   const listes = new Map(b.lists.map((l) => [l.id, l.name]));
   const etiquettes = new Map(b.labels.map((l) => [l.id, l.name || '']));
@@ -845,7 +868,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
   setInterval(() => { chargerLiensAvoirsPennylane(); }, 30 * 60 * 1000).unref();
   if (config()) assurerCharge().catch((e) => console.warn('[trello] chargement initial :', e.message));
 
-  // Mise à jour automatique : nouveautés Trello toutes les 20 secondes (lecture seule).
+  // Mise à jour automatique : nouveautés Trello toutes les 5 minutes (lecture seule).
   if (config()) {
     let occupe = false;
     setInterval(async () => {
@@ -859,7 +882,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
         try { appliquerDecisionsTrello(db); } catch (e) { console.warn('[trello] décisions :', e.message); }
         await lirePiecesJointes();
       } catch (e) { etat.erreur = e.message; } finally { occupe = false; }
-    }, 20000).unref();
+    }, 5 * 60 * 1000).unref(); // toutes les 5 min (au lieu de 20 s)
   }
 
   // Bouton « Synchroniser » du recouvrement : lit les nouveautés Trello maintenant.
