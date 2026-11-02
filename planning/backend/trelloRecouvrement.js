@@ -262,7 +262,7 @@ function construireRapport(db) {
       const avant = new Set(a.data.old.idLabels || []);
       pose = a.data.card.idLabels.some((x) => idSoldee.has(x) && !avant.has(x));
     }
-    if (a.type === 'commentCard' && /sold[ée]e?\b/i.test(a.data.text || '')) pose = true;
+    if (a.type === 'commentCard' && /\bsold[ée]es?\s+(le|au|ce\s+jour)\b/i.test(a.data.text || '')) pose = true;
     if (pose && (!soldeeLe.has(id) || a.date > soldeeLe.get(id))) soldeeLe.set(id, a.date);
   }
 
@@ -649,7 +649,7 @@ function construireRapport(db) {
       const pose = soldeeLe.get(carte.id);
       const soldeeValable = citeLaFacture || !pose || pose.slice(0, 10) >= String(f.date_emission || '');
       const comSoldee = (tousComms.get(carte.id) || []).find((c) => c.date && c.date.slice(0, 10) >= String(f.date_emission || '')
-        && /\bsold[ée]e?s?\b/i.test(c.texte || '') && !/\b(pas|non|plus|jamais)\s+(encore\s+)?sold/i.test(c.texte || '')
+        && /\bsold[ée]es?\s+(le|au|ce\s+jour)\b/i.test(c.texte || '') && !/\b(pas|non|plus|jamais)\s+(encore\s+)?sold/i.test(c.texte || '')
         && (!numerosDans(c.texte).size || numerosDans(c.texte).has(num)));
       if ((bas.includes('soldée') || bas.includes('soldee') || bas.includes('clôture dossier') || bas.includes('cloture dossier')) && soldeeValable) {
         statut = 'solde'; resteReel = 0; lien = carte.shortUrl; notes.push(`Trello : étiquette « ${noms.find((x) => /sold|cl[ôo]ture/i.test(x))} »${pose ? ' (posée le ' + dateFR(pose) + ')' : ''} → Soldée${reste > 1 ? ', Pennylane affiche encore ' + reste.toFixed(2) + ' € (à rapprocher)' : ''}`);
