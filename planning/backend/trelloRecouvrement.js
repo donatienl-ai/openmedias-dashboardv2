@@ -433,7 +433,7 @@ function construireRapport(db) {
     // facture, annulation. Une relance ou un virement simplement attendu / promis ne
     // compte pas : la facture reste en retard, à relancer, sans encombrer « À vérifier ».
     const faitNouveau = coms.find((c) => c.date.slice(0, 10) >= String(f.date_emission)
-      && (/\b(avoir|refactur|nouvelle facture|annul)/i.test(c.texte)
+      && (/\b(un|l['’]|cet|notre|votre|d['’]un|le|son|cet)\s*avoir\b|\bavoir\s+(partiel|total|n°|F\s?\d|[ée]tabli|fait|[ée]mis|de\s+\d)|refactur|nouvelle facture|\bannul(?:[ée]e?s?|ation|er)(?![a-z])/i.test(c.texte)
         || (/^\[Pièce jointe « [^»]*(avoir|facture)/i.test(c.texte) && !numerosDans(String(c.texte).slice(0, 200)).has(num))));
     if (!paiement && !ambigu && !faitNouveau) continue;
 
