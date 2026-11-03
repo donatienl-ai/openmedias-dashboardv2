@@ -273,10 +273,11 @@ function construireRapportComplet(db) {
     }
     if (a.type === 'addAttachmentToCard') {
       const nomPj = (a.data.attachment && a.data.attachment.name) || '';
-      ajouterNum(id, nomPj);
+      // (03/11/2026) les pièces jointes sont lues sur les cartes telles qu'elles sont aujourd'hui (plus bas) :
+      // un PDF joint par erreur puis supprimé ne rattache plus la facture (F6654 REMA sur la carte Schnebelen).
       // (03/11/2026, Lina) la carte qui porte le PDF de la facture est SA carte : les autres
       // cartes du même client qui la citent ne lui donnent plus leurs étiquettes (F7065, F7460…).
-      if (!/avoir/i.test(nomPj)) numerosDans(nomPj).forEach((x) => { if (!pdfFacture.has(x)) pdfFacture.set(x, new Set()); pdfFacture.get(x).add(id); });
+      void nomPj;
     }
   }
   for (const c of etat.cartes) { ajouterNum(c.id, c.name); ajouterNum(c.id, c.desc); }
@@ -698,8 +699,10 @@ function construireRapportComplet(db) {
       const etiq = part != null ? fr.find((y) => y.p === part).x : null;
       const res = new Map(invs.map((f) => [String(f.id), { frac: null, etiq, paye: 0, details: [] }]));
       if (part != null) {
-        let paye = invs.reduce((s, f) => s + Number(f.amount), 0) * part;
-        for (const f of invs) { const a = Math.min(Number(f.amount), paye); paye -= a; res.get(String(f.id)).frac = Math.round((Number(f.amount) - a) * 100) / 100; }
+        // (03/11/2026) factures annulées hors calcul de la part payée (Cellnex : F7355 annulée, remplacée par F7375).
+        const invsFr = invs.filter((f) => f.status !== 'cancelled' && Number(f.amount) > 0);
+        let paye = invsFr.reduce((s, f) => s + Number(f.amount), 0) * part;
+        for (const f of invsFr) { const a = Math.min(Number(f.amount), paye); paye -= a; res.get(String(f.id)).frac = Math.round((Number(f.amount) - a) * 100) / 100; }
       }
       const coms = (tousComms.get(carte.id) || []).slice().sort((a, c) => (a.date < c.date ? -1 : 1));
       const ouvertes = invs.filter((f) => restant(f) > 1);
@@ -945,7 +948,9 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       const decisions = (r.decisionsTrello || []).filter((d) => d.statut === 'solde' || d.statut === 'report_projet' || d.resteReel != null)
         .map((d) => ({ id: d.id, statut: d.statut, resteReel: d.resteReel, note: d.note }));
       const classees = new Set(decisions.map((d) => String(d.id)));
-      const aVerifier = items.filter((x) => x.facture !== 'F5885' && !classees.has(String(x.id)));
+      // (03/11/2026) Groupe SCP retiré du dashboard : ses avoirs non plus (ex. F7213).
+      const pieceScp = new Set(db.prepare("SELECT i.invoice_number AS n FROM pennylane_invoices i LEFT JOIN pennylane_customers c ON c.id = i.customer_id WHERE c.name LIKE '%SCP%'").all().map((x) => String(x.n)));
+      const aVerifier = items.filter((x) => x.facture !== 'F5885' && !pieceScp.has(String(x.facture)) && !classees.has(String(x.id)));
       res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
