@@ -161,7 +161,7 @@ async function chargerTout() {
   const board = await trelloGet(`/boards/${c.board}`, {
     fields: 'name', lists: 'all', list_fields: 'name,closed', labels: 'all', label_fields: 'name,color', members: 'all', member_fields: 'username,fullName',
   });
-  const cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl,idMembers' });
+  const cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl,idMembers', attachments: 'true', attachment_fields: 'name' });
   const actions = await chargerActions(c.board, DEPUIS);
   etat.board = board; etat.cartes = cartes; etat.actions = actions;
   etat.derniereAction = actions.length ? actions[0].date : DEPUIS;
@@ -178,7 +178,7 @@ async function rafraichir() {
   if (ajout.length) {
     etat.actions = ajout.concat(etat.actions);
     etat.derniereAction = etat.actions[0].date;
-    etat.cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl,idMembers' });
+    etat.cartes = await trelloGet(`/boards/${c.board}/cards/all`, { fields: 'name,desc,idList,idLabels,closed,dateLastActivity,shortUrl,idMembers', attachments: 'true', attachment_fields: 'name' });
   }
   etat.chargeLe = new Date().toISOString();
   return ajout.length;
@@ -280,6 +280,9 @@ function construireRapportComplet(db) {
     }
   }
   for (const c of etat.cartes) { ajouterNum(c.id, c.name); ajouterNum(c.id, c.desc); }
+  // (03/11/2026) PDF « Facture-…-Fxxxx.pdf » actuellement joints aux cartes (y compris copiés d'une autre
+  // carte, sans action « ajout de pièce jointe ») : lien direct facture ↔ carte.
+  for (const c of etat.cartes) for (const at of (c.attachments || [])) { const nomPj = at.name || ''; ajouterNum(c.id, nomPj); if (!/avoir/i.test(nomPj)) numerosDans(nomPj).forEach((x) => { if (!pdfFacture.has(x)) pdfFacture.set(x, new Set()); pdfFacture.get(x).add(c.id); }); }
   // Pièces jointes lues (PDF) : leurs numéros de facture relient aussi la carte.
   const textesPj = pjTextes();
   for (const [id, l] of textesPj) for (const t of l) ajouterNum(id, t.texte);
