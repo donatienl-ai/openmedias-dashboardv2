@@ -588,12 +588,14 @@ const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remaini
 if(inv.internalStatus==='douteux' && !(filters && filters.has('douteux_manuel')) && !statutsK.includes('douteux_manuel'))return false;
 return remaining>0 && inv.internalStatus!=='solde' && (!inv.status||!FINANCE_HORS_RECOUVREMENT.includes(inv.status));
 });
-let totalEncours=0,montantEnRetard=0,nbEnRetard=0,montantActionable=0,nbActionable=0;
+let totalEncours=0,montantEnRetard=0,nbEnRetard=0,montantActionable=0,nbActionable=0,montantLitige=0,nbLitige=0,nbHorsLitige=0;
+// (03/11/2026, Lina) litige hors encours total, sauf quand on ne regarde que des litiges (onglet / recherche).
+const vueLitige=unpaid.length>0&&unpaid.every((i)=>i.internalStatus==='litige');
 const aging={j0_30:0,j31_60:0,j61_90:0,j90_plus:0};
 const parStatut={}; const retardParStatut={}; // vue "pipeline" : répartition de l'encours par statut interne, retard ou pas
 for(const inv of unpaid){
 const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
-totalEncours+=remaining;
+if(vueLitige||(inv.internalStatus||'')!=='litige'){ totalEncours+=remaining; nbHorsLitige++; } else { montantLitige+=remaining; nbLitige++; }
 const statut=inv.internalStatus||'a_relancer';
 if(!parStatut[statut])parStatut[statut]={count:0,montant:0};
 parStatut[statut].count+=1;
@@ -653,7 +655,9 @@ montantDouteux,
 nbDouteux:douteuxListe.length,
 montantEnRetard,
 nbFacturesEnRetard:nbEnRetard,
-nbFacturesTotal:unpaid.length,
+nbFacturesTotal:nbHorsLitige,
+montantLitige,
+nbLitige,
 montantActionable,
 nbFacturesActionable:nbActionable,
 tauxDeRetard,
@@ -746,8 +750,8 @@ const prevK=prevBounds?computeFinanceKpisFromCache(prevBounds):null;
 const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMontant}};
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
 wrap.innerHTML=`
-<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} factures </div>${vueGlobale&&k.nbDouteux>0?`<div class="kpi-lbl" style="color:var(--text-muted)" title="Tapez « douteux » dans la recherche pour les voir">+ ${fmtCACompact(k.montantDouteux)} de douteux non inclus (${k.nbDouteux})</div>`:''}</div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:${(k.montantActionable||0)>0?'#dc2626':'var(--text-muted)'}" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} factures en retard à relancer${((k.retardParStatut||{}).report_projet||{}).count?` · dont ${k.retardParStatut.report_projet.count} en report projet (${fmtCACompact(k.retardParStatut.report_projet.montant)})`:''}</div></div>
+<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} factures </div>${vueGlobale&&k.nbDouteux>0?`<div class="kpi-lbl" style="color:var(--text-muted)" title="Tapez « douteux » dans la recherche pour les voir">+ ${fmtCACompact(k.montantDouteux)} de douteux non inclus (${k.nbDouteux})</div>`:''}${k.nbLitige>0?`<div class="kpi-lbl" style="color:var(--text-muted)">+ ${fmtCACompact(k.montantLitige)} de litige non inclus (${k.nbLitige})</div>`:''}</div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:${(k.montantActionable||0)>0?'#dc2626':'var(--text-muted)'}" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} factures en retard${((k.retardParStatut||{}).report_projet||{}).count?` : <strong>${k.nbFacturesActionable-k.retardParStatut.report_projet.count} à relancer</strong> (${fmtCACompact(k.montantActionable-k.retardParStatut.report_projet.montant)}) · ${k.retardParStatut.report_projet.count} en report projet (${fmtCACompact(k.retardParStatut.report_projet.montant)})`:' à relancer'}</div></div>
 <div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${vueGlobale?k.tauxDeRetard+'%':'—'}</div><div class="kpi-lbl">${vueGlobale?'':'Calculé sur l\'onglet Toutes uniquement · '}${k.nbFacturesEnRetard} factures en retard, dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div></div>
 <div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${(k.dso!=null&&financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?k.dso+'j':'—'}</div><div class="kpi-lbl">${(financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?'':'Calculé sur l\'onglet Toutes uniquement · '}Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
@@ -1604,5 +1608,5 @@ function financeEstARecouvrer(inv){
   const reste=Number(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0))||0;
   if(reste<=1)return false;
   if(inv.status&&FINANCE_HORS_RECOUVREMENT.includes(inv.status))return false;
-  return inv.internalStatus!=='solde'&&inv.internalStatus!=='douteux';
+  return inv.internalStatus!=='solde'&&inv.internalStatus!=='douteux'&&inv.internalStatus!=='litige'; // litige hors « À recouvrer » (03/11/2026)
 }
