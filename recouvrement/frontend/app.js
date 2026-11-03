@@ -41,12 +41,16 @@ async function tryAutoLogin(){
 if(!commercialId)return false;
 try{
 const r=await fetch(`${API}/auth/me`,{headers:{'x-commercial-id':commercialId}});
-if(!r.ok)throw new Error('session invalide');
+if(r.status===401||r.status===403||r.status===404)throw new Error('session invalide');
+if(!r.ok)throw new Error('serveur indisponible');
 const d=await r.json();
 if(redirectAwayIfNotAllowed(d.accountRole,d.accountRoles))return true;
 activateSession(d);
 return true;
-}catch{
+}catch(e){
+// (03/11/2026) Serveur en redémarrage (502) ou coupure réseau : on garde la session et on réessaie,
+// au lieu de déconnecter la personne (cause des « je n'ai plus accès » après une mise à jour).
+if(!e||e.message!=='session invalide'){ setTimeout(()=>location.reload(),8000); return true; }
 // Compte supprimé/désactivé depuis, ou rôle non autorisé ici : on nettoie
 // pour retomber proprement sur l'écran de connexion.
 localStorage.removeItem('commercialId');
@@ -405,7 +409,12 @@ function financeAppliquerRestesReels(){
       // (03/11/2026, Lina) part payée d'après Trello (« 1/2 payé »…) → affichée comme acompte de la facture.
       if(inv._acomptesPennylane===undefined)inv._acomptesPennylane=inv.echeancesPennylane||null;
       const payeTrello=financeArrondi(ttc-Math.max(0,rr));
-      if(dec.statut!=='solde'&&payeTrello>0.5&&rr>0.5&&/pay[ée]|r[èe]glement\s*\d/i.test(dec.note||'')&&!((inv._acomptesPennylane&&inv._acomptesPennylane.acomptes)||[]).length){
+      const acPl=((inv._acomptesPennylane&&inv._acomptesPennylane.acomptes)||[]);
+      if(dec.statut!=='solde'&&payeTrello>0.5&&rr>0.5&&acPl.length&&/pay[ée]|r[èe]glement\s*\d/i.test(dec.note||'')){
+        // Échéancier Pennylane existant : les échéances sont marquées réglées dans l'ordre, à hauteur de la part payée d'après Trello.
+        let resteP=payeTrello;
+        inv.echeancesPennylane=Object.assign({},inv._acomptesPennylane,{acomptes:acPl.map((a)=>{ const m=Number(a.montant)||0; if(resteP>0.5&&m>0){ const r=Math.min(m,resteP); resteP-=r; return Object.assign({},a,{etat:r>=m-0.5?'soldee':'partielle',regle:financeArrondi(r),resteAPayer:financeArrondi(m-r),trello:true}); } return a; })});
+      }else if(dec.statut!=='solde'&&payeTrello>0.5&&rr>0.5&&/pay[ée]|r[èe]glement\s*\d/i.test(dec.note||'')){
         inv.echeancesPennylane=Object.assign({},inv._acomptesPennylane||{},{acomptes:[
           {type:'acompte',rang:1,etat:'soldee',date:null,montant:payeTrello,regle:payeTrello,resteAPayer:0,trello:true},
           {type:'solde',rang:2,etat:inv.status==='late'?'en_retard':'a_venir',date:inv.deadline||null,montant:financeArrondi(rr),regle:0,resteAPayer:financeArrondi(rr),trello:true}]});
