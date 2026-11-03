@@ -8,6 +8,9 @@
 const TRELLO_API = 'https://api.trello.com/1';
 const DEPUIS = '2025-01-01T00:00:00.000Z';
 const LECTEURS = ['arianesmirnoff', 'comptaopenmedias']; // Ariane + compte Comptabilité
+// (03/11/2026, Lina) Paiements lus dans les commentaires : désactivés. Les étiquettes (« 1/2 payé »…)
+// et Pennylane font foi ; un commentaire comme « relancé 6k » faussait le reste dû (F7236).
+const PAIEMENTS_COMMENTAIRES = false;
 const LISTES_RECOUVREMENT = ['RECOUVREMENT', 'STAND BY TRESORERIE / PROBLEMATIQUES', 'ANNULATIONS', 'Projets Groupe SCP', 'Projets SCP', 'Clients Forbes - Stand By'];
 const FILTRE_ACTIONS = 'commentCard,updateComment,deleteComment,updateCard,addAttachmentToCard,createCard,addLabelToCard,removeLabelFromCard';
 
@@ -259,6 +262,7 @@ function construireRapportComplet(db) {
 
   // Commentaires et pièces jointes par carte
   const comms = new Map(); const nums = new Map();
+  const pdfFacture = new Map(); // n° de facture → cartes qui portent son PDF (lien direct, 03/11/2026)
   const ajouterNum = (id, txt) => { if (!id) return; const s = nums.get(id) || new Set(); numerosDans(txt).forEach((x) => s.add(x)); nums.set(id, s); };
   for (const a of etat.actions) {
     const id = a.data && a.data.card && a.data.card.id;
@@ -267,7 +271,13 @@ function construireRapportComplet(db) {
       ajouterNum(id, a.data.text);
       if (lecteurs.has(a.idMemberCreator)) { if (!comms.has(id)) comms.set(id, []); comms.get(id).push({ date: a.date, texte: a.data.text || '' }); }
     }
-    if (a.type === 'addAttachmentToCard') ajouterNum(id, a.data.attachment && a.data.attachment.name);
+    if (a.type === 'addAttachmentToCard') {
+      const nomPj = (a.data.attachment && a.data.attachment.name) || '';
+      ajouterNum(id, nomPj);
+      // (03/11/2026, Lina) la carte qui porte le PDF de la facture est SA carte : les autres
+      // cartes du même client qui la citent ne lui donnent plus leurs étiquettes (F7065, F7460…).
+      if (!/avoir/i.test(nomPj)) numerosDans(nomPj).forEach((x) => { if (!pdfFacture.has(x)) pdfFacture.set(x, new Set()); pdfFacture.get(x).add(id); });
+    }
   }
   for (const c of etat.cartes) { ajouterNum(c.id, c.name); ajouterNum(c.id, c.desc); }
   // Pièces jointes lues (PDF) : leurs numéros de facture relient aussi la carte.
@@ -311,6 +321,7 @@ function construireRapportComplet(db) {
     let liees = [];
     const cites = [...(nums.get(carte.id) || [])];
     for (const n of cites) {
+      const pc = pdfFacture.get(n); if (pc && !pc.has(carte.id)) continue; // facture rattachée à la carte qui porte son PDF
       const fs = parNumero.get(n);
       if (fs) liees.push(...fs.filter(dansPerimetre));
       else if (Number(n.slice(1)) >= 5300 && carte.dateLastActivity >= DEPUIS) rapport.numerosInconnus.push({ carte: carte.name, numero: n, lien: carte.shortUrl });
@@ -347,8 +358,8 @@ function construireRapportComplet(db) {
       dernierCommentaire: dernierCom ? `${dateFR(dernierCom.date)} : ${extrait(dernierCom.texte)}` : null, lien: carte.shortUrl,
     });
 
-    // SCP : à retirer du dashboard
-    if (/SCP/i.test(liste)) { liees.forEach((f) => rapport.scp.push({ facture: f.invoice_number, client: f.client, montant: f.amount })); continue; }
+    // SCP et Clients Forbes (03/11/2026, Lina) : à retirer du dashboard
+    if (/SCP|forbes/i.test(liste)) { liees.forEach((f) => rapport.scp.push({ facture: f.invoice_number, client: f.client, montant: f.amount })); continue; }
 
     // A. « Soldée » dans Trello mais restant dû dans Pennylane
     if (labels.includes('Soldée') && ouvertes.length) {
@@ -690,7 +701,7 @@ function construireRapportComplet(db) {
       const coms = (tousComms.get(carte.id) || []).slice().sort((a, c) => (a.date < c.date ? -1 : 1));
       const ouvertes = invs.filter((f) => restant(f) > 1);
       for (const c of coms) {
-        if (!c.date || !estPaiement(c.texte || '')) continue;
+        if (!PAIEMENTS_COMMENTAIRES || !c.date || !estPaiement(c.texte || '')) continue;
         const m = montantDans(c.texte); if (!m) continue;
         const dispo = ouvertes.filter((f) => String(f.date_emission) <= c.date.slice(0, 10)); if (!dispo.length) continue;
         const numF = (f) => String(f.invoice_number || '').toUpperCase().replace(/\s|-/g, '');
@@ -735,6 +746,9 @@ function construireRapportComplet(db) {
       if (statut !== 'solde' && (bas.includes('report projet') || listeReports.has(carte.idList))) {
         statut = 'report_projet'; lien = carte.shortUrl; notes.push(bas.includes('report projet') ? 'Trello : étiquette « report projet »' : 'Trello : carte dans la liste « Reports projets »');
       }
+      // (03/11/2026, Lina) report confirmé par nous en commentaire, même sans étiquette (F7170).
+      const comReport = (tousComms.get(carte.id) || []).find((c) => /je vous confirme le report|report (du projet|de la diffusion)[^.\n]{0,40}(confirm|valid|act[ée])|(projet|diffusion) report[ée]e? (au|à|en|sur)\b/i.test(c.texte || ''));
+      if (statut !== 'solde' && statut !== 'report_projet' && comReport) { statut = 'report_projet'; lien = carte.shortUrl; notes.push(`Trello le ${dateFR(comReport.date)} : report confirmé en commentaire → Report projet`); }
       // (fractions et paiements : calculés par carte, voir allocationCarte ci-dessus)
     }
     if (statut !== 'solde') {
@@ -877,7 +891,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       try {
         await rafraichir(); etat.erreur = null;
         try { appliquerDouteuxTrello(db); } catch (e) { console.warn('[trello] douteux :', e.message); }
-        try { appliquerLitigeForbes(db); } catch (e) { console.warn('[trello] Forbes :', e.message); }
+        // (03/11/2026, Lina) liste « Clients Forbes » retirée du dashboard : plus de passage en Litige.
         try { appliquerReportsProjets(db); } catch (e) { console.warn('[trello] Reports projets :', e.message); }
         try { appliquerDecisionsTrello(db); } catch (e) { console.warn('[trello] décisions :', e.message); }
         await lirePiecesJointes();
@@ -918,7 +932,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       const r = construireRapport(db);
       const items = [];
       for (const x of r.incoherences) items.push({ id: x.id, facture: x.facture, raison: `${x.raison}.${x.detail ? ' ' + x.detail : ''}`, lien: x.lien });
-      for (const x of r.vieillesFactures) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
+      // (03/11/2026, Lina) vieilles factures : écart Pennylane / promesse / demande client → plus dans « À vérifier » (Trello prime)
       for (const x of r.anomaliesCalcul || []) items.push({ id: x.id, facture: x.facture, raison: x.raison, lien: x.lien });
       for (const x of r.nouveauxDouteux) items.push({ id: x.id, facture: x.facture, raison: 'Marquée « client douteux » dans Trello mais pas Douteux dans le dashboard.', lien: x.lien });
       // scp : numéros des factures des cartes de la liste Trello « Projets SCP »,
