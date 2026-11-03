@@ -390,6 +390,8 @@ function financeAppliquerRestesReels(){
     const pl=Number(inv._restePennylane)||0;
     if(inv._resteHtPennylane===undefined)inv._resteHtPennylane=inv.remainingAmountHt;
     inv.remainingAmountTtc=pl; inv.remainingAmountHt=inv._resteHtPennylane; inv.internalStatus=inv._statutOrigine||null; inv._resteReel=null; inv._notesCalcul=[]; if(inv._acomptesPennylane!==undefined)inv.echeancesPennylane=inv._acomptesPennylane;
+    // (03/11/2026) une facture = un seul acompte « montant illisible » (ex. CRABINVEST F7457/F7458) : le montant est celui de la facture.
+    { const ep=inv.echeancesPennylane; if(ep&&ep.acomptes&&ep.acomptes.length===1&&ep.acomptes[0].montant==null&&Number(inv.amountTtc)>0){ const t=Number(inv.amountTtc)||0, r0=Number(inv._restePennylane)||0; if(inv._acomptesPennylane===undefined)inv._acomptesPennylane=ep; inv.echeancesPennylane=Object.assign({},ep,{acomptes:[Object.assign({},ep.acomptes[0],{montant:t,regle:financeArrondi(t-r0),resteAPayer:r0,etat:r0<=1?'soldee':(t-r0>1?'partielle':(inv.status==='late'?'en_retard':'a_venir')),alerte:null})]}); } }
     const setReste=(v)=>{ inv.remainingAmountTtc=v; const a=Number(inv.amountTtc)||0, h=Number(inv.amountHt)||0; inv.remainingAmountHt=financeArrondi(v*(a?h/a:1/1.2)); };
     const ttc=Number(inv.amountTtc!=null?inv.amountTtc:inv.amount)||0;
     // Factures annulées / archivées : hors recouvrement, Pennylane y laisse parfois un reste.
@@ -401,8 +403,8 @@ function financeAppliquerRestesReels(){
     // Trello prioritaire : statut et reste dû décidés côté serveur (étiquettes, « soldée », paiements, fractions).
     const dec=financeDecisionsTrello.get(String(inv.id));
     inv._noteTrello=dec&&dec.note?dec.note:'';
-    if(dec&&(dec.statut==='solde'||dec.statut==='report_projet'||dec.resteReel!=null)){
-      if(dec.statut==='solde'||dec.statut==='report_projet')inv.internalStatus=dec.statut;
+    if(dec&&(dec.statut==='solde'||dec.statut==='report_projet'||dec.statut==='litige'||dec.resteReel!=null)){
+      if(dec.statut==='solde'||dec.statut==='report_projet'||dec.statut==='litige')inv.internalStatus=dec.statut;
       let rr=dec.statut==='solde'?0:(dec.resteReel!=null?Number(dec.resteReel):pl);
       if(dec.statut!=='solde'&&totAv>0&&pl>ttc-totAv+1)rr=Math.min(rr,financeArrondi(pl-totAv));
       if(Math.abs(rr-pl)>0.5){ inv._resteReel={pennylane:pl,avoirs:totAv,reel:rr,nums,trello:true}; setReste(Math.max(0,rr)); }
