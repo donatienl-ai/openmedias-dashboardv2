@@ -21,7 +21,7 @@ async function fetchWithRetry(url, maxRetries = 5) {
     const res = await fetch(url, { headers: { Authorization: authHeader() } });
     if (res.status === 429) {
       const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
-      const waitMs = retryAfter > 0 ? retryAfter * 1000 : (attempt + 1) * 2000;
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : (attempt + 1) * 3000;
       await sleep(waitMs);
       continue;
     }
@@ -185,14 +185,19 @@ export async function getRdvBookedInRange({ start, end }) {
  * Récupère l'utm_source de l'invitee d'un event (1 appel API par event).
  * Renvoie '' si erreur sur cet event (on ne fait pas planter tout le calcul).
  */
-async function getInviteeUtmSource(record) {
-  try {
-    const data = await fetchWithRetry(`${record.uri}/invitees?count=1`);
-    const invitee = data.collection?.[0];
-    return (invitee?.tracking?.utm_source || '').toLowerCase().trim();
-  } catch {
-    return '';
+// utm_source d'un RDV : ne change jamais → gardé en mémoire, partagé entre les tuiles
+// SalesForge et Newsletter (avant : 1 appel Calendly par RDV à chaque calcul, en double,
+// d'où les « Calendly failed (429) » sur un mois complet). Une erreur n'est pas gardée.
+const utmCache = new Map();
+function getInviteeUtmSource(record) {
+  if (!record.uri) return Promise.resolve('');
+  if (!utmCache.has(record.uri)) {
+    const p = fetchWithRetry(`${record.uri}/invitees?count=1`)
+      .then((data) => ((data.collection?.[0]?.tracking?.utm_source) || '').toLowerCase().trim());
+    utmCache.set(record.uri, p);
+    p.catch(() => utmCache.delete(record.uri));
   }
+  return utmCache.get(record.uri).catch(() => '');
 }
 
 /**
@@ -218,7 +223,7 @@ export async function getSalesforgeRdv({ start, end }) {
   }
 
   // Invitees par paquets parallèles de 10
-  const BATCH = 10;
+  const BATCH = 5; // 5 appels en parallèle (quota Calendly)
   const salesforgeRecords = [];
   for (let i = 0; i < createdInRange.length; i += BATCH) {
     const batch = createdInRange.slice(i, i + BATCH);
@@ -251,7 +256,7 @@ export async function getNewsletterRdv({ start, end }) {
   }
 
   // Récupère les utm_source par paquets de 10
-  const BATCH = 10;
+  const BATCH = 5; // 5 appels en parallèle (quota Calendly)
   const nlRecords = [];
   for (let i = 0; i < createdInRange.length; i += BATCH) {
     const batch = createdInRange.slice(i, i + BATCH);
