@@ -2400,7 +2400,7 @@ export default function App() {
     const storedId = localStorage.getItem('commercialId');
     if (storedId) {
       let reessai = false; // serveur indisponible : on garde l'écran d'attente et on réessaie
-      fetch('api/auth/me', { headers: { 'x-commercial-id': storedId } })
+      fetch('/planning/api/auth/me', { headers: { 'x-commercial-id': storedId } }) // (03/11/2026) bonne adresse : 'api/auth/me' renvoyait la page HTML
         .then((r) => { if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error('session invalide'); if (!r.ok) throw new Error('serveur indisponible'); return r.json(); })
         .then((d) => {
           const cred = {
