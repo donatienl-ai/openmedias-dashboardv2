@@ -362,8 +362,8 @@ function construireRapportComplet(db) {
       dernierCommentaire: dernierCom ? `${dateFR(dernierCom.date)} : ${extrait(dernierCom.texte)}` : null, lien: carte.shortUrl,
     });
 
-    // SCP et Clients Forbes (03/11/2026, Lina) : à retirer du dashboard
-    if (/SCP|forbes/i.test(liste)) { liees.forEach((f) => rapport.scp.push({ facture: f.invoice_number, client: f.client, montant: f.amount })); continue; }
+    // SCP : à retirer du dashboard (Clients Forbes remis en Litige le 03/11/2026, Lina)
+    if (/SCP/i.test(liste)) { liees.forEach((f) => rapport.scp.push({ facture: f.invoice_number, client: f.client, montant: f.amount })); continue; }
 
     // A. « Soldée » dans Trello mais restant dû dans Pennylane
     if (labels.includes('Soldée') && ouvertes.length) {
@@ -672,6 +672,7 @@ function construireRapportComplet(db) {
     return null;
   };
   const listeReports = new Set(b.lists.filter((l) => /^reports? projets?$/i.test(String(l.name || '').trim())).map((l) => l.id));
+  const listeForbes = new Set(b.lists.filter((l) => /forbes/i.test(String(l.name || ''))).map((l) => l.id)); // (03/11/2026) Forbes → Litige
   // Répartition PAR CARTE (02/11/2026, règles Lina) : une carte peut porter plusieurs
   // factures (acomptes). On ne met plus rien « à vérifier » pour ça, on classe :
   //  • étiquette « 1/2 payé », « règlement 20 % »… = part payée du PROJET (somme des
@@ -755,6 +756,8 @@ function construireRapportComplet(db) {
       // (03/11/2026, Lina) report confirmé par nous en commentaire, même sans étiquette (F7170).
       const comReport = (tousComms.get(carte.id) || []).find((c) => /je vous confirme le report|report (du projet|de la diffusion)[^.\n]{0,40}(confirm|valid|act[ée])|(projet|diffusion) report[ée]e? (au|à|en|sur)\b/i.test(c.texte || ''));
       if (statut !== 'solde' && statut !== 'report_projet' && comReport) { statut = 'report_projet'; lien = carte.shortUrl; notes.push(`Trello le ${dateFR(comReport.date)} : report confirmé en commentaire → Report projet`); }
+      // (03/11/2026, Lina) carte dans la liste « Clients Forbes » → Litige (passe avant le report).
+      if (statut !== 'solde' && listeForbes.has(carte.idList)) { statut = 'litige'; lien = carte.shortUrl; notes.push('Trello : carte dans la liste « Clients Forbes - Stand By » → Litige'); }
       // (fractions et paiements : calculés par carte, voir allocationCarte ci-dessus)
     }
     if (statut !== 'solde') {
@@ -897,7 +900,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       try {
         await rafraichir(); etat.erreur = null;
         try { appliquerDouteuxTrello(db); } catch (e) { console.warn('[trello] douteux :', e.message); }
-        // (03/11/2026, Lina) liste « Clients Forbes » retirée du dashboard : plus de passage en Litige.
+        try { appliquerLitigeForbes(db); } catch (e) { console.warn('[trello] Forbes :', e.message); } // Forbes remis en Litige (03/11/2026, Lina)
         try { appliquerReportsProjets(db); } catch (e) { console.warn('[trello] Reports projets :', e.message); }
         try { appliquerDecisionsTrello(db); } catch (e) { console.warn('[trello] décisions :', e.message); }
         await lirePiecesJointes();
@@ -945,7 +948,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       // retirées du dashboard et des calculs (15/10/2026, demande Lina).
       // Trello prioritaire (02/11/2026) : une facture déjà classée d'après Trello (Soldée, Report
       // projet, reste dû recalculé) ne va plus dans « À vérifier » ; F5885 (avoir de 2022) exclue.
-      const decisions = (r.decisionsTrello || []).filter((d) => d.statut === 'solde' || d.statut === 'report_projet' || d.resteReel != null)
+      const decisions = (r.decisionsTrello || []).filter((d) => d.statut === 'solde' || d.statut === 'report_projet' || d.statut === 'litige' || d.resteReel != null)
         .map((d) => ({ id: d.id, statut: d.statut, resteReel: d.resteReel, note: d.note }));
       const classees = new Set(decisions.map((d) => String(d.id)));
       // (03/11/2026) Groupe SCP retiré du dashboard : ses avoirs non plus (ex. F7213).
