@@ -377,14 +377,15 @@ const FINANCE_STATUTS_SOLDABLES_AUTO=['','a_relancer','en_cours'];
 function financeArrondi(v){ return Math.round((Number(v)||0)*100)/100; }
 function financeAppliquerRestesReels(){
   financeInvoicesCache=financeInvoicesCache.filter((i)=>i.invoiceNumber!=='F5885'); // avoir de 2022 : exclu du dashboard (Lina)
-  const ajout=(inv,raison)=>{ const k=String(inv.id); if(!financeAVerifier.has(k))financeAVerifier.set(k,[]); const l=financeAVerifier.get(k); if(!l.some(x=>x.raison===raison))l.push({id:inv.id,facture:inv.invoiceNumber,raison,lien:null,calcul:true}); };
+  // (03/11/2026, Lina) un écart avec Pennylane seul n'est plus « À vérifier » : simple note sur la fiche (Trello prime).
+  const ajout=(inv,raison)=>{ inv._notesCalcul=inv._notesCalcul||[]; if(!inv._notesCalcul.includes(raison))inv._notesCalcul.push(raison); };
   for(const [k,l] of financeAVerifier){ const r=l.filter(x=>!x.calcul); if(r.length)financeAVerifier.set(k,r); else financeAVerifier.delete(k); }
   for(const inv of financeInvoicesCache){
     if(inv._restePennylane===undefined)inv._restePennylane=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
     if(inv._statutOrigine===undefined)inv._statutOrigine=inv.internalStatus||'';
     const pl=Number(inv._restePennylane)||0;
     if(inv._resteHtPennylane===undefined)inv._resteHtPennylane=inv.remainingAmountHt;
-    inv.remainingAmountTtc=pl; inv.remainingAmountHt=inv._resteHtPennylane; inv.internalStatus=inv._statutOrigine||null; inv._resteReel=null;
+    inv.remainingAmountTtc=pl; inv.remainingAmountHt=inv._resteHtPennylane; inv.internalStatus=inv._statutOrigine||null; inv._resteReel=null; inv._notesCalcul=[]; if(inv._acomptesPennylane!==undefined)inv.echeancesPennylane=inv._acomptesPennylane;
     const setReste=(v)=>{ inv.remainingAmountTtc=v; const a=Number(inv.amountTtc)||0, h=Number(inv.amountHt)||0; inv.remainingAmountHt=financeArrondi(v*(a?h/a:1/1.2)); };
     const ttc=Number(inv.amountTtc!=null?inv.amountTtc:inv.amount)||0;
     // Factures annulées / archivées : hors recouvrement, Pennylane y laisse parfois un reste.
@@ -401,6 +402,14 @@ function financeAppliquerRestesReels(){
       let rr=dec.statut==='solde'?0:(dec.resteReel!=null?Number(dec.resteReel):pl);
       if(dec.statut!=='solde'&&totAv>0&&pl>ttc-totAv+1)rr=Math.min(rr,financeArrondi(pl-totAv));
       if(Math.abs(rr-pl)>0.5){ inv._resteReel={pennylane:pl,avoirs:totAv,reel:rr,nums,trello:true}; setReste(Math.max(0,rr)); }
+      // (03/11/2026, Lina) part payée d'après Trello (« 1/2 payé »…) → affichée comme acompte de la facture.
+      if(inv._acomptesPennylane===undefined)inv._acomptesPennylane=inv.echeancesPennylane||null;
+      const payeTrello=financeArrondi(ttc-Math.max(0,rr));
+      if(dec.statut!=='solde'&&payeTrello>0.5&&rr>0.5&&/pay[ée]|r[èe]glement\s*\d/i.test(dec.note||'')&&!((inv._acomptesPennylane&&inv._acomptesPennylane.acomptes)||[]).length){
+        inv.echeancesPennylane=Object.assign({},inv._acomptesPennylane||{},{acomptes:[
+          {type:'acompte',rang:1,etat:'soldee',date:null,montant:payeTrello,regle:payeTrello,resteAPayer:0,trello:true},
+          {type:'solde',rang:2,etat:inv.status==='late'?'en_retard':'a_venir',date:inv.deadline||null,montant:financeArrondi(rr),regle:0,resteAPayer:financeArrondi(rr),trello:true}]});
+      }
       continue;
     }
     if(totAv>0 && pl>ttc-totAv+1){
@@ -465,7 +474,8 @@ function financeAVerifierHtml(inv){
 const items=(financeAVerifier.get(String(inv&&inv.id))||[]).slice();
 const partiel=financePartielsTrello.get(String(inv&&inv.id));
 if(partiel)items.unshift({raison:`Paiement partiel selon Trello : ${(partiel.details||[]).join(', ')} (total ${Number(partiel.montant).toLocaleString('fr-FR')} €), pas encore rapproché dans Pennylane.`});
-const noteTrello=inv&&inv._noteTrello?inv._noteTrello:((financeInvoicesCache.find((i)=>String(i.id)===String(inv&&inv.id))||{})._noteTrello||'');
+const invC=(inv&&inv._notesCalcul)?inv:(financeInvoicesCache.find((i)=>String(i.id)===String(inv&&inv.id))||inv||{});
+const noteTrello=[invC._noteTrello||(inv&&inv._noteTrello)||'',...(invC._notesCalcul||[])].filter(Boolean).join(' · ');
 const infoTrello=noteTrello?'<div class="finance-detail-section" style="border-left:3px solid #94a3b8;padding-left:10px"><div class="form-label">D\'après Trello</div><div style="font-size:12px;margin:2px 0">'+String(noteTrello).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))+'</div></div>':'';
 if(!items.length)return infoTrello;
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1415,7 +1425,7 @@ const detail=a.etat==='partielle'||(a.etat==='en_retard'&&a.regle>0)?' · régl�
 const alerte=a.alerte?'<div style="font-size:11px;color:#b45309;margin-top:2px">⚠ '+esc(a.alerte)+' — à corriger dans Pennylane</div>':'';
 return '<div class="finance-installment-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border,#e5e7eb)">'
 +'<strong style="font-size:12px">'+esc(nom)+'</strong>'
-+'<span style="font-size:12px">'+(a.date?formatDateFR(a.date):'date ?')+' · '+(a.montant!=null?fmtCA(a.montant):'montant ?')+esc(detail)+'</span>'
++'<span style="font-size:12px">'+(a.date?formatDateFR(a.date):(a.trello?'d’après Trello':'date ?'))+' · '+(a.montant!=null?fmtCA(a.montant):'montant ?')+esc(detail)+'</span>'
 +'<span style="margin-left:auto;font-size:11px;font-weight:600;color:'+col+'">'+lib+'</span>'
 +'<div style="flex-basis:100%;font-size:10px;color:var(--text-muted)">Source : Pennylane</div>'+alerte+'</div>';
 }).join('');
