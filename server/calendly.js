@@ -186,18 +186,49 @@ export async function getRdvBookedInRange({ start, end }) {
  * Renvoie '' si erreur sur cet event (on ne fait pas planter tout le calcul).
  */
 // utm_source d'un RDV : ne change jamais → gardé en mémoire, partagé entre les tuiles
-// SalesForge et Newsletter (avant : 1 appel Calendly par RDV à chaque calcul, en double,
-// d'où les « Calendly failed (429) » sur un mois complet). Une erreur n'est pas gardée.
+// SalesForge et Newsletter. Les appels Calendly (1 par RDV) partent EN TÂCHE DE FOND,
+// 5 à la fois : le dashboard n'attend jamais plus de 20 s (avant : « Calendly failed (429) »
+// ou calcul bloqué plusieurs minutes sur un mois complet). Une erreur n'est pas gardée.
 const utmCache = new Map();
+const utmResolu = new Map();
 function getInviteeUtmSource(record) {
   if (!record.uri) return Promise.resolve('');
   if (!utmCache.has(record.uri)) {
     const p = fetchWithRetry(`${record.uri}/invitees?count=1`)
-      .then((data) => ((data.collection?.[0]?.tracking?.utm_source) || '').toLowerCase().trim());
+      .then((data) => ((data.collection?.[0]?.tracking?.utm_source) || '').toLowerCase().trim())
+      .then((src) => { utmResolu.set(record.uri, src); return src; });
     utmCache.set(record.uri, p);
     p.catch(() => utmCache.delete(record.uri));
   }
   return utmCache.get(record.uri).catch(() => '');
+}
+const utmFile = [];
+const utmEnFile = new Set();
+let utmTravail = null;
+function remplirUtmEnFond(records) {
+  for (const r of records) {
+    if (r.uri && !utmResolu.has(r.uri) && !utmEnFile.has(r.uri)) { utmEnFile.add(r.uri); utmFile.push(r); }
+  }
+  if (utmTravail || !utmFile.length) return;
+  utmTravail = (async () => {
+    while (utmFile.length) {
+      const lot = utmFile.splice(0, 5);
+      await Promise.all(lot.map((r) => getInviteeUtmSource(r)));
+      lot.forEach((r) => utmEnFile.delete(r.uri));
+      await sleep(300);
+    }
+  })().finally(() => { utmTravail = null; });
+}
+async function attendreUtm(records, ms = 20000) {
+  remplirUtmEnFond(records);
+  const fin = Date.now() + ms;
+  const manque = () => records.filter((r) => r.uri && !utmResolu.has(r.uri)).length;
+  while (manque() && Date.now() < fin) await sleep(500);
+  const m = manque();
+  if (m) {
+    remplirUtmEnFond(records);
+    throw new Error(`analyse des RDV Calendly en cours (${records.length - m}/${records.length} faits) : réessaie dans quelques minutes`);
+  }
 }
 
 /**
@@ -223,15 +254,8 @@ export async function getSalesforgeRdv({ start, end }) {
   }
 
   // Invitees par paquets parallèles de 10
-  const BATCH = 5; // 5 appels en parallèle (quota Calendly)
-  const salesforgeRecords = [];
-  for (let i = 0; i < createdInRange.length; i += BATCH) {
-    const batch = createdInRange.slice(i, i + BATCH);
-    const sources = await Promise.all(batch.map(getInviteeUtmSource));
-    sources.forEach((src, j) => {
-      if (src === 'salesforge') salesforgeRecords.push(batch[j]);
-    });
-  }
+  await attendreUtm(createdInRange);
+  const salesforgeRecords = createdInRange.filter((r) => utmResolu.get(r.uri) === 'salesforge');
 
   return withTotal(groupByHost(salesforgeRecords));
 }
@@ -256,15 +280,8 @@ export async function getNewsletterRdv({ start, end }) {
   }
 
   // Récupère les utm_source par paquets de 10
-  const BATCH = 5; // 5 appels en parallèle (quota Calendly)
-  const nlRecords = [];
-  for (let i = 0; i < createdInRange.length; i += BATCH) {
-    const batch = createdInRange.slice(i, i + BATCH);
-    const sources = await Promise.all(batch.map(getInviteeUtmSource));
-    sources.forEach((src, j) => {
-      if (src === 'newsletter') nlRecords.push(batch[j]);
-    });
-  }
+  await attendreUtm(createdInRange);
+  const nlRecords = createdInRange.filter((r) => utmResolu.get(r.uri) === 'newsletter');
 
   // Grouper par manager (NL_MANAGERS uniquement)
   const counts = {};
