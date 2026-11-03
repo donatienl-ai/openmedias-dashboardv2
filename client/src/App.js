@@ -2399,8 +2399,9 @@ export default function App() {
     // du portail unique (pas de re-login en changeant d'onglet/de page).
     const storedId = localStorage.getItem('commercialId');
     if (storedId) {
+      let reessai = false; // serveur indisponible : on garde l'écran d'attente et on réessaie
       fetch('api/auth/me', { headers: { 'x-commercial-id': storedId } })
-        .then((r) => { if (!r.ok) throw new Error('session invalide'); return r.json(); })
+        .then((r) => { if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error('session invalide'); if (!r.ok) throw new Error('serveur indisponible'); return r.json(); })
         .then((d) => {
           const cred = {
             mode: 'commercial', commercialId: d.commercial_id, nom: d.nom,
@@ -2417,11 +2418,14 @@ export default function App() {
           sessionStorage.setItem('om_cred', JSON.stringify(cred));
           setPassword(cred);
         })
-        .catch(() => {
+        .catch((e) => {
+          // (03/11/2026) Serveur en redémarrage (502) ou coupure réseau : on garde la session et on
+          // réessaie, au lieu de déconnecter la personne (cause des « je n'ai plus accès au planning »).
+          if (!e || e.message !== 'session invalide') { reessai = true; setTimeout(() => window.location.reload(), 8000); return; }
           // Compte supprimé/désactivé depuis : on nettoie pour retomber sur l'écran de connexion.
           localStorage.removeItem('commercialId'); localStorage.removeItem('commercialNom');
         })
-        .finally(() => setCheckingSession(false));
+        .finally(() => { if (!reessai) setCheckingSession(false); });
     } else {
       setCheckingSession(false);
     }
