@@ -1063,14 +1063,26 @@ openFinanceInvoiceDetail(invId);
 // autres pastilles, la modification en direct se fait via la pastille complète
 // dans la fiche détail.
 function financeDeadlineDotHtml(inv){
+{ const a1=financeAcomptesAuto(inv)[0]; if(a1&&!inv.deadlineStatusColor&&(financeAcomptesAuto(inv).length>1||a1.trello))return financeAcompteDotHtml(inv,a1,false); }
 const color=inv.deadlineStatusColor||'var(--text-muted)';
 const label=inv.deadlineStatusLabel||'—';
 const title=`${label} — échéance 1`.replace(/"/g,'&quot;');
 return `<button type="button" class="finance-installment-dot" style="background:${color}" title="${title}" onclick="openFinanceInvoiceDetail('${inv.id}')"></button>`;
 }
+// (03/11/2026, Lina) Échéancier lu dans Pennylane (mention de la facture), complété par Trello (« 1/2 payé »…) :
+// affiché dans les colonnes Éch. 1 à 4 quand aucune échéance n'a été saisie à la main (ex. F7479).
+const FINANCE_ACOMPTE_ETAT={soldee:['Réglé','#16a34a'],partielle:['Partiellement réglé','#d97706'],en_retard:['En retard','#dc2626'],a_venir:['À venir','#64748b'],inconnu:['État inconnu','#64748b']};
+function financeAcomptesAuto(inv){ return (!(inv.installments||[]).length&&inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[]; }
+function financeAcompteDotHtml(inv,a,avecDate){
+const e=FINANCE_ACOMPTE_ETAT[a.etat]||FINANCE_ACOMPTE_ETAT.inconnu;
+const title=`${e[0]}${a.trello?' (d’après Trello)':''} — ${a.date?formatDateFR(a.date):'date ?'} · ${a.montant!=null?fmtCA(a.montant):'montant ?'}${a.regle?' · réglé '+fmtCA(a.regle):''}`.replace(/"/g,'&quot;');
+return `<button type="button" class="finance-installment-dot" style="background:${e[1]}" title="${title}" onclick="openFinanceInvoiceDetail('${inv.id}')"></button>`+(avecDate?`<div class="finance-relance-badge" style="margin-top:2px">${a.date?formatDateFR(a.date):''}</div>`:'');
+}
 function financeInstallmentCellHtml(inv,idx){
 const list=inv.installments||[];
 const inst=list[idx];
+const acAuto=financeAcomptesAuto(inv);
+if(!inst&&acAuto.length>1&&acAuto[idx+1])return financeAcompteDotHtml(inv,acAuto[idx+1],true)+((idx===2&&acAuto.length>4)?`<span class="finance-installment-more">+${acAuto.length-4}</span>`:'');
 if(!inst)return `<button type="button" class="finance-installment-add-btn" title="Ajouter une échéance" onclick="openFinanceInstallmentQuickAdd(event,'${inv.id}')">+</button>`;
 const color=inst.statusColor||'var(--text-muted)';
 const label=inst.statusLabel||'—';
