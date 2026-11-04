@@ -12,8 +12,10 @@ name: Radar — mise à jour du catalogue
 #   12:00 UTC -> 14h00 Paris (été) / 13h00 Paris (hiver)
 on:
   schedule:
-    - cron: "30 8 * * *"
-    - cron: "0 12 * * *"
+    # 04/11/2026 (Lina) : une seule mise à jour par jour, à 20h Paris (heure
+    # d'hiver, UTC+1 ; 21h en été). Le commit du Radar redéploie le site sur
+    # Render (coupure ~2 min) : on le fait hors des heures de travail.
+    - cron: "0 19 * * *"
   workflow_dispatch:
     inputs:
       mode:
