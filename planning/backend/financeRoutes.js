@@ -18,7 +18,7 @@ function echeancesPennylaneDe(r) {
   }
 }
 
-module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES }) {
+module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES, sansModules = false }) {
   function joursDeRetard(deadline) {
     if (!deadline) return null;
     const d = new Date(`${deadline}T00:00:00`);
@@ -602,9 +602,13 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
   });
 
   // Import Excel des créances douteuses (29/09/2026)
-  require('./creancesDouteuses')(app, { db, requireFinance });
+  // sansModules : utilisé par le test des contrôles d'accès (base factice), qui ne
+  // vérifie que les routes ci-dessus. Chargements protégés : un module qui plante
+  // n'empêche plus le reste du recouvrement de démarrer (04/11/2026).
+  if (sansModules) return;
+  try { require('./creancesDouteuses')(app, { db, requireFinance }); } catch (e) { console.warn('[finance] creancesDouteuses indisponible :', e.message); }
   // Diagnostic avoirs / doublons Pennylane (29/09/2026)
-  require('./financeAvoirs')(app, { db, requireFinance });
+  try { require('./financeAvoirs')(app, { db, requireFinance }); } catch (e) { console.warn('[finance] financeAvoirs indisponible :', e.message); }
   // Trello × recouvrement, lecture seule (14/10/2026). Chargement protégé : si le
   // module manque ou plante, le reste du recouvrement fonctionne normalement.
   try { require('./trelloRecouvrement')(app, { db, requireFinance }); } catch (e) { console.warn('[trello] module indisponible :', e.message); }
