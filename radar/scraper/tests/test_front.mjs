@@ -476,7 +476,10 @@ async function testDesignTokenParity() {
   }
 
   // Polices : même déclaration de famille
-  ok("DA : Baloo 2 en police d'affichage", /--font-display:\s*'Baloo 2'/.test(radar));
+  // Police d'affichage : la même que le dashboard (Sora depuis la refonte), sans nom figé
+  { const fam = (css) => (css.match(/--font-display:\s*'([^']+)'/) || [])[1];
+    ok("DA : même police d'affichage que le dashboard", !!fam(radar) && fam(radar) === fam(dash),
+       `dashboard=${fam(dash)} radar=${fam(radar)}`); }
   ok("DA : Inter en police de texte", /--font-body:\s*'Inter'/.test(radar));
 
   // Contrat de thème partagé entre les trois apps
