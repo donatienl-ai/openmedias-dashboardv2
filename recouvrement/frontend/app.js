@@ -340,7 +340,8 @@ if(/groupe\s*scp/i.test(inv.customerName||inv.customer_name||''))return true;
 return financeScpNumeros.has(String(inv.invoiceNumber||inv.invoice_number||''));
 }
 let financeTrelloInfo=null;
-let financeDecisionsTrello=new Map(); // statut + reste dû décidés d'après Trello (serveur, Trello prioritaire)
+let financeDecisionsTrello=new Map();
+let financeEtiquettes=new Map(); // (04/11/2026) étiquettes Trello « recouvrement » de chaque facture // statut + reste dû décidés d'après Trello (serveur, Trello prioritaire)
 async function loadFinanceAVerifier(){
 try{
 const r=await fetch(`${API}/finance/a-verifier`,{headers:financeHeaders()});
@@ -352,6 +353,7 @@ const m=new Map();
 for(const it of (d.items||[])){ if(it.id==null)continue; const k=String(it.id); if(!m.has(k))m.set(k,[]); m.get(k).push(it); }
 financeAVerifier=m;
 financeDecisionsTrello=new Map((d.decisions||[]).map((x)=>[String(x.id),x]));
+financeEtiquettes=new Map((d.etiquettes||[]).map((x)=>[String(x.id),x.e||[]]));
 financePartielsTrello=new Map((d.partiels||[]).map((p)=>[String(p.id),p]));
 financeAvoirsParFacture=new Map();financeAvoirsParAvoir=new Map();
 for(const a of (d.avoirs||[])){const kf=String(a.factureId),ka=String(a.avoirId);if(!financeAvoirsParFacture.has(kf))financeAvoirsParFacture.set(kf,[]);financeAvoirsParFacture.get(kf).push(a);if(!financeAvoirsParAvoir.has(ka))financeAvoirsParAvoir.set(ka,[]);financeAvoirsParAvoir.get(ka).push(a);}
@@ -577,7 +579,7 @@ const statutsK=financeStatutsPourRecherche(qnK);
 const list=financeInvoicesCache.filter(inv=>{
   if(!invoiceInRange(inv,from,to))return false;
   if(!qnK)return financeMatchesFilters(inv,filters);
-  return financeNormTxt([inv.invoiceNumber,inv.customerName,inv.contactName].join(' ')).includes(qnK)||statutsK.some(k=>financeMatchesFilterKey(inv,k));
+  return financeNormTxt([inv.invoiceNumber,inv.customerName,inv.contactName,...(financeEtiquettes.get(String(inv.id))||[]).map((e)=>e.n)].join(' ')).includes(qnK)||statutsK.some(k=>financeMatchesFilterKey(inv,k));
 });
 const unpaid=list.filter(inv=>{
 const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
@@ -724,11 +726,18 @@ if(pct===0)return '<span class="finance-kpi-delta flat">= vs période préc.</sp
 const up=pct>0;
 return `<span class="finance-kpi-delta ${up?'up':'down'}">${up?'▲':'▼'} ${Math.abs(pct)}% vs préc.</span>`;
 }
+// (04/11/2026) Clic sur la légende de répartition : affiche les factures du statut.
+function financeFiltrerParStatut(key){
+  const onglet={a_relancer:'all',litige:'litige_manuel',report_projet:'report_projet'}[key];
+  if(onglet){ const inp=document.getElementById('finance-search'); if(inp&&inp.value){ inp.value=''; inp.dispatchEvent(new Event('input',{bubbles:true})); } setFinanceFilter(onglet); return; }
+  const mot={douteux:'douteux',solde:'soldée'}[key]; if(mot)financeChercher(mot);
+}
+function financeChercher(mot){ const inp=document.getElementById('finance-search'); if(!inp)return; inp.value=mot; inp.dispatchEvent(new Event('input',{bubbles:true})); inp.focus(); }
 function renderFinanceKpis(k){
 const wrap=document.getElementById('finance-kpis');
 if(!wrap||!k)return;
 const statutSegs=Object.keys(FINANCE_STATUS_LABEL).map(key=>({key,label:FINANCE_STATUS_LABEL[key],color:FINANCE_STATUS_COLOR[key]}));
-const parStatut=k.parStatut||{};
+const parStatut=Object.fromEntries(Object.entries(k.parStatut||{}).filter(([key])=>key!=='litige'||!k.nbLitige)); // (04/11/2026) même périmètre que l'encours total
 // Filet de sécurité : une facture dont internalStatus ne correspond à aucun
 // des 5 statuts connus (donnée invalide/orpheline) ne doit pas silencieusement
 // disparaître de la barre — elle tombe dans un segment "Autre" visible plutôt
@@ -749,18 +758,19 @@ const prevBounds=financePreviousPeriodBounds();
 const prevK=prevBounds?computeFinanceKpisFromCache(prevBounds):null;
 const parStatutForSegs={...parStatut,__autre:{count:autreCount,montant:autreMontant}};
 const barSegs=statutSegs.map(s=>({label:s.label,pct:statutTotal?((parStatutForSegs[s.key]||{}).montant||0)/statutTotal*100:0,color:s.color}));
+const rpC=((k.retardParStatut||{}).report_projet||{}).count||0, rpM=((k.retardParStatut||{}).report_projet||{}).montant||0, litC=((k.retardParStatut||{}).litige||{}).count||0, litM=((k.retardParStatut||{}).litige||{}).montant||0;
 wrap.innerHTML=`
-<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} factures </div>${vueGlobale&&k.nbDouteux>0?`<div class="kpi-lbl" style="color:var(--text-muted)" title="Tapez « douteux » dans la recherche pour les voir">+ ${fmtCACompact(k.montantDouteux)} de douteux non inclus (${k.nbDouteux})</div>`:''}${k.nbLitige>0?`<div class="kpi-lbl" style="color:var(--text-muted)">+ ${fmtCACompact(k.montantLitige)} de litige non inclus (${k.nbLitige})</div>`:''}</div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:${(k.montantActionable||0)>0?'#dc2626':'var(--text-muted)'}" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl">${k.nbFacturesActionable} factures en retard${((k.retardParStatut||{}).report_projet||{}).count?` : <strong>${k.nbFacturesActionable-k.retardParStatut.report_projet.count} à relancer</strong> (${fmtCACompact(k.montantActionable-k.retardParStatut.report_projet.montant)}) · ${k.retardParStatut.report_projet.count} en report projet (${fmtCACompact(k.retardParStatut.report_projet.montant)})`:' à relancer'}</div></div>
-<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement)"><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${vueGlobale?k.tauxDeRetard+'%':'—'}</div><div class="kpi-lbl">${vueGlobale?'':'Calculé sur l\'onglet Toutes uniquement · '}${k.nbFacturesEnRetard} factures en retard, dont ${((k.retardParStatut||{}).litige||{}).count||0} en litige (${fmtCACompact(((k.retardParStatut||{}).litige||{}).montant||0)}) et ${((k.retardParStatut||{}).report_projet||{}).count||0} en report de projet.</div></div>
-<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#8b5cf6"></span>DSO</div><div class="kpi-val" style="color:#8b5cf6">${(k.dso!=null&&financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?k.dso+'j':'—'}</div><div class="kpi-lbl">${(financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?'':'Calculé sur l\'onglet Toutes uniquement · '}Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
+<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:var(--accent)"></span>Encours total</div><div class="kpi-val" title="${fmtCA(k.totalEncours)}">${fmtCACompact(k.totalEncours)}</div><div class="kpi-lbl">${k.nbFacturesTotal} factures </div>${(vueGlobale&&k.nbDouteux>0)||k.nbLitige>0?`<div class="kpi-lbl" style="color:var(--text-muted)" title="Douteux : tapez « douteux » dans la recherche · Litige : onglet Litige">hors ${[vueGlobale&&k.nbDouteux>0?`douteux ${fmtCACompact(k.montantDouteux)}`:'',k.nbLitige>0?`litige ${fmtCACompact(k.montantLitige)}`:''].filter(Boolean).join(' · ')}</div>`:''}</div>
+<div class="kpi-card" title="Hors factures soldées, annulées, ou suivies séparément (litige / promesse de paiement / douteux)"><div class="kpi-eyebrow"><span class="dot" style="background:#dc2626"></span>À relancer aujourd'hui ⓘ</div><div class="kpi-val" style="color:${(k.montantActionable||0)>0?'#dc2626':'var(--text-muted)'}" title="${fmtCA(k.montantActionable)}">${fmtCACompact(k.montantActionable)}</div><div class="kpi-lbl"><strong>${k.nbFacturesActionable-rpC} à relancer</strong> · ${fmtCACompact(k.montantActionable-rpM)}</div>${rpC?`<div class="kpi-lbl" style="color:var(--text-muted)">${rpC} en report projet · ${fmtCACompact(rpM)}`:'<div>'}</div></div>
+<div class="kpi-card" title="${k.nbFacturesEnRetard} factures en retard, dont ${litC} en litige (${fmtCACompact(litM)}) et ${rpC} en report projet (${fmtCACompact(rpM)}). Hors soldées, annulées, douteux."><div class="kpi-eyebrow"><span class="dot" style="background:var(--gold)"></span>Taux de retard ⓘ</div><div class="kpi-val" style="color:var(--gold)">${vueGlobale?k.tauxDeRetard+'%':'—'}</div><div class="kpi-lbl">${vueGlobale?'':'Onglet À recouvrer uniquement · '}${k.nbFacturesEnRetard} factures en retard</div></div>
+<div class="kpi-card"><div class="kpi-eyebrow"><span class="dot" style="background:#14b8a6"></span>DSO</div><div class="kpi-val" style="color:#14b8a6">${(k.dso!=null&&financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?k.dso+'j':'—'}</div><div class="kpi-lbl">${(financeActiveFilters.has('all')&&!(document.getElementById('finance-search')?.value||'').trim())?'':'Calculé sur l\'onglet Toutes uniquement · '}Délai moyen de paiement (${(financePeriodFrom||financePeriodTo)?`période sélectionnée, ${k.periodJours}j`:`${k.periodJours}j glissants`})</div></div>
 <div class="kpi-card" style="grid-column:1/-1">
-<div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours par statut</div>
+<div class="kpi-eyebrow"><span class="dot" style="background:var(--text-muted)"></span>Répartition de l'encours</div>
 <div class="finance-statut-bar-row">
 ${financeStatutBarHtml(barSegs)}
 <div class="finance-statut-bar-total">${fmtCACompact(statutTotal)}<span>encours</span></div>
 </div>
-<div class="finance-aging-legend">${statutSegs.filter(s=>(parStatutForSegs[s.key]||{}).count).map(s=>`<span><span class="dot" style="background:${s.color}"></span>${s.label} — ${(parStatutForSegs[s.key]||{}).count} · ${fmtCA((parStatutForSegs[s.key]||{}).montant||0)}</span>`).join('')}</div>
+<div class="finance-aging-legend">${statutSegs.filter(s=>(parStatutForSegs[s.key]||{}).count).map(s=>`<span style="cursor:pointer" title="${(parStatutForSegs[s.key]||{}).count} factures · ${fmtCA((parStatutForSegs[s.key]||{}).montant||0)} — cliquer pour afficher" onclick="financeFiltrerParStatut('${s.key}')"><span class="dot" style="background:${s.color}"></span>${s.key==='a_relancer'?'À relancer ou à venir':s.label} · ${(parStatutForSegs[s.key]||{}).count}</span>`).join('')}</div>
 </div>
 `;
 }
@@ -932,7 +942,9 @@ ${chip('late','En retard')}
 ${chip('litige_manuel','Litige')}
 ${chip('report_projet','Report projet')}
 ${chip('a_verifier','À vérifier','Pennylane, Trello et le dashboard ne disent pas la même chose : à trancher par les expertes-comptables')}
+<select class="finance-tab" title="Autres vues (recherche)" onchange="if(this.value)financeChercher(this.value);this.value=''" style="cursor:pointer"><option value="">Plus ▾</option><option value="soldée">Soldées</option><option value="annulée">Annulées</option><option value="douteux">Douteux</option><option value="avoir">Avoirs</option><option value="partiel">Partiellement réglées</option></select>
 `;
+{ const inp=document.getElementById('finance-search'); if(inp&&!document.getElementById('finance-search-suggestions')){ const dl=document.createElement('datalist'); dl.id='finance-search-suggestions'; dl.innerHTML=['soldée','annulée','douteux','litige','report projet','partiel','avoir','à venir','en retard','1/2 payé','1/4 payé','upsell à régler'].map((m)=>`<option value="${m}">`).join(''); document.body.appendChild(dl); inp.setAttribute('list',dl.id); } }
 }
 // Filtrage complet (période + onglets + recherche) — factorisé pour être
 // partagé entre l'affichage du tableau (renderFinanceInvoices) et l'export
@@ -967,7 +979,7 @@ function currentFilteredFinanceInvoices(){
   return financeInvoicesCache.filter(inv=>{
     if(!financeMatchesPeriod(inv))return false;
     if(!qn)return financeActiveFilters.has('all')?financeEstARecouvrer(inv):financeMatchesFilters(inv,financeActiveFilters);
-    const texte=financeNormTxt([inv.invoiceNumber,inv.customerName,inv.contactName].join(' ')).includes(qn);
+    const texte=financeNormTxt([inv.invoiceNumber,inv.customerName,inv.contactName,...(financeEtiquettes.get(String(inv.id))||[]).map((e)=>e.n)].join(' ')).includes(qn);
     return texte||statutsQ.some(k=>financeMatchesFilterKey(inv,k));
   });
 }
@@ -1017,7 +1029,7 @@ const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<optio
 wrap.innerHTML=`<table>
 <thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Éch. 1${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th class="sortable-th" onclick="setFinanceSort('montant')" title="Ce qu'il reste à payer sur la facture (le montant total est dans la fiche)">Reste dû TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
 <tbody>${list.map(inv=>`<tr class="finance-invoice-row" onclick="financeRowClick(event,'${inv.id}')">
-<td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeEmissionDateHtml(inv)}</td>
+<td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeEmissionDateHtml(inv)}${financeEtiquettesHtml(inv)}</td>
 <td>${inv.customerName||'—'}</td>
 <td>${inv.contactName||'—'}</td>
 <td>${inv.contactEmail||inv.customerEmail||'—'}</td>
@@ -1077,6 +1089,15 @@ function financeAcompteDotHtml(inv,a,avecDate){
 const e=FINANCE_ACOMPTE_ETAT[a.etat]||FINANCE_ACOMPTE_ETAT.inconnu;
 const title=`${e[0]}${a.trello?' (d’après Trello)':''} — ${a.date?formatDateFR(a.date):'date ?'} · ${a.montant!=null?fmtCA(a.montant):'montant ?'}${a.regle?' · réglé '+fmtCA(a.regle):''}`.replace(/"/g,'&quot;');
 return `<button type="button" class="finance-installment-dot" style="background:${e[1]}" title="${title}" onclick="openFinanceInvoiceDetail('${inv.id}')"></button>`+(avecDate?`<div class="finance-relance-badge" style="margin-top:2px">${a.date?formatDateFR(a.date):''}</div>`:'');
+}
+// (04/11/2026) Étiquettes Trello sous le n° de facture : mêmes noms et couleurs que Trello, 2 au plus (+n).
+const TRELLO_COULEURS={green:'#4bce97',yellow:'#e2b203',orange:'#fea362',red:'#f87168',purple:'#9f8fef',blue:'#579dff',sky:'#6cc3e0',lime:'#94c748',pink:'#e774bb',black:'#8590a2'};
+function financeEtiquettesHtml(inv){
+  const e=financeEtiquettes.get(String(inv.id))||[]; if(!e.length)return '';
+  if(!document.getElementById('fin-etq-style')){ const st=document.createElement('style'); st.id='fin-etq-style'; st.textContent='.fin-etqs{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}.fin-etq{display:inline-flex;align-items:center;gap:4px;font-size:10px;line-height:1.5;padding:0 6px;border-radius:999px;background:color-mix(in srgb,var(--etq) 18%,transparent);white-space:nowrap}.fin-etq::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--etq)}'; document.head.appendChild(st); }
+  const esc=(t)=>String(t).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const col=(c)=>TRELLO_COULEURS[String(c||'').replace(/_(dark|light)$/,'')]||'#8590a2';
+  return `<div class="fin-etqs" title="${esc(e.map((x)=>x.n).join(' · '))}">${e.slice(0,2).map((x)=>`<span class="fin-etq" style="--etq:${col(x.c)}">${esc(x.n)}</span>`).join('')}${e.length>2?`<span class="fin-etq" style="--etq:#8590a2">+${e.length-2}</span>`:''}</div>`;
 }
 function financeInstallmentCellHtml(inv,idx){
 const list=inv.installments||[];
