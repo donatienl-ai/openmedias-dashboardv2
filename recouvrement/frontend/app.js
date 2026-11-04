@@ -729,8 +729,9 @@ return `<span class="finance-kpi-delta ${up?'up':'down'}">${up?'▲':'▼'} ${Ma
 // (04/11/2026) Clic sur la légende de répartition : affiche les factures du statut.
 function financeFiltrerParStatut(key){
   const onglet={a_relancer:'all',litige:'litige_manuel',report_projet:'report_projet'}[key];
-  if(onglet){ const inp=document.getElementById('finance-search'); if(inp&&inp.value){ inp.value=''; inp.dispatchEvent(new Event('input',{bubbles:true})); } setFinanceFilter(onglet); return; }
-  const mot={douteux:'douteux',solde:'soldée'}[key]; if(mot)financeChercher(mot);
+  const cle=onglet||{douteux:'douteux_manuel',solde:'soldees'}[key]; if(!cle)return;
+  const inp=document.getElementById('finance-search'); if(inp)inp.value='';
+  financeActiveFilters=new Set([cle]); renderFinanceTabs(); renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache());
 }
 function financeChercher(mot){ const inp=document.getElementById('finance-search'); if(!inp)return; inp.value=mot; inp.dispatchEvent(new Event('input',{bubbles:true})); inp.focus(); }
 function renderFinanceKpis(k){
@@ -885,6 +886,7 @@ if(key==='douteux_manuel')return inv.internalStatus==='douteux';
 if(key==='a_verifier')return financeAVerifier.has(String(inv.id));
 if(key==='litige_manuel')return inv.internalStatus==='litige';
 if(key==='report_projet')return inv.internalStatus==='report_projet';
+if(key==='soldees')return inv.internalStatus==='solde'||inv.status==='paid'; // (04/11/2026)
 if(key==='partially_paid'&&financeEstPartielle(inv))return true;
 const statuses=PENNYLANE_TAB_STATUSES[key];
 if(!statuses||!statuses.includes(inv.status))return false;
@@ -898,15 +900,13 @@ if(!filters||filters.has('all'))return true;
 for(const key of filters){ if(financeMatchesFilterKey(inv,key))return true; }
 return false;
 }
+// (04/11/2026, Lina) Les onglets s'additionnent, « À recouvrer » compris ; plus aucun onglet → À recouvrer.
 function setFinanceFilter(key){
 if(!key)return;
-if(key==='all'){
-financeActiveFilters=new Set(['all']);
-}else{
-financeActiveFilters.delete('all');
+{
 if(financeActiveFilters.has(key))financeActiveFilters.delete(key);
 else financeActiveFilters.add(key);
-if(!financeActiveFilters.size)financeActiveFilters.add('all'); // plus aucun chip actif -> retombe sur Toutes
+if(!financeActiveFilters.size)financeActiveFilters.add('all');
 }
 renderFinanceTabs();
 renderFinanceInvoices();
@@ -928,6 +928,7 @@ counts.douteux_manuel=list.filter((i)=>financeMatchesFilterKey(i,'douteux_manuel
 counts.litige_manuel=list.filter((i)=>financeMatchesFilterKey(i,'litige_manuel')).length;
 counts.report_projet=list.filter((i)=>financeMatchesFilterKey(i,'report_projet')).length;
 counts.a_verifier=list.filter((i)=>financeMatchesFilterKey(i,'a_verifier')).length;
+counts.soldees=list.filter((i)=>financeMatchesFilterKey(i,'soldees')).length;
 const chip=(key,label,title)=>{
 const active=financeActiveFilters.has(key);
 const c=FINANCE_TAB_COLOR[key]||FINANCE_TAB_COLOR.all;
@@ -942,9 +943,9 @@ ${chip('late','En retard')}
 ${chip('litige_manuel','Litige')}
 ${chip('report_projet','Report projet')}
 ${chip('a_verifier','À vérifier','Pennylane, Trello et le dashboard ne disent pas la même chose : à trancher par les expertes-comptables')}
-<select class="finance-tab" title="Autres vues (recherche)" onchange="if(this.value)financeChercher(this.value);this.value=''" style="cursor:pointer;width:auto;max-width:130px;flex:0 0 auto"><option value="">Plus ▾</option><option value="soldée">Soldées</option><option value="annulée">Annulées</option><option value="douteux">Douteux</option><option value="avoir">Avoirs</option><option value="partiel">Partiellement réglées</option></select>
+${[['soldees','Soldées'],['cancelled','Annulées'],['douteux_manuel','Douteux'],['credit_note','Avoirs'],['partially_paid','Partiellement réglées']].filter(([k])=>financeActiveFilters.has(k)).map(([k,l])=>chip(k,l+' ✕','Cliquer pour retirer')).join('')}<select class="finance-tab" title="Ajouter une vue" onchange="financeAjouterFiltre(this.value);this.value=''" style="cursor:pointer;width:auto;max-width:130px;flex:0 0 auto"><option value="">Plus ▾</option>${[['soldees','Soldées'],['cancelled','Annulées'],['douteux_manuel','Douteux'],['credit_note','Avoirs'],['partially_paid','Partiellement réglées']].filter(([k])=>!financeActiveFilters.has(k)).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>${(financeActiveFilters.size>1||!financeActiveFilters.has('all'))?`<button type="button" class="finance-tab" style="opacity:.7" onclick="financeReinitFiltres()" title="Revenir à « À recouvrer » seul">Réinitialiser</button>`:''}
 `;
-{ const inp=document.getElementById('finance-search'); if(inp&&!document.getElementById('finance-search-suggestions')){ const dl=document.createElement('datalist'); dl.id='finance-search-suggestions'; dl.innerHTML=['soldée','annulée','douteux','litige','report projet','partiel','avoir','à venir','en retard','1/2 payé','1/4 payé','upsell à régler'].map((m)=>`<option value="${m}">`).join(''); document.body.appendChild(dl); inp.setAttribute('list',dl.id); } }
+{ const inp=document.getElementById('finance-search'); if(inp&&!document.getElementById('finance-search-suggestions')){ const dl=document.createElement('datalist'); dl.id='finance-search-suggestions'; dl.innerHTML=['soldée','annulée','douteux','litige','report projet','partiel','avoir','à venir','en retard','1/2 payé','1/4 payé','upsell à régler'].map((m)=>`<option value="${m}">`).join(''); document.body.appendChild(dl); inp.setAttribute('list',dl.id); inp.type='search'; } }
 }
 // Filtrage complet (période + onglets + recherche) — factorisé pour être
 // partagé entre l'affichage du tableau (renderFinanceInvoices) et l'export
@@ -973,12 +974,17 @@ function financeStatutsPourRecherche(qn){
   if(qn.length<3)return [];
   return FINANCE_STATUTS_RECHERCHABLES.filter(s=>s.mots.some(m=>m.startsWith(qn))).map(s=>s.key);
 }
+// Onglets actifs (OU) : « À recouvrer » = factures avec un reste dû, hors douteux/litige.
+function financeMatchesOnglets(inv){ for(const k of financeActiveFilters){ if(k==='all'?financeEstARecouvrer(inv):financeMatchesFilterKey(inv,k))return true; } return false; }
+function financeAjouterFiltre(key){ if(key&&!financeActiveFilters.has(key))setFinanceFilter(key); }
+function financeReinitFiltres(){ financeActiveFilters=new Set(['all']); const inp=document.getElementById('finance-search'); if(inp)inp.value=''; renderFinanceTabs(); renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache()); }
 function currentFilteredFinanceInvoices(){
   const qn=financeNormTxt(document.getElementById('finance-search')?.value||'');
   const statutsQ=financeStatutsPourRecherche(qn);
   return financeInvoicesCache.filter(inv=>{
     if(!financeMatchesPeriod(inv))return false;
-    if(!qn)return financeActiveFilters.has('all')?financeEstARecouvrer(inv):financeMatchesFilters(inv,financeActiveFilters);
+    if(!qn)return financeMatchesOnglets(inv);
+    if(!statutsQ.length)return financeMatchesOnglets(inv)&&financeNormTxt([inv.invoiceNumber,inv.customerName,inv.contactName,...(financeEtiquettes.get(String(inv.id))||[]).map((e)=>e.n)].join(' ')).includes(qn); // (04/11/2026) la recherche affine les onglets
     const texte=financeNormTxt([inv.invoiceNumber,inv.customerName,inv.contactName,...(financeEtiquettes.get(String(inv.id))||[]).map((e)=>e.n)].join(' ')).includes(qn);
     return texte||statutsQ.some(k=>financeMatchesFilterKey(inv,k));
   });
