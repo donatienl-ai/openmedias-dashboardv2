@@ -5,12 +5,10 @@ export function resolveSaleName(rawName, roster = []) {
   const safeRoster = Array.isArray(roster) ? roster : [];
   const norm = normalize(rawName);
 
-  const quentin = safeRoster.find(s => s && s.display && normalize(s.display).includes('quentin'));
-  const quentinName = quentin ? quentin.display : 'Quentin';
-
-  if (!norm || norm === 'inconnu' || norm === 'unknown' || norm === 'unassigned') {
-    return quentinName;
-  }
+  // Nom vide : non attribué (04/11/2026, demande Lina — plus de rattachement par
+  // défaut à Quentin). « Inconnu » reste tel quel, donc hors roster = non attribué.
+  if (!norm) return null;
+  if (norm === 'inconnu' || norm === 'unknown' || norm === 'unassigned') return rawName;
 
   const exact = safeRoster.filter(s => s && s.display && wordsKey(s.display) === wordsKey(rawName));
   if (exact.length === 1) return exact[0].display;
@@ -27,15 +25,14 @@ export function completeRosterRows(dataMap, roster = [], withAmount = false) {
   const safeRoster = Array.isArray(roster) ? roster : [];
   const safeMap = dataMap instanceof Map ? dataMap : new Map();
 
-  const quentin = safeRoster.find(s => s && s.display && normalize(s.display).includes('quentin'));
-  const quentinName = quentin ? quentin.display : 'Quentin';
-
-  // Fusion propre des données : redirection de tout "Inconnu" vers Quentin
+  // Fusion des données. Plus de redirection « Inconnu » → Quentin (04/11/2026) :
+  // ce qui n'est rattaché à personne reste non attribué.
   const mergedMap = new Map();
 
   for (const [name, entry] of safeMap.entries()) {
     const norm = normalize(name);
-    const targetName = (!norm || norm === 'inconnu' || norm === 'unknown') ? quentinName : name;
+    void norm;
+    const targetName = name;
 
     const current = mergedMap.get(targetName) || { count: 0, amount: 0, inbound: 0, outbound: 0 };
     mergedMap.set(targetName, {
