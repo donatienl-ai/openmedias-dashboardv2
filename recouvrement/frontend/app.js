@@ -942,7 +942,7 @@ ${chip('late','En retard')}
 ${chip('litige_manuel','Litige')}
 ${chip('report_projet','Report projet')}
 ${chip('a_verifier','À vérifier','Pennylane, Trello et le dashboard ne disent pas la même chose : à trancher par les expertes-comptables')}
-<select class="finance-tab" title="Autres vues (recherche)" onchange="if(this.value)financeChercher(this.value);this.value=''" style="cursor:pointer"><option value="">Plus ▾</option><option value="soldée">Soldées</option><option value="annulée">Annulées</option><option value="douteux">Douteux</option><option value="avoir">Avoirs</option><option value="partiel">Partiellement réglées</option></select>
+<select class="finance-tab" title="Autres vues (recherche)" onchange="if(this.value)financeChercher(this.value);this.value=''" style="cursor:pointer;width:auto;max-width:130px;flex:0 0 auto"><option value="">Plus ▾</option><option value="soldée">Soldées</option><option value="annulée">Annulées</option><option value="douteux">Douteux</option><option value="avoir">Avoirs</option><option value="partiel">Partiellement réglées</option></select>
 `;
 { const inp=document.getElementById('finance-search'); if(inp&&!document.getElementById('finance-search-suggestions')){ const dl=document.createElement('datalist'); dl.id='finance-search-suggestions'; dl.innerHTML=['soldée','annulée','douteux','litige','report projet','partiel','avoir','à venir','en retard','1/2 payé','1/4 payé','upsell à régler'].map((m)=>`<option value="${m}">`).join(''); document.body.appendChild(dl); inp.setAttribute('list',dl.id); } }
 }
@@ -1027,20 +1027,15 @@ return 0;
 }
 const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<option value="${s}" ${s===inv.internalStatus?'selected':''}>${FINANCE_STATUS_LABEL[s]||s}</option>`).join('');
 wrap.innerHTML=`<table>
-<thead><tr><th>Facture</th><th>Entreprise</th><th>Nom Prénom</th><th>Mail</th><th>Téléphone</th><th class="sortable-th" onclick="setFinanceSort('deadline')">Éch. 1${financeSortArrow('deadline')}</th><th title="2e échéance — cf. Échéances de paiement dans la fiche facture">Éch. 2</th><th title="3e échéance">Éch. 3</th><th title="4e échéance">Éch. 4</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th class="sortable-th" onclick="setFinanceSort('montant')" title="Ce qu'il reste à payer sur la facture (le montant total est dans la fiche)">Reste dû TTC${financeSortArrow('montant')}</th><th>Statut</th></tr></thead>
+<thead><tr><th>Facture</th><th>Entreprise</th><th>Contact</th><th>Statut</th><th class="sortable-th" onclick="setFinanceSort('deadline')" title="Un point par échéance : vert réglée, rouge en retard, orange partielle, gris à venir. Détail et modification de la date dans la fiche.">Échéances${financeSortArrow('deadline')}</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th class="sortable-th" onclick="setFinanceSort('montant')" title="Ce qu'il reste à payer sur la facture (le montant total est dans la fiche)">Reste dû TTC${financeSortArrow('montant')}</th></tr></thead>
 <tbody>${list.map(inv=>`<tr class="finance-invoice-row" onclick="financeRowClick(event,'${inv.id}')">
-<td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeEmissionDateHtml(inv)}${financeEtiquettesHtml(inv)}</td>
+<td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeEmissionDateHtml(inv)}${financeEtiquettesInfoHtml(inv)}</td>
 <td>${inv.customerName||'—'}</td>
-<td>${inv.contactName||'—'}</td>
-<td>${inv.contactEmail||inv.customerEmail||'—'}</td>
-<td>${inv.contactPhone||inv.customerPhone||'—'}</td>
-<td><div class="finance-deadline-cell"><input type="date" class="form-input finance-deadline-input" value="${inv.deadline||''}" onchange="patchFinanceInvoice('${inv.id}',{deadline:this.value})" title="${inv.deadlineManual?'Échéance corrigée manuellement — ne sera plus écrasée par la synchro Pennylane':'Échéance Pennylane'}">${inv.deadlineManual?'<span class="finance-deadline-manual-dot" title="Corrigée manuellement">✎</span>':''}${financeDeadlineDotHtml(inv)}</div></td>
-<td class="finance-installment-cell">${financeInstallmentCellHtml(inv,0)}</td>
-<td class="finance-installment-cell">${financeInstallmentCellHtml(inv,1)}</td>
-<td class="finance-installment-cell">${financeInstallmentCellHtml(inv,2)}</td>
+<td>${financeContactHtml(inv)}</td>
+<td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'};min-width:120px" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select></td>
+<td>${financeEcheancesResumeHtml(inv)}</td>
 <td>${financeRetardBarHtml(inv)}</td>
 <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}${financeExclusEncoursBadge(inv)}</td>
-<td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'}" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select></td>
 </tr>`).join('')}</tbody>
 </table>`;
 }
@@ -1098,6 +1093,39 @@ function financeEtiquettesHtml(inv){
   const esc=(t)=>String(t).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const col=(c)=>TRELLO_COULEURS[String(c||'').replace(/_(dark|light)$/,'')]||'#8590a2';
   return `<div class="fin-etqs" title="${esc(e.map((x)=>x.n).join(' · '))}">${e.slice(0,2).map((x)=>`<span class="fin-etq" style="--etq:${col(x.c)}">${esc(x.n)}</span>`).join('')}${e.length>2?`<span class="fin-etq" style="--etq:#8590a2">+${e.length-2}</span>`:''}</div>`;
+}
+// (04/11/2026, Lina) Liste allégée : une colonne Échéances (points alignés), un Contact compact,
+// et seulement les étiquettes Trello d'information (Décalage, Upsell…) en texte gris.
+function financeStyleListe(){ if(document.getElementById('fin-liste-style'))return; const st=document.createElement('style'); st.id='fin-liste-style'; st.textContent='.fin-ech{display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}.fin-ech-dots{display:inline-flex;gap:3px}.fin-ech-dots i{width:8px;height:8px;border-radius:50%;display:inline-block}.fin-ech-txt{font-size:11px;color:var(--text-muted)}.fin-ct-wrap{display:flex;align-items:center;gap:4px;white-space:nowrap}.fin-ct{border:0;background:transparent;cursor:pointer;color:var(--text-muted);font-size:13px;padding:0 2px;line-height:1}.fin-ct:hover{color:var(--accent)}.fin-etq-info{font-size:10px;color:var(--text-muted);margin-top:2px}'; document.head.appendChild(st); }
+function financeEtiquettesInfoHtml(inv){
+  const e=(financeEtiquettes.get(String(inv.id))||[]).filter((x)=>/d[ée]calage|upsell|impay/i.test(x.n));
+  if(!e.length)return ''; financeStyleListe();
+  const esc=(t)=>String(t).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return `<div class="fin-etq-info" title="${esc(e.map((x)=>x.n).join(' · '))}">${esc(e[0].n)}${e.length>1?' +'+(e.length-1):''}</div>`;
+}
+function financeCopier(el){ const v=el.getAttribute('data-v')||''; const t=el.textContent; const fin=()=>{ el.textContent='✓'; setTimeout(()=>{ el.textContent=t; },1200); }; try{ navigator.clipboard.writeText(v).then(fin,()=>{}); }catch(e){} }
+function financeContactHtml(inv){
+  financeStyleListe();
+  const esc=(t)=>String(t).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const nom=inv.contactName||'', mail=inv.contactEmail||inv.customerEmail||'', tel=inv.contactPhone||inv.customerPhone||'';
+  const ic=(sym,val,lib)=>val?`<button type="button" class="fin-ct" data-v="${esc(val)}" title="${esc(lib+' : '+val)} — cliquer pour copier" onclick="event.stopPropagation();financeCopier(this)">${sym}</button>`:'';
+  return `<div class="fin-ct-wrap">${nom?esc(nom):'<span style="color:var(--text-muted)">—</span>'}${ic('✉',mail,'E-mail')}${ic('☎',tel,'Téléphone')}</div>`;
+}
+function financeEcheancesResumeHtml(inv){
+  financeStyleListe();
+  const reste=Number(inv.remainingAmountTtc)||0;
+  let pts=[];
+  const ac=financeAcomptesAuto(inv);
+  if(ac.length){ pts=ac.map((a)=>{ const e=FINANCE_ACOMPTE_ETAT[a.etat]||FINANCE_ACOMPTE_ETAT.inconnu; return {col:e[1],ok:a.etat==='soldee',date:a.date,tit:`${e[0]}${a.trello?' (d’après Trello)':''} — ${a.date?formatDateFR(a.date):'date ?'} · ${a.montant!=null?fmtCA(a.montant):'montant ?'}`}; }); }
+  else{
+    const late=inv.status==='late'||(inv.deadline&&inv.deadline<new Date().toISOString().slice(0,10)&&reste>1);
+    pts=[{col:inv.deadlineStatusColor||(reste<=1?'#16a34a':(late?'#dc2626':'#64748b')),ok:reste<=1||/r[ée]gl|sold/i.test(inv.deadlineStatusLabel||''),date:inv.deadline,tit:`${inv.deadlineStatusLabel||(reste<=1?'Réglé':(late?'En retard':'À venir'))} — ${inv.deadline?formatDateFR(inv.deadline):'date ?'}`}];
+    for(const it of (inv.installments||[])) pts.push({col:it.statusColor||'#64748b',ok:/r[ée]gl|sold/i.test(it.statusLabel||''),date:it.dueDate,tit:`${it.statusLabel||'—'} — ${it.dueDate?formatDateFR(it.dueDate):'date ?'} · ${fmtCA(it.amount||0)}`});
+  }
+  const nOk=pts.filter((p)=>p.ok).length; const proch=pts.find((p)=>!p.ok&&p.date);
+  const txt=pts.length>1?`${nOk}/${pts.length} réglée${nOk>1?'s':''}${proch?' · prochaine '+formatDateFR(proch.date):''}`:(proch?formatDateFR(proch.date):(pts[0]&&pts[0].date?formatDateFR(pts[0].date):''));
+  const tit=pts.map((p,i)=>`Éch. ${i+1} : ${p.tit}`).join('\n').replace(/"/g,'&quot;');
+  return `<div class="fin-ech" title="${tit}" onclick="event.stopPropagation();openFinanceInvoiceDetail('${inv.id}')"><span class="fin-ech-dots">${pts.map((p)=>`<i style="background:${p.col}"></i>`).join('')}</span><span class="fin-ech-txt">${txt}</span></div>`;
 }
 function financeInstallmentCellHtml(inv,idx){
 const list=inv.installments||[];
