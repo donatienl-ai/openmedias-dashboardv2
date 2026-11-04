@@ -1129,7 +1129,7 @@ function financeEcheancesResumeHtml(inv){
     for(const it of (inv.installments||[])) pts.push({col:it.statusColor||'#64748b',ok:/r[ée]gl|sold/i.test(it.statusLabel||''),date:it.dueDate,tit:`${it.statusLabel||'—'} — ${it.dueDate?formatDateFR(it.dueDate):'date ?'} · ${fmtCA(it.amount||0)}`});
   }
   const nOk=pts.filter((p)=>p.ok).length; const proch=pts.find((p)=>!p.ok&&p.date);
-  const txt=pts.length>1?`${nOk}/${pts.length} réglée${nOk>1?'s':''}${proch?' · prochaine '+formatDateFR(proch.date):''}`:(proch?formatDateFR(proch.date):(pts[0]&&pts[0].date?formatDateFR(pts[0].date):''));
+  const txt=`${nOk}/${pts.length} réglée${nOk>1?'s':''}`; void proch;
   const tit=pts.map((p,i)=>`Éch. ${i+1} : ${p.tit}`).join('\n').replace(/"/g,'&quot;');
   return `<div class="fin-ech" title="${tit}" onclick="event.stopPropagation();openFinanceInvoiceDetail('${inv.id}')"><span class="fin-ech-dots">${pts.map((p)=>`<i style="background:${p.col}"></i>`).join('')}</span><span class="fin-ech-txt">${txt}</span></div>`;
 }
