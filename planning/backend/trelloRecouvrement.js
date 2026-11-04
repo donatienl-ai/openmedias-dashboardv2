@@ -233,6 +233,7 @@ function construireRapportComplet(db) {
   const b = etat.board;
   const listes = new Map(b.lists.map((l) => [l.id, l.name]));
   const etiquettes = new Map(b.labels.map((l) => [l.id, l.name || '']));
+  const couleurEtiquette = new Map(b.labels.map((l) => [l.id, l.color || ''])); // (04/11/2026) pastilles Trello sur la liste des factures
   const lecteurs = new Set(b.members.filter((m) => LECTEURS.includes(m.username)).map((m) => m.id));
 
   // Factures en base (toutes, pour savoir si un numéro existe ; périmètre ≥ 2025 pour les contrôles)
@@ -665,6 +666,7 @@ function construireRapportComplet(db) {
   // Une étiquette « Soldée » posée AVANT l'émission de la facture concerne une facture
   // précédente (sauf si la carte cite ce n° de facture) : elle n'est pas appliquée.
   rapport.decisionsTrello = [];
+  rapport.etiquettesFactures = []; // étiquettes Trello « recouvrement » de chaque facture, pour l'affichage et la recherche
   const fractionEtiquette = (nom) => {
     const n = String(nom || '').toLowerCase().replace(/\s+/g, ' ').trim();
     let m = n.match(/^(\d)\s*\/\s*(\d)\s+pay/); if (m && Number(m[2]) > 0) return Number(m[1]) / Number(m[2]);
@@ -775,7 +777,10 @@ function construireRapportComplet(db) {
         }
       }
     }
-    if (statut || resteReel != null) rapport.decisionsTrello.push({ id: f.id, facture: f.invoice_number, client: f.client, statutActuel: f.internal_status || 'a_relancer', statut, resteReel, restePennylane: reste, note: notes.join(' · '), lien });
+    { const etq = new Map();
+      for (const { carte } of entrees) for (const idl of (carte.idLabels || [])) { const n = String(etiquettes.get(idl) || '').trim(); if (n && /sold|cl[oô]ture|pay[ée]|r[èe]glement|report|douteux|annul|upsell|impay|d[ée]calage|avoir/i.test(n)) etq.set(n, couleurEtiquette.get(idl) || ''); }
+      if (etq.size) rapport.etiquettesFactures.push({ id: f.id, e: [...etq].map(([n, c]) => ({ n, c })) }); }
+      if (statut || resteReel != null) rapport.decisionsTrello.push({ id: f.id, facture: f.invoice_number, client: f.client, statutActuel: f.internal_status || 'a_relancer', statut, resteReel, restePennylane: reste, note: notes.join(' · '), lien });
   }
 
   rapport.resume = {
@@ -954,7 +959,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       // (03/11/2026) Groupe SCP retiré du dashboard : ses avoirs non plus (ex. F7213).
       const pieceScp = new Set(db.prepare("SELECT i.invoice_number AS n FROM pennylane_invoices i LEFT JOIN pennylane_customers c ON c.id = i.customer_id WHERE c.name LIKE '%SCP%'").all().map((x) => String(x.n)));
       const aVerifier = items.filter((x) => x.facture !== 'F5885' && !pieceScp.has(String(x.facture)) && !classees.has(String(x.id)));
-      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
+      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, etiquettes: r.etiquettesFactures || [], avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
