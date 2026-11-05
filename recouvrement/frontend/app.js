@@ -874,6 +874,8 @@ litige_manuel: {bg:'var(--red-dim)', fg:'#dc2626'},
 report_projet: {bg:'rgba(139,92,246,0.14)', fg:'#8b5cf6'},
 paid: {bg:'var(--green-dim)', fg:'var(--green)'},
 partially_paid: {bg:'rgba(13,148,136,0.12)', fg:'#0d9488'},
+a_relancer_onglet: {bg:'rgba(202,138,4,0.14)', fg:'var(--gold)'}, // couleur du statut « À relancer » (05/11/2026)
+relancee: {bg:'var(--accent-dim)', fg:'var(--accent)'}, // couleur de l'ancien statut « Relancé »
 cancelled: {bg:'var(--surface2)', fg:'var(--text-dim)'},
 credit_note: {bg:'rgba(139,92,246,0.14)', fg:'#8b5cf6'},
 archived: {bg:'var(--surface2)', fg:'var(--text-muted)'},
@@ -956,13 +958,12 @@ return `<button type="button" class="finance-tab ${active?'active':''}"${style} 
 wrap.innerHTML=`
 ${chip('all','À recouvrer','Factures avec un reste dû (hors douteux). Soldées, annulées, douteux… : tapez leur statut dans la recherche.')}
 ${chip('a_relancer_onglet','À relancer','En retard et pas relancées depuis 7 jours (hors report projet, litige, douteux). Un acompte échu non payé compte comme un retard.')}
-${chip('relancee','Relancé','Relancées il y a moins de 7 jours (commentaire de Fatima dans Trello ou relance saisie). Sans paiement, elles reviennent dans « À relancer » après 7 jours.')}
 ${chip('upcoming','À venir')}
 ${chip('late','En retard')}
 ${chip('litige_manuel','Litige')}
 ${chip('report_projet','Report projet')}
 ${chip('a_verifier','À vérifier','Pennylane, Trello et le dashboard ne disent pas la même chose : à trancher par les expertes-comptables')}
-${[['soldees','Soldées'],['cancelled','Annulées'],['douteux_manuel','Douteux'],['credit_note','Avoirs'],['partially_paid','Partiellement réglées']].filter(([k])=>financeActiveFilters.has(k)).map(([k,l])=>chip(k,l+' ✕','Cliquer pour retirer')).join('')}<select class="finance-tab" title="Ajouter une vue" onchange="financeAjouterFiltre(this.value);this.value=''" style="cursor:pointer;width:auto;max-width:130px;flex:0 0 auto"><option value="">Plus ▾</option>${[['soldees','Soldées'],['cancelled','Annulées'],['douteux_manuel','Douteux'],['credit_note','Avoirs'],['partially_paid','Partiellement réglées']].filter(([k])=>!financeActiveFilters.has(k)).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>${(financeActiveFilters.size>1||!financeActiveFilters.has('all'))?`<button type="button" class="finance-tab" style="opacity:.7" onclick="financeReinitFiltres()" title="Revenir à « À recouvrer » seul">Réinitialiser</button>`:''}
+${[['relancee','Relancé'],['soldees','Soldées'],['cancelled','Annulées'],['douteux_manuel','Douteux'],['credit_note','Avoirs'],['partially_paid','Partiellement réglées']].filter(([k])=>financeActiveFilters.has(k)).map(([k,l])=>chip(k,l+' ✕','Cliquer pour retirer')).join('')}<select class="finance-tab" title="Ajouter une vue" onchange="financeAjouterFiltre(this.value);this.value=''" style="cursor:pointer;width:auto;max-width:130px;flex:0 0 auto"><option value="">Plus ▾</option>${[['relancee','Relancé'],['soldees','Soldées'],['cancelled','Annulées'],['douteux_manuel','Douteux'],['credit_note','Avoirs'],['partially_paid','Partiellement réglées']].filter(([k])=>!financeActiveFilters.has(k)).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select>${(financeActiveFilters.size>1||!financeActiveFilters.has('all'))?`<button type="button" class="finance-tab" style="opacity:.7" onclick="financeReinitFiltres()" title="Revenir à « À recouvrer » seul">Réinitialiser</button>`:''}
 `;
 { const inp=document.getElementById('finance-search'); if(inp&&!document.getElementById('finance-search-suggestions')){ const dl=document.createElement('datalist'); dl.id='finance-search-suggestions'; dl.innerHTML=['soldée','annulée','douteux','litige','report projet','partiel','avoir','à venir','en retard','1/2 payé','1/4 payé','upsell à régler'].map((m)=>`<option value="${m}">`).join(''); document.body.appendChild(dl); inp.setAttribute('list',dl.id); inp.type='search'; } }
 }
@@ -1129,7 +1130,8 @@ function financeFatimaHtml(inv){
   if(!cs.length&&!ra)return '';
   let h='<div class="finance-detail-section" style="border-left:3px solid #0d9488;padding-left:10px"><div class="form-label">Relances</div>';
   if(ra)h+=`<div style="font-size:12px;margin:2px 0"><strong>Échéance n°${ra.rang||'?'} échue le ${formatDateFR(String(ra.date).slice(0,10))}</strong> · ${d&&String(d.date).slice(0,10)>=String(ra.date).slice(0,10)?'relancée le '+formatDateFR(String(d.date).slice(0,10)):'pas encore relancée'}</div>`;
-  if(cs.length)h+='<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Derniers commentaires de Fatima (Trello)</div>'+cs.map((c)=>`<div style="font-size:12px;margin:4px 0"><strong>${formatDateFR(String(c.date).slice(0,10))}</strong>${c.relance?' · relance'+(c.canal?' ('+financeEscHtml(c.canal)+')':''):''} — ${financeEscHtml(c.texte)}</div>`).join('');
+  // Présentation épurée (05/11/2026) : date, canal en pastille, texte sans les @mentions, coupé à 2 lignes (clic = tout lire).
+  if(cs.length)h+='<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Derniers commentaires de Fatima (Trello) — cliquer pour tout lire</div>'+cs.map((c)=>{ const t=String(c.texte||'').replace(/@\w+/g,'').replace(/\s+/g,' ').trim(); const pill=c.relance?`<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent-dim);color:var(--accent);margin-right:6px">${c.canal?financeEscHtml(c.canal):'relance'}</span>`:''; return `<div style="display:grid;grid-template-columns:78px 1fr;gap:6px;font-size:12px;margin:5px 0"><span style="color:var(--text-muted)">${formatDateFR(String(c.date).slice(0,10))}</span><span title="Cliquer pour tout lire" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='unset'?'2':'unset'" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer">${pill}${financeEscHtml(t)}</span></div>`; }).join('');
   return h+'</div>';
 }
 // Acompte échu et non payé : la facture est en retard (à relancer), même si l'échéance
