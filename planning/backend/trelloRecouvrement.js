@@ -253,6 +253,7 @@ function construireRapportComplet(db) {
   const etiquettes = new Map(b.labels.map((l) => [l.id, l.name || '']));
   const couleurEtiquette = new Map(b.labels.map((l) => [l.id, l.color || ''])); // (04/11/2026) pastilles Trello sur la liste des factures
   const lecteurs = new Set(b.members.filter((m) => LECTEURS.includes(m.username)).map((m) => m.id));
+  const nomsMembres = new Map(b.members.map((m) => [m.id, m.fullName || m.username || ''])); // 05/11/2026 : auteur des commentaires
 
   // Factures en base (toutes, pour savoir si un numéro existe ; périmètre ≥ 2025 pour les contrôles)
   const factures = db.prepare(`
@@ -289,7 +290,9 @@ function construireRapportComplet(db) {
     if (a.type === 'commentCard') {
       ajouterNum(id, a.data.text);
       if (lecteurs.has(a.idMemberCreator)) { if (!comms.has(id)) comms.set(id, []); comms.get(id).push({ date: a.date, texte: a.data.text || '' }); }
-      if (a.idMemberCreator === ID_FATIMA) { if (!commsFatima.has(id)) commsFatima.set(id, []); const an = analyserCommentaireRelance(a.data.text); commsFatima.get(id).push({ date: a.date, texte: String(a.data.text || '').replace(/\s+/g, ' ').trim().slice(0, 280), relance: an.relance, canal: an.canal }); }
+      // 05/11/2026 (Lina) : commentaires de TOUTE l'équipe (pas seulement Fatima), avec leur auteur ;
+      // seulement les commentaires utiles (texte réel, hors liens et @mentions), les 5 plus récents par carte.
+      { const lst = commsFatima.get(id) || []; if (lst.length < 5) { const brut = String(a.data.text || ''); const net = brut.replace(/\[?https?:\/\/\S+/g, '').replace(/@\w+/g, '').replace(/\s+/g, ' ').trim(); if (net.length >= 8) { const an = analyserCommentaireRelance(brut); lst.push({ date: a.date, texte: net.slice(0, 240), a: nomsMembres.get(a.idMemberCreator) || '', relance: an.relance, canal: an.canal }); commsFatima.set(id, lst); } } }
     }
     if (a.type === 'addAttachmentToCard') {
       const nomPj = (a.data.attachment && a.data.attachment.name) || '';
