@@ -955,7 +955,8 @@ function goApp(path){ window.location.href = path; }
 const th=document.getElementById("theme");
 function setTheme(mode){
   document.documentElement.setAttribute("data-theme", mode === "dark" ? "dark" : "light");
-  th.textContent = mode === "light" ? "☀ Clair" : "☾ Sombre";
+  th.textContent = mode === "light" ? "☀️" : "🌙"; // icône seule dans le rond, comme Recouvrement (05/11/2026)
+  th.title = mode === "light" ? "Thème clair — passer en sombre" : "Thème sombre — passer en clair";
   localStorage.setItem("theme", mode);
 }
 let mode = localStorage.getItem("theme") || "light";
