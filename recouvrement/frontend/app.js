@@ -1124,7 +1124,9 @@ function financeDerniereRelance(inv){
 function financeRelanceRecente(inv){ const d=financeDerniereRelance(inv); if(!d)return false; const t=new Date(d.date).getTime(); return !isNaN(t)&&(Date.now()-t)<FINANCE_DELAI_RELANCE_JOURS*86400000; }
 function financeEnRetardARelancer(inv){ return financeEstARecouvrer(inv)&&['','a_relancer','en_cours'].includes(inv.internalStatus||'')&&(inv.daysLate||0)>0; }
 function financeEstARelancer(inv){ return financeEnRetardARelancer(inv)&&!financeRelanceRecente(inv); }
-function financeEstRelancee(inv){ return financeEnRetardARelancer(inv)&&financeRelanceRecente(inv); }
+// Onglet « Relancé » (05/11/2026, Lina) : toute facture à recouvrer relancée il y a moins de 7 jours,
+// quel que soit son statut (report projet, pas encore échue…).
+function financeEstRelancee(inv){ return financeEstARecouvrer(inv)&&financeRelanceRecente(inv); }
 function financeDerniereRelanceHtml(inv){ const d=financeDerniereRelance(inv); if(!d)return ''; return `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Relancé le ${formatDateFR(String(d.date).slice(0,10))}${d.canal?' ('+financeEscHtml(d.canal)+')':''}${d.a?' · '+financeEscHtml(d.a):''}</div>`; }
 // Dernier commentaire utile de la carte Trello, avec son auteur (05/11/2026, Lina) — sauf si c'est la relance déjà affichée.
 function financeDernierCommentaireHtml(inv){ const c=financeCommentairesFatima(inv)[0]; if(!c||!c.date)return ''; const d=financeDerniereRelance(inv); if(d&&d.date===c.date)return ''; const t=String(c.texte||''); return `<div title="${financeEscHtml(t)}" style="font-size:11px;color:var(--text-muted);margin-top:2px;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Dernier com. ${formatDateFR(String(c.date).slice(0,10)).slice(0,5)} · ${financeEscHtml(c.a||'Trello')} : ${financeEscHtml(t)}</div>`; }
@@ -1179,6 +1181,19 @@ function financeAjouterAVerifierTrello(){
     if(!sansCarte&&!sansEtiquette)continue;
     const l=financeAVerifier.get(k)||[];
     l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:sansCarte?`Aucune carte Trello trouvée pour cette facture (en retard de ${inv.daysLate} j) : statut à trancher.`:`Aucune étiquette de suivi sur la carte Trello (en retard de ${inv.daysLate} j) : à classer (soldée, report projet, litige, à relancer…).`});
+    financeAVerifier.set(k,l);
+  }
+  // Étiquette « Soldée » mais relance de l'équipe APRÈS la pose de l'étiquette : on n'est pas sûr → « À vérifier » (05/11/2026).
+  for(const inv of financeInvoicesCache){
+    if(inv.internalStatus!=='solde')continue;
+    const k=String(inv.id); const d=financeDecisionsTrello.get(k); if(!d||d.statut!=='solde')continue;
+    const pl=Number(inv._restePennylane)||0; if(pl<=0.5)continue;
+    if(['cancelled','partially_cancelled','archived'].includes(inv.status))continue; // annulée dans Pennylane : réglé
+    const m=String(d.note||'').match(/pos[ée]e le (\d{2})\/(\d{2})\/(\d{4})/); const pose=m?`${m[3]}-${m[2]}-${m[1]}`:String(inv.dateEmission||'');
+    const depuis30=new Date(Date.now()-30*86400000).toISOString().slice(0,10); const rel=financeCommentairesFatima(inv).filter((c)=>c.relance&&String(c.date).slice(0,10)>pose&&String(c.date).slice(0,10)>=depuis30).sort((a,b)=>a.date<b.date?1:-1)[0];
+    if(!rel)continue;
+    const l=financeAVerifier.get(k)||[];
+    l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:`Étiquette Trello « Soldée »${m?' (posée le '+m[1]+'/'+m[2]+')':''} mais relance de ${rel.a||'l’équipe'} le ${formatDateFR(String(rel.date).slice(0,10))} : est-elle vraiment réglée ? Pennylane indique encore ${fmtCA(pl)} dû.`});
     financeAVerifier.set(k,l);
   }
 }
