@@ -335,6 +335,7 @@ let financeAVerifier=new Map();
 // (numéros renvoyés par /finance/a-verifier).
 let financeScpNumeros=new Set();
 let financeFatima=new Map(); // commentaires Trello de Fatima Louzi par facture (05/11/2026)
+let financeLiensTrello=new Map(); // lien de la carte Trello de chaque facture (05/11/2026)
 function financeEstScp(inv){
 if(!inv)return false;
 if(/groupe\s*scp/i.test(inv.customerName||inv.customer_name||''))return true;
@@ -356,6 +357,7 @@ financeAVerifier=m;
 financeDecisionsTrello=new Map((d.decisions||[]).map((x)=>[String(x.id),x]));
 financeEtiquettes=new Map((d.etiquettes||[]).map((x)=>[String(x.id),x.e||[]]));
 financeFatima=new Map((d.fatima||[]).map((x)=>[String(x.id),x.c||[]]));
+financeLiensTrello=new Map((d.liens||[]).map((x)=>[String(x.id),x.u]));
 financePartielsTrello=new Map((d.partiels||[]).map((p)=>[String(p.id),p]));
 financeAvoirsParFacture=new Map();financeAvoirsParAvoir=new Map();
 for(const a of (d.avoirs||[])){const kf=String(a.factureId),ka=String(a.avoirId);if(!financeAvoirsParFacture.has(kf))financeAvoirsParFacture.set(kf,[]);financeAvoirsParFacture.get(kf).push(a);if(!financeAvoirsParAvoir.has(ka))financeAvoirsParAvoir.set(ka,[]);financeAvoirsParAvoir.get(ka).push(a);}
@@ -1055,7 +1057,7 @@ const statutOptionsHtml=(inv)=>(meta.financeInternalStatuses||[]).map(s=>`<optio
 wrap.innerHTML=`<table>
 <thead><tr><th>Facture</th><th>Entreprise</th><th>Contact</th><th>Statut</th><th class="sortable-th" onclick="setFinanceSort('deadline')" title="Un point par échéance : vert réglée, rouge en retard, orange partielle, gris à venir. Détail et modification de la date dans la fiche.">Échéances${financeSortArrow('deadline')}</th><th class="sortable-th" onclick="setFinanceSort('retard')">Retard${financeSortArrow('retard')}</th><th class="sortable-th" onclick="setFinanceSort('montant')" title="Ce qu'il reste à payer sur la facture (le montant total est dans la fiche)">Reste dû TTC${financeSortArrow('montant')}</th></tr></thead>
 <tbody>${list.map(inv=>`<tr class="finance-invoice-row" onclick="financeRowClick(event,'${inv.id}')">
-<td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeEmissionDateHtml(inv)}${financeEtiquettesInfoHtml(inv)}</td>
+<td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeLienTrelloHtml(inv)}${financeEmissionDateHtml(inv)}${financeEtiquettesInfoHtml(inv)}</td>
 <td>${inv.customerName||'—'}</td>
 <td>${financeContactHtml(inv)}</td>
 <td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'};min-width:120px" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select>${financeDerniereRelanceHtml(inv)}</td>
@@ -1127,11 +1129,9 @@ function financeDerniereRelanceHtml(inv){ const d=financeDerniereRelance(inv); i
 function financeFatimaHtml(inv){
   if(!inv)return '';
   const cs=financeCommentairesFatima(inv).slice(0,3); const ra=inv._retardAcompte; const d=financeDerniereRelance(inv);
-  if(!cs.length&&!ra)return '';
+  if(!ra)return '';
   let h='<div class="finance-detail-section" style="border-left:3px solid #0d9488;padding-left:10px"><div class="form-label">Relances</div>';
   if(ra)h+=`<div style="font-size:12px;margin:2px 0"><strong>Échéance n°${ra.rang||'?'} échue le ${formatDateFR(String(ra.date).slice(0,10))}</strong> · ${d&&String(d.date).slice(0,10)>=String(ra.date).slice(0,10)?'relancée le '+formatDateFR(String(d.date).slice(0,10)):'pas encore relancée'}</div>`;
-  // Présentation épurée (05/11/2026) : date, canal en pastille, texte sans les @mentions, coupé à 2 lignes (clic = tout lire).
-  if(cs.length)h+='<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Derniers commentaires de Fatima (Trello) — cliquer pour tout lire</div>'+cs.map((c)=>{ const t=String(c.texte||'').replace(/@\w+/g,'').replace(/\s+/g,' ').trim(); const pill=c.relance?`<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent-dim);color:var(--accent);margin-right:6px">${c.canal?financeEscHtml(c.canal):'relance'}</span>`:''; return `<div style="display:grid;grid-template-columns:78px 1fr;gap:6px;font-size:12px;margin:5px 0"><span style="color:var(--text-muted)">${formatDateFR(String(c.date).slice(0,10))}</span><span title="Cliquer pour tout lire" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='unset'?'2':'unset'" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer">${pill}${financeEscHtml(t)}</span></div>`; }).join('');
   return h+'</div>';
 }
 // Acompte échu et non payé : la facture est en retard (à relancer), même si l'échéance
@@ -1494,9 +1494,16 @@ ${nbLitige?`<span style="color:#dc2626"><strong>${nbLitige}</strong> en litige</
 // côté serveur. Le texte brut est repris depuis financeCommentsCache (jamais
 // ré-injecté depuis le HTML déjà échappé) pour ne pas avoir à gérer l'échappement
 // des guillemets/apostrophes dans un attribut HTML.
+function financeLienTrelloHtml(inv){ const u=financeLiensTrello.get(String(inv&&inv.id)); return u?` <a href="${financeEscHtml(u)}" target="_blank" rel="noopener" title="Ouvrir la carte Trello" onclick="event.stopPropagation()" style="font-size:11px;color:var(--text-muted);text-decoration:none;white-space:nowrap">Trello ↗</a>`:''; }
+// Commentaires (05/11/2026, Lina) : les commentaires Trello de Fatima (relances) s'affichent ici,
+// en lecture seule et marqués « Trello », mélangés par date avec les commentaires du dashboard.
 function financeCommentsListHtml(invoiceId,comments){
-if(!comments.length)return '<div class="idea-box-empty">Aucun commentaire pour l’instant</div>';
-return comments.map(c=>financeCommentRowHtml(invoiceId,c)).join('');
+const ts=(c)=>{ const d=parseSqliteUtc(c.created_at)||new Date(c.created_at); return d&&!isNaN(d)?d.getTime():0; };
+const lignes=(comments||[]).map((c)=>({t:ts(c),html:financeCommentRowHtml(invoiceId,c)}));
+const lien=financeLiensTrello.get(String(invoiceId));
+for(const c of financeFatima.get(String(invoiceId))||[]){ const t=String(c.texte||'').replace(/@\w+/g,'').replace(/\s+/g,' ').trim(); const pill=c.relance?`<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent-dim);color:var(--accent)">relance${c.canal?' · '+financeEscHtml(c.canal):''}</span>`:''; lignes.push({t:new Date(c.date).getTime()||0,html:`<div class="finance-relance-entry" style="border-left:3px solid #0d9488;padding-left:8px"><div title="Cliquer pour tout lire" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='unset'?'3':'unset'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer">${financeEscHtml(t)}</div><div class="finance-relance-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>Fatima Louzi · Trello · ${new Date(c.date).toLocaleString('fr-FR')}</span>${pill}${lien?`<a href="${financeEscHtml(lien)}" target="_blank" rel="noopener" style="margin-left:auto;font-size:11px">Voir sur Trello ↗</a>`:''}</div></div>`}); }
+if(!lignes.length)return '<div class="idea-box-empty">Aucun commentaire pour l’instant</div>';
+return lignes.sort((a,b)=>b.t-a.t).map((l)=>l.html).join('');
 }
 function financeCommentRowHtml(invoiceId,c){
 const modifie=c.updated_at?' · <em>modifié</em>':'';
