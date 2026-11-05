@@ -11,6 +11,9 @@ const LECTEURS = ['arianesmirnoff', 'comptaopenmedias']; // Ariane + compte Comp
 // 05/11/2026 (Lina) : commentaires de Fatima Louzi (recouvrement), lus pour l'information
 // et l'onglet « Relancé » du dashboard. Ils ne changent jamais le statut d'une facture.
 const ID_FATIMA = '67693c54e36bbceffbcf54d4';
+// Échéancier écrit dans la mention Pennylane (05/11/2026) : sert à lire « a/b payé » en échéances.
+let echeancesLib = null;
+try { echeancesLib = require('./echeancesPennylane'); } catch (e) { /* facultatif */ }
 function analyserCommentaireRelance(texte) {
   const t = String(texte || '');
   const pasRelance = /facture envoy|(mail|sms|message|msg|appel|vocal) re[çc]u|re[çc]u ce jour|virement re[çc]u/i.test(t); // un message REÇU du client n'est pas une relance
@@ -253,7 +256,7 @@ function construireRapportComplet(db) {
 
   // Factures en base (toutes, pour savoir si un numéro existe ; périmètre ≥ 2025 pour les contrôles)
   const factures = db.prepare(`
-    SELECT i.id, i.invoice_number, i.customer_id, i.date_emission, i.amount, i.remaining_amount, i.status, i.internal_status,
+    SELECT i.id, i.invoice_number, i.customer_id, i.date_emission, i.amount, i.remaining_amount, i.status, i.internal_status, i.special_mention,
            c.name AS client
     FROM pennylane_invoices i LEFT JOIN pennylane_customers c ON c.id = i.customer_id
   `).all();
@@ -722,8 +725,19 @@ function construireRapportComplet(db) {
       if (part != null) {
         // (03/11/2026) factures annulées hors calcul de la part payée (Cellnex : F7355 annulée, remplacée par F7375).
         const invsFr = invs.filter((f) => f.status !== 'cancelled' && Number(f.amount) > 0);
-        let paye = invsFr.reduce((s, f) => s + Number(f.amount), 0) * part;
-        for (const f of invsFr) { const a = Math.min(Number(f.amount), paye); paye -= a; res.get(String(f.id)).frac = Math.round((Number(f.amount) - a) * 100) / 100; }
+        // (05/11/2026, Lina) « a/b payé » = a échéances payées sur b. Quand la facture a un échéancier
+        // Pennylane de b échéances (ex. F7359 « 1/3 payé » : 50 % / 25 % / 25 %), les a premières
+        // échéances sont payées — et non a/b du montant total.
+        const mFr = String(etiq || '').toLowerCase().match(/^(\d)\s*\/\s*(\d)\s+pay/);
+        let acEch = [];
+        if (mFr && invsFr.length === 1 && echeancesLib) { try { acEch = echeancesLib.lireAcomptes(invsFr[0].special_mention || '', Number(invsFr[0].amount)) || []; } catch (e) { acEch = []; } }
+        if (mFr && acEch.length === Number(mFr[2]) && acEch.every((x) => Number(x.montant) > 0)) {
+          const payeEch = acEch.slice(0, Number(mFr[1])).reduce((s, x) => s + Number(x.montant), 0);
+          const f0 = invsFr[0]; res.get(String(f0.id)).frac = Math.round(Math.max(0, Number(f0.amount) - payeEch) * 100) / 100;
+        } else {
+          let paye = invsFr.reduce((s, f) => s + Number(f.amount), 0) * part;
+          for (const f of invsFr) { const a = Math.min(Number(f.amount), paye); paye -= a; res.get(String(f.id)).frac = Math.round((Number(f.amount) - a) * 100) / 100; }
+        }
       }
       const coms = (tousComms.get(carte.id) || []).slice().sort((a, c) => (a.date < c.date ? -1 : 1));
       const ouvertes = invs.filter((f) => restant(f) > 1);
