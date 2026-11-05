@@ -365,7 +365,7 @@ const avant=financeInvoicesCache.length;
 financeInvoicesCache=financeInvoicesCache.filter((inv)=>!financeEstScp(inv));
 if(financeInvoicesCache.length!==avant){ renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache()); }
 }
-financeAppliquerRestesReels();financeAppliquerRetardAcomptes();
+financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();
 renderFinanceTabs(); renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache());
 }catch(e){ /* Trello indisponible : l'onglet reste vide */ }
 }
@@ -512,7 +512,7 @@ fetch(`${API}/finance/kpis`,{headers:financeHeaders()}).then(r=>r.json()),
 fetch(`${API}/finance/invoices`,{headers:financeHeaders()}).then(r=>r.json()),
 ]);
 financeInvoicesCache=(Array.isArray(invoices)?invoices:[]).filter((inv)=>!financeEstScp(inv)); // SCP retirés (15/10/2026)
-financeAppliquerRestesReels();financeAppliquerRetardAcomptes();
+financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();
 // La syncOverview (répartition brute Pennylane, tous statuts confondus) est
 // la seule chose qu'on garde du backend telle quelle : c'est un repère de
 // cohérence de synchro globale, jamais borné à une période. Les KPI
@@ -535,7 +535,7 @@ if(!r.ok)return;
 const updated=await r.json();
 const idx=financeInvoicesCache.findIndex(i=>i.id===updated.id);
 if(idx>=0)financeInvoicesCache[idx]=updated; else financeInvoicesCache.push(updated);
-financeAppliquerRestesReels();financeAppliquerRetardAcomptes();
+financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();
 renderFinanceTabs();
 renderFinanceInvoices();
 renderFinanceKpis(computeFinanceKpisFromCache());
@@ -1148,6 +1148,18 @@ function financeAppliquerRetardAcomptes(){
       if(j>0&&j>(inv.daysLate||0)){ inv.daysLate=j; inv._retardAcompte={rang:a.rang||null,date:a.date}; }
       break;
     }
+  }
+}
+// Statut « Relancé » (05/11/2026, Lina) : une facture relancée il y a moins de 7 jours
+// (commentaire de Fatima dans Trello ou relance saisie) passe « Relancé » ; sans paiement,
+// elle repasse « À relancer » au bout de 7 jours. Affichage seulement, rien n'est écrit en base.
+function financeAppliquerStatutRelance(){
+  for(const inv of financeInvoicesCache){
+    const st=inv.internalStatus||'';
+    if(st!==''&&st!=='a_relancer'&&st!=='en_cours')continue;
+    if(!(Number(inv.remainingAmountTtc)>0.5))continue;
+    if(financeRelanceRecente(inv)){ if(st!=='en_cours'){ inv.internalStatus='en_cours'; inv._statutRelanceAuto=true; } }
+    else if(st==='en_cours'&&(inv.daysLate||0)>0){ inv.internalStatus='a_relancer'; inv._statutRelanceAuto=true; }
   }
 }
 function financeAcomptesAuto(inv){ return (!(inv.installments||[]).length&&inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[]; }
