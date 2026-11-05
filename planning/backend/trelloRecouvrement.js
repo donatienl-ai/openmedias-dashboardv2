@@ -258,6 +258,7 @@ function construireRapportComplet(db) {
   const couleurEtiquette = new Map(b.labels.map((l) => [l.id, l.color || ''])); // (04/11/2026) pastilles Trello sur la liste des factures
   const lecteurs = new Set(b.members.filter((m) => LECTEURS.includes(m.username)).map((m) => m.id));
   const nomsMembres = new Map(b.members.map((m) => [m.id, m.fullName || m.username || ''])); // 05/11/2026 : auteur des commentaires
+  const nomsParPseudo = new Map(b.members.map((m) => [String(m.username || '').toLowerCase(), m.fullName || m.username || ''])); // personnes identifiées avec @
 
   // Factures en base (toutes, pour savoir si un numéro existe ; périmètre ≥ 2025 pour les contrôles)
   const factures = db.prepare(`
@@ -296,7 +297,7 @@ function construireRapportComplet(db) {
       if (lecteurs.has(a.idMemberCreator)) { if (!comms.has(id)) comms.set(id, []); comms.get(id).push({ date: a.date, texte: a.data.text || '' }); }
       // 05/11/2026 (Lina) : commentaires de TOUTE l'équipe (pas seulement Fatima), avec leur auteur ;
       // seulement les commentaires utiles (texte réel, hors liens et @mentions), les 5 plus récents par carte.
-      { const lst = commsFatima.get(id) || []; if (lst.length < 5) { const brut = String(a.data.text || ''); const net = brut.replace(/\[?https?:\/\/\S+/g, '').replace(/@\w+/g, '').replace(/\s+/g, ' ').trim(); if (net.length >= 8) { const an = analyserCommentaireRelance(brut); lst.push({ date: a.date, texte: net.slice(0, 240), a: nomsMembres.get(a.idMemberCreator) || '', relance: an.relance, canal: an.canal, promesse: an.promesse, dp: an.datePromesse }); commsFatima.set(id, lst); } } }
+      { const lst = commsFatima.get(id) || []; if (lst.length < 5) { const brut = String(a.data.text || ''); const net = brut.replace(/\[?https?:\/\/\S+/g, '').replace(/@\w+/g, '').replace(/\s+/g, ' ').trim(); if (net.length >= 8) { const an = analyserCommentaireRelance(brut); lst.push({ date: a.date, texte: net.slice(0, 240), a: nomsMembres.get(a.idMemberCreator) || '', relance: an.relance, canal: an.canal, promesse: an.promesse, dp: an.datePromesse, m: [...new Set((brut.match(/@([\w.-]+)/g) || []).map((x) => nomsParPseudo.get(x.slice(1).toLowerCase()) || x.slice(1)))].slice(0, 6) }); commsFatima.set(id, lst); } } }
     }
     if (a.type === 'addAttachmentToCard') {
       const nomPj = (a.data.attachment && a.data.attachment.name) || '';
@@ -854,7 +855,7 @@ function appliquerDecisionsTrello(db) {
 }
 function appliquerDouteuxTrello(db) {
   const r = construireRapport(db);
-  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='douteux' WHERE id=? AND COALESCE(internal_status,'') NOT IN ('douteux','solde')");
+  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='douteux' WHERE id=? AND COALESCE(internal_status,'') NOT IN ('douteux','solde') AND internal_status_manual_at IS NULL");
   for (const x of r.nouveauxDouteux || []) {
     const res = maj.run(x.id);
     if (res.changes) console.log(`[trello] ${x.facture} ${x.client || ''} → Douteux (étiquette « client douteux » dans Trello)`);
@@ -914,7 +915,7 @@ const LISTE_REPORTS = 'reports projets';
 function appliquerReportsProjets(db) {
   const r = candidatsListeTrello(db, LISTE_REPORTS);
   if (r.factures.length > 10) { console.warn(`[trello] Reports projets : ${r.factures.length} factures candidates, au-delà du garde-fou (10) — rien n'est appliqué`); return r; }
-  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='report_projet' WHERE id=? AND COALESCE(internal_status,'') IN ('','a_relancer','en_cours')");
+  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='report_projet' WHERE id=? AND COALESCE(internal_status,'') IN ('','a_relancer','en_cours') AND internal_status_manual_at IS NULL");
   for (const x of r.factures) {
     const res = maj.run(x.id);
     if (res.changes) console.log(`[trello] ${x.facture} ${x.client || ''} → Report projet (carte « ${x.carte} » dans Reports projets)`);
@@ -926,7 +927,7 @@ function appliquerLitigeForbes(db) {
   // Garde-fou : un rapprochement anormalement large (mauvais nom de liste,
   // carte au nom trop court…) ne doit pas basculer des dizaines de factures.
   if (r.factures.length > 10) { console.warn(`[trello] Forbes : ${r.factures.length} factures candidates, au-delà du garde-fou (10) — rien n'est appliqué`); return r; }
-  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='litige' WHERE id=? AND COALESCE(internal_status,'') IN ('','a_relancer','en_cours')");
+  const maj = db.prepare("UPDATE pennylane_invoices SET internal_status='litige' WHERE id=? AND COALESCE(internal_status,'') IN ('','a_relancer','en_cours') AND internal_status_manual_at IS NULL");
   for (const x of r.factures) {
     const res = maj.run(x.id);
     if (res.changes) console.log(`[trello] ${x.facture} ${x.client || ''} → Litige (carte « ${x.carte} » dans Clients Forbes - Stand By)`);
