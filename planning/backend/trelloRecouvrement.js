@@ -24,7 +24,11 @@ function analyserCommentaireRelance(texte) {
   else if (/\bsms\b/i.test(t)) canal = 'SMS';
   else if (/mail|^\s*bonjour/i.test(t)) canal = 'mail';
   else if (/\bNRP\b|appel|messagerie|t[ée]l[ée]phon/i.test(t)) canal = 'appel';
-  return { relance, canal };
+  // Promesse de paiement (05/11/2026, Lina) : le client annonce un paiement, ce n'est pas un paiement.
+  const promesse = !/virement (de [\d\s.,]+ ?€ )?re[çc]u le|r[ée]gl[ée] le \d/i.test(t) && /s'?en occupe|va (r[ée]gler|payer|faire le virement|virer|proc[ée]der)|virement (pr[ée]vu|programm|en cours|sera|part)|(r[èe]glement|paiement) (pr[ée]vu|programm|en cours)|en cours de paiement|avis de virement|r[ée]glera|paiera|payera/i.test(t);
+  let datePromesse = null;
+  if (promesse) { const m = t.match(/(?:le|au|avant le|pour le|d'ici le)\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/i); if (m) { const now = new Date(); let y = m[3] ? Number(m[3].length === 2 ? '20' + m[3] : m[3]) : now.getFullYear(); const mo = Number(m[2]); if (!m[3] && mo < now.getMonth() + 1 - 6) y += 1; if (mo >= 1 && mo <= 12 && Number(m[1]) >= 1 && Number(m[1]) <= 31) datePromesse = `${y}-${String(mo).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`; } }
+  return { relance, canal, promesse, datePromesse };
 }
 // (03/11/2026, Lina) Paiements lus dans les commentaires : désactivés. Les étiquettes (« 1/2 payé »…)
 // et Pennylane font foi ; un commentaire comme « relancé 6k » faussait le reste dû (F7236).
@@ -292,7 +296,7 @@ function construireRapportComplet(db) {
       if (lecteurs.has(a.idMemberCreator)) { if (!comms.has(id)) comms.set(id, []); comms.get(id).push({ date: a.date, texte: a.data.text || '' }); }
       // 05/11/2026 (Lina) : commentaires de TOUTE l'équipe (pas seulement Fatima), avec leur auteur ;
       // seulement les commentaires utiles (texte réel, hors liens et @mentions), les 5 plus récents par carte.
-      { const lst = commsFatima.get(id) || []; if (lst.length < 5) { const brut = String(a.data.text || ''); const net = brut.replace(/\[?https?:\/\/\S+/g, '').replace(/@\w+/g, '').replace(/\s+/g, ' ').trim(); if (net.length >= 8) { const an = analyserCommentaireRelance(brut); lst.push({ date: a.date, texte: net.slice(0, 240), a: nomsMembres.get(a.idMemberCreator) || '', relance: an.relance, canal: an.canal }); commsFatima.set(id, lst); } } }
+      { const lst = commsFatima.get(id) || []; if (lst.length < 5) { const brut = String(a.data.text || ''); const net = brut.replace(/\[?https?:\/\/\S+/g, '').replace(/@\w+/g, '').replace(/\s+/g, ' ').trim(); if (net.length >= 8) { const an = analyserCommentaireRelance(brut); lst.push({ date: a.date, texte: net.slice(0, 240), a: nomsMembres.get(a.idMemberCreator) || '', relance: an.relance, canal: an.canal, promesse: an.promesse, dp: an.datePromesse }); commsFatima.set(id, lst); } } }
     }
     if (a.type === 'addAttachmentToCard') {
       const nomPj = (a.data.attachment && a.data.attachment.name) || '';
@@ -690,6 +694,7 @@ function construireRapportComplet(db) {
   rapport.decisionsTrello = [];
   rapport.commentairesFatima = []; // 05/11/2026 : derniers commentaires de Fatima par facture
   rapport.liensTrello = []; // 05/11/2026 : lien de la carte Trello de chaque facture (carte ouverte en priorité)
+  rapport.listesFactures = []; // 05/11/2026 : colonne Trello de cette carte (report projet / diffusion faite)
   rapport.etiquettesFactures = []; // étiquettes Trello « recouvrement » de chaque facture, pour l'affichage et la recherche
   const fractionEtiquette = (nom) => {
     const n = String(nom || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -818,7 +823,7 @@ function construireRapportComplet(db) {
     { const fs = []; const vus = new Set();
       for (const { carte } of entrees) { if (vus.has(carte.id)) continue; vus.add(carte.id); for (const c of (commsFatima.get(carte.id) || [])) fs.push(c); }
       if (fs.length) { fs.sort((a, b) => (a.date < b.date ? 1 : -1)); rapport.commentairesFatima.push({ id: f.id, c: fs.slice(0, 5) }); } }
-    { const e = entrees.find((x) => x.carte && !x.carte.closed) || entrees[0]; if (e && e.carte && e.carte.shortUrl) rapport.liensTrello.push({ id: f.id, u: e.carte.shortUrl }); }
+    { const e = entrees.find((x) => x.carte && !x.carte.closed) || entrees[0]; if (e && e.carte && e.carte.shortUrl) rapport.liensTrello.push({ id: f.id, u: e.carte.shortUrl }); if (e && e.liste) rapport.listesFactures.push({ id: f.id, l: e.liste }); }
       if (statut || resteReel != null) rapport.decisionsTrello.push({ id: f.id, facture: f.invoice_number, client: f.client, statutActuel: f.internal_status || 'a_relancer', statut, resteReel, restePennylane: reste, note: notes.join(' · '), lien });
   }
 
@@ -1002,7 +1007,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       // (03/11/2026) Groupe SCP retiré du dashboard : ses avoirs non plus (ex. F7213).
       const pieceScp = new Set(db.prepare("SELECT i.invoice_number AS n FROM pennylane_invoices i LEFT JOIN pennylane_customers c ON c.id = i.customer_id WHERE c.name LIKE '%SCP%'").all().map((x) => String(x.n)));
       const aVerifier = items.filter((x) => x.facture !== 'F5885' && !pieceScp.has(String(x.facture)) && !classees.has(String(x.id)));
-      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, etiquettes: r.etiquettesFactures || [], fatima: r.commentairesFatima || [], liens: r.liensTrello || [], avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
+      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, etiquettes: r.etiquettesFactures || [], fatima: r.commentairesFatima || [], liens: r.liensTrello || [], listes: r.listesFactures || [], avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
