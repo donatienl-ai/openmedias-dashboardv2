@@ -394,7 +394,12 @@ function setupReports(db) {
     const scpMail = new Set((rapportTrello.scp || []).map((x) => String(x.facture)));
     // Relances (05/11/2026) : dernière relance de Fatima (Trello) par facture.
     const relancesFatima = new Map();
-    for (const x of (rapportTrello.commentairesFatima || [])) { const r = (x.c || []).filter((c) => c.relance && c.date).map((c) => c.date).sort().pop(); if (r) relancesFatima.set(String(x.id), r); }
+    const promessesEnCours = new Set(); const aujourdhuiTxt = new Date().toISOString().slice(0, 10);
+    for (const x of (rapportTrello.commentairesFatima || [])) {
+      const r = (x.c || []).filter((c) => (c.relance || c.promesse) && c.date).map((c) => c.date).sort().pop(); if (r) relancesFatima.set(String(x.id), r);
+      // Promesse avec une date annoncée encore à venir (05/11/2026) : à part jusqu'au lendemain de cette date.
+      if ((x.c || []).some((c) => c.promesse && c.dp && c.dp >= aujourdhuiTxt)) promessesEnCours.add(String(x.id));
+    }
     const relanceesRecemment = [];
     const debutJour = new Date(); debutJour.setHours(0, 0, 0, 0);
     const enRetard = [];
@@ -414,7 +419,7 @@ function setupReports(db) {
       if (!(reste > 0.5)) continue;
       const ligne = { id: f.id, invoice_number: numero, customer_name: f.customerName || '', contact_name: f.contactName || '', contact_email: f.contactEmail || '', contact_phone: f.contactPhone || '', remaining_amount: reste, daysLate: f.daysLate };
       if (statut === 'litige') { litigesCalcules.push(ligne); continue; }
-      if (statut && statut !== 'a_relancer' && statut !== 'en_cours') continue;
+      if (statut && statut !== 'a_relancer' && statut !== 'en_cours' && statut !== 'promesse_paiement') continue;
       // Acompte échu non payé = retard, comme le dashboard (05/11/2026). Pas quand Trello a
       // déjà recalculé les parts payées (le dashboard s'appuie alors sur Trello).
       let jours = f.daysLate || 0;
@@ -425,7 +430,7 @@ function setupReports(db) {
       // Relancée il y a moins de 7 jours (Fatima dans Trello ou relance saisie) : onglet « Relancé »,
       // pas dans la liste du jour ; sans paiement, elle y revient après 7 jours.
       const derniere = [relancesFatima.get(String(f.id)), f.lastRelanceAt].filter(Boolean).map(String).sort().pop();
-      if (derniere && Date.now() - new Date(derniere).getTime() < 7 * 86400000) { relanceesRecemment.push(ligne); continue; }
+      if (promessesEnCours.has(String(f.id)) || (derniere && Date.now() - new Date(derniere).getTime() < 7 * 86400000)) { relanceesRecemment.push(ligne); continue; }
       enRetard.push(ligne);
     }
     enRetard.sort((a, b) => b.daysLate - a.daysLate);
@@ -497,7 +502,7 @@ function setupReports(db) {
       html += `</table>`;
     }
 
-    if (relanceesRecemment.length) html += '<p style="color:#555;font-family:Arial,sans-serif;font-size:13px">' + relanceesRecemment.length + ' autre(s) facture(s) en retard relancée(s) il y a moins de 7 jours (onglet « Relancé ») : ' + relanceesRecemment.map((r) => r.invoice_number).join(', ') + '.</p>';
+    if (relanceesRecemment.length) html += '<p style="color:#555;font-family:Arial,sans-serif;font-size:13px">' + relanceesRecemment.length + ' autre(s) facture(s) en retard relancée(s) ou avec une promesse de paiement récente (onglet « Relancé ») : ' + relanceesRecemment.map((r) => r.invoice_number).join(', ') + '.</p>';
     if (sansTrello) html += '<p style="color:#b45309;font-family:Arial,sans-serif;font-size:13px">⚠️ Trello n’était pas chargé à l’envoi : les statuts venus de Trello (soldée, report projet, litige) ne sont pas appliqués dans ce mail.</p>';
     html += empreinteHtml(enRetard.length + ' facture(s)' + (litiges.length ? ` + ${litiges.length} litige(s)` : ''));
     // seulementA : envoi de test à une seule adresse (05/11/2026, Lina).
