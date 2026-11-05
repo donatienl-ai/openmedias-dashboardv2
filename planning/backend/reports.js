@@ -353,9 +353,25 @@ function setupReports(db) {
   // commun pour cette constante — à garder synchronisée si la liste change.
   const REPORTS_PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete', 'paid'];
 
-  function reportRelancesQuotidien({ force = false } = {}) {
+  function reportRelancesQuotidien({ force = false, tentative = 0 } = {}) {
     const fmt = (d) => d.toISOString().slice(0, 10);
     const today = fmt(new Date());
+    // 05/11/2026 : on attend que Trello soit chargé, comme le dashboard. Nouvel
+    // essai toutes les 5 min (6 fois) ; ensuite le mail part avec une mention.
+    let rapportTrello = null;
+    try {
+      const trello = require('./trelloRecouvrement');
+      if (trello._etat && trello._etat.board) rapportTrello = trello._construireRapport(db);
+    } catch (e) { console.warn('[RELANCES] Trello :', e.message); }
+    if (!rapportTrello && tentative < 6) {
+      console.log('[RELANCES] Trello pas encore chargé — nouvel essai dans 5 min');
+      setTimeout(() => reportRelancesQuotidien({ force, tentative: tentative + 1 }), 5 * 60 * 1000).unref();
+      return;
+    }
+    const sansTrello = !rapportTrello;
+    if (!rapportTrello) rapportTrello = {};
+    let facturesDashboard = [];
+    try { facturesDashboard = require('./financeRoutes').listeFacturesDashboard() || []; } catch (e) { console.warn('[RELANCES] factures :', e.message); }
     if (!force && !claimReportOnce(`relances_${today}`)) {
       console.log(`[RELANCES] ${today} déjà envoyé — doublon ignoré`);
       return;
@@ -369,20 +385,35 @@ function setupReports(db) {
     // ne pas relancer un client qui a déjà payé. "douteux" ajouté le
     // 24/09/2026 (demande Lina, même logique que litige/promesse/soldée :
     // déjà suivie autrement, pas besoin d'une relance automatique).
-    const rows = db.prepare(`
-      SELECT i.*, c.name AS customer_name, c.contact_name AS contact_name,
-             c.contact_email AS contact_email, c.contact_phone AS contact_phone
-      FROM pennylane_invoices i
-      LEFT JOIN pennylane_customers c ON c.id = i.customer_id
-      WHERE i.remaining_amount > 0
-        AND i.internal_status NOT IN ('litige', 'promesse_paiement', 'solde', 'douteux')
-        AND i.date_emission >= '2025-01-01'
-        AND (i.status IS NULL OR i.status NOT IN (${REPORTS_PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',')}))
-    `).all(...REPORTS_PENNYLANE_HORS_RECOUVREMENT);
-    const enRetard = rows
-      .map((r) => ({ ...r, daysLate: joursDeRetardRelance(r.deadline) }))
-      .filter((r) => (r.daysLate || 0) > 0)
-      .sort((a, b) => b.daysLate - a.daysLate);
+    // 05/11/2026 (Lina) : le mail lit exactement le dashboard Recouvrement —
+    // même liste de factures (mêmes jours de retard), mêmes décisions Trello
+    // (Soldée, Report projet, Litige Forbes, reste dû recalculé), mêmes
+    // exclusions (SCP, F5885, avant 2025, statuts Pennylane hors recouvrement).
+    // « À relancer » = statut à relancer (ou aucun) ET en retard, comme la tuile.
+    const decisionsMail = new Map((rapportTrello.decisionsTrello || []).map((d) => [String(d.id), d]));
+    const scpMail = new Set((rapportTrello.scp || []).map((x) => String(x.facture)));
+    const enRetard = [];
+    const litigesCalcules = [];
+    for (const f of facturesDashboard) {
+      const numero = String(f.invoiceNumber || '');
+      if (numero === 'F5885' || scpMail.has(numero) || /SCP/i.test(f.customerName || '')) continue;
+      if ((f.dateEmission || '') < '2025-01-01') continue;
+      if (f.status && REPORTS_PENNYLANE_HORS_RECOUVREMENT.includes(f.status)) continue;
+      let statut = f.internalStatus || null;
+      let reste = Number(f.remainingAmountTtc != null ? f.remainingAmountTtc : (f.remainingAmount || 0));
+      const d = decisionsMail.get(String(f.id));
+      if (d) {
+        if (d.statut === 'solde' || d.statut === 'report_projet' || d.statut === 'litige') statut = d.statut;
+        if (d.resteReel != null) reste = Number(d.resteReel);
+      }
+      if (!(reste > 0.5)) continue;
+      const ligne = { id: f.id, invoice_number: numero, customer_name: f.customerName || '', contact_name: f.contactName || '', contact_email: f.contactEmail || '', contact_phone: f.contactPhone || '', remaining_amount: reste, daysLate: f.daysLate };
+      if (statut === 'litige') { litigesCalcules.push(ligne); continue; }
+      if (statut && statut !== 'a_relancer') continue;
+      if ((f.daysLate || 0) > 0) enRetard.push(ligne);
+    }
+    enRetard.sort((a, b) => b.daysLate - a.daysLate);
+    litigesCalcules.sort((a, b) => b.remaining_amount - a.remaining_amount);
 
     const dest = db.prepare(
       "SELECT email FROM commercial_users WHERE role IN ('finance','admin') AND actif=1"
@@ -424,17 +455,7 @@ function setupReports(db) {
     // on les ajoute seulement en lecture, à la fin du même mail, pour que
     // l'équipe garde un œil dessus sans déclencher de relance automatique.
     // Confirmé par Lina : "Section informative séparée", pas une relance.
-    const litiges = db.prepare(`
-      SELECT i.*, c.name AS customer_name, c.contact_name AS contact_name,
-             c.contact_email AS contact_email, c.contact_phone AS contact_phone
-      FROM pennylane_invoices i
-      LEFT JOIN pennylane_customers c ON c.id = i.customer_id
-      WHERE i.internal_status = 'litige'
-        AND i.remaining_amount > 0
-        AND i.date_emission >= '2025-01-01'
-        AND (i.status IS NULL OR i.status NOT IN (${REPORTS_PENNYLANE_HORS_RECOUVREMENT.map(() => '?').join(',')}))
-      ORDER BY i.remaining_amount DESC
-    `).all(...REPORTS_PENNYLANE_HORS_RECOUVREMENT);
+    const litiges = litigesCalcules;
 
     if (litiges.length) {
       const totalLitige = litiges.reduce((s, r) => s + (r.remaining_amount || 0), 0);
@@ -460,6 +481,7 @@ function setupReports(db) {
       html += `</table>`;
     }
 
+    if (sansTrello) html += '<p style="color:#b45309;font-family:Arial,sans-serif;font-size:13px">⚠️ Trello n’était pas chargé à l’envoi : les statuts venus de Trello (soldée, report projet, litige) ne sont pas appliqués dans ce mail.</p>';
     html += empreinteHtml(enRetard.length + ' facture(s)' + (litiges.length ? ` + ${litiges.length} litige(s)` : ''));
     sendMailOnly(`💶 Relances du jour — ${enRetard.length} facture(s) en retard (${fmtMoney(totalDu)})`, html, dest);
   }
