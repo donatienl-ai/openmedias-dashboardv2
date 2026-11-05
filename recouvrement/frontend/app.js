@@ -502,7 +502,7 @@ const partiel=financePartielsTrello.get(String(inv&&inv.id));
 if(partiel)items.unshift({raison:`Paiement partiel selon Trello : ${(partiel.details||[]).join(', ')} (total ${Number(partiel.montant).toLocaleString('fr-FR')} €), pas encore rapproché dans Pennylane.`});
 const invC=(inv&&inv._notesCalcul)?inv:(financeInvoicesCache.find((i)=>String(i.id)===String(inv&&inv.id))||inv||{});
 const noteTrello=[invC._noteTrello||(inv&&inv._noteTrello)||'',...(invC._notesCalcul||[])].filter(Boolean).join(' · ');
-const infoTrello=financeFatimaHtml(invC)+(noteTrello?'<div class="finance-detail-section" style="border-left:3px solid #94a3b8;padding-left:10px"><div class="form-label">D\'après Trello</div><div style="font-size:12px;margin:2px 0">'+String(noteTrello).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))+'</div></div>':'');
+const infoTrello=financeFatimaHtml(invC)+(noteTrello?'<div class="finance-detail-section" style="border-left:3px solid #94a3b8;padding-left:10px"><div class="form-label">D\'après Trello</div><div style="font-size:12px;margin:2px 0">'+financeNotesPilulesHtml(noteTrello)+'</div></div>':'');
 if(!items.length)return infoTrello;
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const lien=items.find(i=>i.lien);
@@ -1196,6 +1196,22 @@ function financeAjouterAVerifierTrello(){
     l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:`Étiquette Trello « Soldée »${m?' (posée le '+m[1]+'/'+m[2]+')':''} mais relance de ${rel.a||'l’équipe'} le ${formatDateFR(String(rel.date).slice(0,10))} : est-elle vraiment réglée ? Pennylane indique encore ${fmtCA(pl)} dû.`});
     financeAVerifier.set(k,l);
   }
+}
+// « D'après Trello » en pilules (05/11/2026, Lina) : une pilule par information, sans doublon,
+// colorée selon le sens (soldée, report, part payée, litige…) ; le texte complet reste au survol.
+function financeNotesPilulesHtml(txt){
+  const vus=new Set(); const out=[];
+  for(const brut of String(txt||'').split(/\s+·\s+/)){
+    const t=brut.replace(/^Trello\s*:\s*/i,'').trim(); if(!t)continue;
+    const etq=(t.match(/«\s*([^»]+?)\s*»/)||[])[1]; const reste=(t.match(/reste d[ûu] ([\d\s.,]+)\s*€/i)||[])[1];
+    let label=etq?etq:t.replace(/\(.*?\)/g,'').split('→')[0].trim();
+    if(/annul[ée]e dans pennylane/i.test(t))label='Annulée dans Pennylane';
+    if(reste)label+=' · reste '+Number(String(reste).replace(/\s/g,'')).toLocaleString('fr-FR',{maximumFractionDigits:0})+' €';
+    const cle=label.toLowerCase(); if(vus.has(cle))continue; vus.add(cle);
+    const b=label.toLowerCase(); const col=/sold|cl[oô]ture|annul/.test(b)?['var(--green-dim)','var(--green)']:/report/.test(b)?['rgba(139,92,246,0.14)','#8b5cf6']:/litige|forbes/.test(b)?['var(--red-dim)','#dc2626']:/douteux/.test(b)?['rgba(249,115,22,0.14)','#f97316']:/pay|r[èe]glement|acompte|%/.test(b)?['rgba(202,138,4,0.14)','var(--gold)']:['var(--surface2)','var(--text-dim)'];
+    out.push(`<span title="${financeEscHtml(t)}" style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;margin:2px 4px 2px 0;background:${col[0]};color:${col[1]}">${financeEscHtml(label)}</span>`);
+  }
+  return out.join('');
 }
 function financeAcomptesAuto(inv){ return (!(inv.installments||[]).length&&inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[]; }
 function financeAcompteDotHtml(inv,a,avecDate){
