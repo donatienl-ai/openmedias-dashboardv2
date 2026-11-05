@@ -412,8 +412,8 @@ function financeAppliquerRestesReels(){
     const dec=financeDecisionsTrello.get(String(inv.id));
     inv._noteTrello=dec&&dec.note?dec.note:'';
     if(dec&&(dec.statut==='solde'||dec.statut==='report_projet'||dec.statut==='litige'||dec.resteReel!=null)){
-      if(dec.statut==='solde'||dec.statut==='report_projet'||dec.statut==='litige')inv.internalStatus=dec.statut;
-      let rr=dec.statut==='solde'?0:(dec.resteReel!=null?Number(dec.resteReel):pl);
+      if(!inv.statutManuelLe&&(dec.statut==='solde'||dec.statut==='report_projet'||dec.statut==='litige'))inv.internalStatus=dec.statut; // statut choisi à la main : il prime sur Trello (05/11/2026)
+      let rr=dec.statut==='solde'?(inv.statutManuelLe&&inv.internalStatus!=='solde'?pl:0):(dec.resteReel!=null?Number(dec.resteReel):pl);
       if(dec.statut!=='solde'&&totAv>0&&pl>ttc-totAv+1)rr=Math.min(rr,financeArrondi(pl-totAv));
       if(Math.abs(rr-pl)>0.5){ inv._resteReel={pennylane:pl,avoirs:totAv,reel:rr,nums,trello:true}; setReste(Math.max(0,rr)); }
       // (03/11/2026, Lina) part payée d'après Trello (« 1/2 payé »…) → affichée comme acompte de la facture.
@@ -1168,6 +1168,7 @@ function financeAppliquerStatutRelance(){
   for(const inv of financeInvoicesCache){
     const st=inv.internalStatus||'';
     if(st!==''&&st!=='a_relancer'&&st!=='en_cours'&&st!=='promesse_paiement')continue;
+    if(inv.statutManuelLe){ const dm=financeDerniereRelance(inv); if(!dm||String(dm.date)<=String(inv.statutManuelLe))continue; } // statut choisi à la main : seule une relance plus récente le fait bouger
     if(!(Number(inv.remainingAmountTtc)>0.5))continue;
     if(financeRelanceRecente(inv)){ const d=financeDerniereRelance(inv); const cible=d&&d.promesse?'promesse_paiement':'en_cours'; if(st!==cible){ inv.internalStatus=cible; inv._statutRelanceAuto=true; } }
     else if((st==='en_cours'||st==='promesse_paiement')&&(inv.daysLate||0)>0){ inv.internalStatus='a_relancer'; inv._statutRelanceAuto=true; }
@@ -1180,6 +1181,7 @@ function financeAjouterAVerifierTrello(){
   if(!financeLiensTrello.size)return; // Trello pas encore chargé : on ne conclut rien
   for(const inv of financeInvoicesCache){
     const k=String(inv.id);
+    if(inv.statutManuelLe)continue; // tranché à la main (05/11/2026)
     if(!financeEstARecouvrer(inv))continue;
     if(!['','a_relancer','en_cours'].includes(inv.internalStatus||''))continue;
     if(!((inv.daysLate||0)>30))continue;
@@ -1192,7 +1194,7 @@ function financeAjouterAVerifierTrello(){
   }
   // Report projet mais carte Trello dans une colonne « diffusion faite » : le report est-il terminé ? (05/11/2026)
   for(const inv of financeInvoicesCache){
-    if(inv.internalStatus!=='report_projet'||!financeEstARecouvrer(inv))continue;
+    if(inv.statutManuelLe||inv.internalStatus!=='report_projet'||!financeEstARecouvrer(inv))continue;
     const k=String(inv.id); const col=financeListesTrello.get(k)||'';
     if(!/^\s*[789]\s*-|termin[ée].*diffus/i.test(col))continue;
     const l=financeAVerifier.get(k)||[];
@@ -1201,7 +1203,7 @@ function financeAjouterAVerifierTrello(){
   }
   // Étiquette « Soldée » mais relance de l'équipe APRÈS la pose de l'étiquette : on n'est pas sûr → « À vérifier » (05/11/2026).
   for(const inv of financeInvoicesCache){
-    if(inv.internalStatus!=='solde')continue;
+    if(inv.statutManuelLe||inv.internalStatus!=='solde')continue;
     const k=String(inv.id); const d=financeDecisionsTrello.get(k); if(!d||d.statut!=='solde')continue;
     const pl=Number(inv._restePennylane)||0; if(pl<=0.5)continue;
     if(['cancelled','partially_cancelled','archived'].includes(inv.status))continue; // annulée dans Pennylane : réglé
@@ -1568,7 +1570,7 @@ function financeCommentsListHtml(invoiceId,comments){
 const ts=(c)=>{ const d=parseSqliteUtc(c.created_at)||new Date(c.created_at); return d&&!isNaN(d)?d.getTime():0; };
 const lignes=(comments||[]).map((c)=>({t:ts(c),html:financeCommentRowHtml(invoiceId,c)}));
 const lien=financeLiensTrello.get(String(invoiceId));
-for(const c of financeFatima.get(String(invoiceId))||[]){ const t=String(c.texte||'').replace(/@\w+/g,'').replace(/\s+/g,' ').trim(); const pill=c.relance?`<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent-dim);color:var(--accent)">relance${c.canal?' · '+financeEscHtml(c.canal):''}</span>`:''; lignes.push({t:new Date(c.date).getTime()||0,html:`<div class="finance-relance-entry" style="border-left:3px solid #0d9488;padding-left:8px"><div title="Cliquer pour tout lire" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='unset'?'3':'unset'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer">${financeEscHtml(t)}</div><div class="finance-relance-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>${financeEscHtml(c.a||'Fatima Louzi')} · Trello · ${new Date(c.date).toLocaleString('fr-FR')}</span>${pill}${lien?`<a href="${financeEscHtml(lien)}" target="_blank" rel="noopener" style="margin-left:auto;font-size:11px">Voir sur Trello ↗</a>`:''}</div></div>`}); }
+for(const c of financeFatima.get(String(invoiceId))||[]){ const t=String(c.texte||'').replace(/@\w+/g,'').replace(/\s+/g,' ').trim(); const pill=c.relance?`<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent-dim);color:var(--accent)">relance${c.canal?' · '+financeEscHtml(c.canal):''}</span>`:''; lignes.push({t:new Date(c.date).getTime()||0,html:`<div class="finance-relance-entry" style="border-left:3px solid #0d9488;padding-left:8px"><div title="Cliquer pour tout lire" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='unset'?'3':'unset'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer">${financeEscHtml(t)}</div><div class="finance-relance-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>Écrit par <strong>${financeEscHtml(c.a||'—')}</strong> · Trello · ${new Date(c.date).toLocaleString('fr-FR')}${(c.m&&c.m.length)?' · identifié : '+c.m.map((x)=>'@'+financeEscHtml(x)).join(', '):''}</span>${pill}${lien?`<a href="${financeEscHtml(lien)}" target="_blank" rel="noopener" style="margin-left:auto;font-size:11px">Voir sur Trello ↗</a>`:''}</div></div>`}); }
 if(!lignes.length)return '<div class="idea-box-empty">Aucun commentaire pour l’instant</div>';
 return lignes.sort((a,b)=>b.t-a.t).map((l)=>l.html).join('');
 }
