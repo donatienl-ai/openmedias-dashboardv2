@@ -392,11 +392,16 @@ function setupReports(db) {
     // « À relancer » = statut à relancer (ou aucun) ET en retard, comme la tuile.
     const decisionsMail = new Map((rapportTrello.decisionsTrello || []).map((d) => [String(d.id), d]));
     const scpMail = new Set((rapportTrello.scp || []).map((x) => String(x.facture)));
+    // Relances (05/11/2026) : dernière relance de Fatima (Trello) par facture.
+    const relancesFatima = new Map();
+    for (const x of (rapportTrello.commentairesFatima || [])) { const r = (x.c || []).filter((c) => c.relance && c.date).map((c) => c.date).sort().pop(); if (r) relancesFatima.set(String(x.id), r); }
+    const relanceesRecemment = [];
+    const debutJour = new Date(); debutJour.setHours(0, 0, 0, 0);
     const enRetard = [];
     const litigesCalcules = [];
     for (const f of facturesDashboard) {
       const numero = String(f.invoiceNumber || '');
-      if (numero === 'F5885' || scpMail.has(numero) || /SCP/i.test(f.customerName || '')) continue;
+      if (numero === 'F5885' || scpMail.has(numero) || /groupe\s*scp/i.test(f.customerName || '')) continue;
       if ((f.dateEmission || '') < '2025-01-01') continue;
       if (f.status && REPORTS_PENNYLANE_HORS_RECOUVREMENT.includes(f.status)) continue;
       let statut = f.internalStatus || null;
@@ -409,8 +414,19 @@ function setupReports(db) {
       if (!(reste > 0.5)) continue;
       const ligne = { id: f.id, invoice_number: numero, customer_name: f.customerName || '', contact_name: f.contactName || '', contact_email: f.contactEmail || '', contact_phone: f.contactPhone || '', remaining_amount: reste, daysLate: f.daysLate };
       if (statut === 'litige') { litigesCalcules.push(ligne); continue; }
-      if (statut && statut !== 'a_relancer') continue;
-      if ((f.daysLate || 0) > 0) enRetard.push(ligne);
+      if (statut && statut !== 'a_relancer' && statut !== 'en_cours') continue;
+      // Acompte échu non payé = retard, comme le dashboard (05/11/2026). Pas quand Trello a
+      // déjà recalculé les parts payées (le dashboard s'appuie alors sur Trello).
+      let jours = f.daysLate || 0;
+      const ech = (!(d && d.resteReel != null) && !(f.installments || []).length && f.echeancesPennylane && f.echeancesPennylane.acomptes) || [];
+      for (const a of ech) { if (a.etat === 'soldee' || !a.date) continue; const j = Math.floor((debutJour.getTime() - new Date(String(a.date).slice(0, 10) + 'T00:00:00').getTime()) / 86400000); if (j > jours) jours = j; break; }
+      if (!(jours > 0)) continue;
+      ligne.daysLate = jours;
+      // Relancée il y a moins de 7 jours (Fatima dans Trello ou relance saisie) : onglet « Relancé »,
+      // pas dans la liste du jour ; sans paiement, elle y revient après 7 jours.
+      const derniere = [relancesFatima.get(String(f.id)), f.lastRelanceAt].filter(Boolean).map(String).sort().pop();
+      if (derniere && Date.now() - new Date(derniere).getTime() < 7 * 86400000) { relanceesRecemment.push(ligne); continue; }
+      enRetard.push(ligne);
     }
     enRetard.sort((a, b) => b.daysLate - a.daysLate);
     litigesCalcules.sort((a, b) => b.remaining_amount - a.remaining_amount);
@@ -481,6 +497,7 @@ function setupReports(db) {
       html += `</table>`;
     }
 
+    if (relanceesRecemment.length) html += '<p style="color:#555;font-family:Arial,sans-serif;font-size:13px">' + relanceesRecemment.length + ' autre(s) facture(s) en retard relancée(s) il y a moins de 7 jours (onglet « Relancé ») : ' + relanceesRecemment.map((r) => r.invoice_number).join(', ') + '.</p>';
     if (sansTrello) html += '<p style="color:#b45309;font-family:Arial,sans-serif;font-size:13px">⚠️ Trello n’était pas chargé à l’envoi : les statuts venus de Trello (soldée, report projet, litige) ne sont pas appliqués dans ce mail.</p>';
     html += empreinteHtml(enRetard.length + ' facture(s)' + (litiges.length ? ` + ${litiges.length} litige(s)` : ''));
     // seulementA : envoi de test à une seule adresse (05/11/2026, Lina).
@@ -514,14 +531,6 @@ function setupReports(db) {
   // Du lundi au vendredi à 8h : digest des relances de recouvrement du jour
   cron.schedule('0 8 * * 1-5', () => reportRelancesQuotidien(), { timezone: 'Europe/Paris' });
 
-  // 05/11/2026 (Lina) : mail test UNIQUE du nouveau calcul « Relances du jour »,
-  // envoyé seulement à Lina, 3 min après le démarrage (le temps que Trello se
-  // charge). Une seule fois pour toujours : la clé est enregistrée en base.
-  setTimeout(() => {
-    try {
-      if (claimReportOnce('relances_test_lina_20261105')) reportRelancesQuotidien({ force: true, seulementA: 'lina.e@openmedias.fr' });
-    } catch (e) { console.warn('[RELANCES] test Lina :', e.message); }
-  }, 3 * 60 * 1000).unref();
 
   console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h, relances lun-ven 8h)');
 
