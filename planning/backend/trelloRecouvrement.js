@@ -8,6 +8,21 @@
 const TRELLO_API = 'https://api.trello.com/1';
 const DEPUIS = '2025-01-01T00:00:00.000Z';
 const LECTEURS = ['arianesmirnoff', 'comptaopenmedias']; // Ariane + compte Comptabilité
+// 05/11/2026 (Lina) : commentaires de Fatima Louzi (recouvrement), lus pour l'information
+// et l'onglet « Relancé » du dashboard. Ils ne changent jamais le statut d'une facture.
+const ID_FATIMA = '67693c54e36bbceffbcf54d4';
+function analyserCommentaireRelance(texte) {
+  const t = String(texte || '');
+  const pasRelance = /facture envoy|mail re[çc]u|re[çc]u ce jour|virement re[çc]u/i.test(t);
+  const relance = !pasRelance && /relanc|\bNRP\b|mail envoy|e-?mail (fait|envoy)|\bsms\b|whats+a?p+|messagerie|msg laiss|message laiss|appel|mise en demeure|courrier|^\s*bonjour/i.test(t);
+  let canal = null;
+  if (/mise en demeure|courrier|recommand/i.test(t)) canal = 'courrier';
+  else if (/whats+a?p+/i.test(t)) canal = 'WhatsApp';
+  else if (/\bsms\b/i.test(t)) canal = 'SMS';
+  else if (/mail|^\s*bonjour/i.test(t)) canal = 'mail';
+  else if (/\bNRP\b|appel|messagerie|t[ée]l[ée]phon/i.test(t)) canal = 'appel';
+  return { relance, canal };
+}
 // (03/11/2026, Lina) Paiements lus dans les commentaires : désactivés. Les étiquettes (« 1/2 payé »…)
 // et Pennylane font foi ; un commentaire comme « relancé 6k » faussait le reste dû (F7236).
 const PAIEMENTS_COMMENTAIRES = false;
@@ -262,7 +277,7 @@ function construireRapportComplet(db) {
   }
 
   // Commentaires et pièces jointes par carte
-  const comms = new Map(); const nums = new Map();
+  const comms = new Map(); const nums = new Map(); const commsFatima = new Map();
   const pdfFacture = new Map(); // n° de facture → cartes qui portent son PDF (lien direct, 03/11/2026)
   const ajouterNum = (id, txt) => { if (!id) return; const s = nums.get(id) || new Set(); numerosDans(txt).forEach((x) => s.add(x)); nums.set(id, s); };
   for (const a of etat.actions) {
@@ -271,6 +286,7 @@ function construireRapportComplet(db) {
     if (a.type === 'commentCard') {
       ajouterNum(id, a.data.text);
       if (lecteurs.has(a.idMemberCreator)) { if (!comms.has(id)) comms.set(id, []); comms.get(id).push({ date: a.date, texte: a.data.text || '' }); }
+      if (a.idMemberCreator === ID_FATIMA) { if (!commsFatima.has(id)) commsFatima.set(id, []); const an = analyserCommentaireRelance(a.data.text); commsFatima.get(id).push({ date: a.date, texte: String(a.data.text || '').replace(/\s+/g, ' ').trim().slice(0, 280), relance: an.relance, canal: an.canal }); }
     }
     if (a.type === 'addAttachmentToCard') {
       const nomPj = (a.data.attachment && a.data.attachment.name) || '';
@@ -666,6 +682,7 @@ function construireRapportComplet(db) {
   // Une étiquette « Soldée » posée AVANT l'émission de la facture concerne une facture
   // précédente (sauf si la carte cite ce n° de facture) : elle n'est pas appliquée.
   rapport.decisionsTrello = [];
+  rapport.commentairesFatima = []; // 05/11/2026 : derniers commentaires de Fatima par facture
   rapport.etiquettesFactures = []; // étiquettes Trello « recouvrement » de chaque facture, pour l'affichage et la recherche
   const fractionEtiquette = (nom) => {
     const n = String(nom || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -780,6 +797,9 @@ function construireRapportComplet(db) {
     { const etq = new Map();
       for (const { carte } of entrees) for (const idl of (carte.idLabels || [])) { const n = String(etiquettes.get(idl) || '').trim(); if (n && /sold|cl[oô]ture|pay[ée]|r[èe]glement|report|douteux|annul|upsell|impay|d[ée]calage|avoir/i.test(n)) etq.set(n, couleurEtiquette.get(idl) || ''); }
       if (etq.size) rapport.etiquettesFactures.push({ id: f.id, e: [...etq].map(([n, c]) => ({ n, c })) }); }
+    { const fs = []; const vus = new Set();
+      for (const { carte } of entrees) { if (vus.has(carte.id)) continue; vus.add(carte.id); for (const c of (commsFatima.get(carte.id) || [])) fs.push(c); }
+      if (fs.length) { fs.sort((a, b) => (a.date < b.date ? 1 : -1)); rapport.commentairesFatima.push({ id: f.id, c: fs.slice(0, 5) }); } }
       if (statut || resteReel != null) rapport.decisionsTrello.push({ id: f.id, facture: f.invoice_number, client: f.client, statutActuel: f.internal_status || 'a_relancer', statut, resteReel, restePennylane: reste, note: notes.join(' · '), lien });
   }
 
@@ -963,7 +983,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       // (03/11/2026) Groupe SCP retiré du dashboard : ses avoirs non plus (ex. F7213).
       const pieceScp = new Set(db.prepare("SELECT i.invoice_number AS n FROM pennylane_invoices i LEFT JOIN pennylane_customers c ON c.id = i.customer_id WHERE c.name LIKE '%SCP%'").all().map((x) => String(x.n)));
       const aVerifier = items.filter((x) => x.facture !== 'F5885' && !pieceScp.has(String(x.facture)) && !classees.has(String(x.id)));
-      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, etiquettes: r.etiquettesFactures || [], avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
+      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, etiquettes: r.etiquettesFactures || [], fatima: r.commentairesFatima || [], avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
