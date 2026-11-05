@@ -1060,7 +1060,7 @@ wrap.innerHTML=`<table>
 <td><button type="button" class="finance-invoice-link" onclick="openFinanceInvoiceDetail('${inv.id}')">${inv.invoiceNumber||inv.id}</button>${financeLienTrelloHtml(inv)}${financeEmissionDateHtml(inv)}${financeEtiquettesInfoHtml(inv)}</td>
 <td>${inv.customerName||'—'}</td>
 <td>${financeContactHtml(inv)}</td>
-<td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'};min-width:120px" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select>${financeDerniereRelanceHtml(inv)}</td>
+<td><select class="form-select finance-inline-select" style="color:${FINANCE_STATUS_COLOR[inv.internalStatus]||'inherit'};min-width:120px" onchange="patchFinanceInvoice('${inv.id}',{internalStatus:this.value})">${statutOptionsHtml(inv)}</select>${financeDerniereRelanceHtml(inv)}${financeDernierCommentaireHtml(inv)}</td>
 <td>${financeEcheancesResumeHtml(inv)}</td>
 <td>${financeRetardBarHtml(inv)}</td>
 <td style="font-weight:600;color:var(--accent)">${fmtCA(inv.remainingAmountTtc!=null?inv.remainingAmountTtc:inv.remainingAmount)}${financeExclusEncoursBadge(inv)}</td>
@@ -1117,7 +1117,7 @@ function financeEscHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,(c)=>
 function financeCommentairesFatima(inv){ return financeFatima.get(String(inv&&inv.id))||[]; }
 function financeDerniereRelance(inv){
   let best=null;
-  for(const c of financeCommentairesFatima(inv)){ if(c.relance&&c.date&&(!best||c.date>best.date))best={date:c.date,canal:c.canal||null}; }
+  for(const c of financeCommentairesFatima(inv)){ if(c.relance&&c.date&&(!best||c.date>best.date))best={date:c.date,canal:c.canal||null,a:c.a||null}; }
   if(inv&&inv.lastRelanceAt&&(!best||String(inv.lastRelanceAt)>best.date))best={date:String(inv.lastRelanceAt),canal:null};
   return best;
 }
@@ -1125,7 +1125,9 @@ function financeRelanceRecente(inv){ const d=financeDerniereRelance(inv); if(!d)
 function financeEnRetardARelancer(inv){ return financeEstARecouvrer(inv)&&['','a_relancer','en_cours'].includes(inv.internalStatus||'')&&(inv.daysLate||0)>0; }
 function financeEstARelancer(inv){ return financeEnRetardARelancer(inv)&&!financeRelanceRecente(inv); }
 function financeEstRelancee(inv){ return financeEnRetardARelancer(inv)&&financeRelanceRecente(inv); }
-function financeDerniereRelanceHtml(inv){ const d=financeDerniereRelance(inv); if(!d)return ''; return `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Relancé le ${formatDateFR(String(d.date).slice(0,10))}${d.canal?' ('+financeEscHtml(d.canal)+')':''}</div>`; }
+function financeDerniereRelanceHtml(inv){ const d=financeDerniereRelance(inv); if(!d)return ''; return `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Relancé le ${formatDateFR(String(d.date).slice(0,10))}${d.canal?' ('+financeEscHtml(d.canal)+')':''}${d.a?' · '+financeEscHtml(d.a):''}</div>`; }
+// Dernier commentaire utile de la carte Trello, avec son auteur (05/11/2026, Lina) — sauf si c'est la relance déjà affichée.
+function financeDernierCommentaireHtml(inv){ const c=financeCommentairesFatima(inv)[0]; if(!c||!c.date)return ''; const d=financeDerniereRelance(inv); if(d&&d.date===c.date)return ''; const t=String(c.texte||''); return `<div title="${financeEscHtml(t)}" style="font-size:11px;color:var(--text-muted);margin-top:2px;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Dernier com. ${formatDateFR(String(c.date).slice(0,10)).slice(0,5)} · ${financeEscHtml(c.a||'Trello')} : ${financeEscHtml(t)}</div>`; }
 function financeFatimaHtml(inv){
   if(!inv)return '';
   const cs=financeCommentairesFatima(inv).slice(0,3); const ra=inv._retardAcompte; const d=financeDerniereRelance(inv);
@@ -1519,7 +1521,7 @@ function financeCommentsListHtml(invoiceId,comments){
 const ts=(c)=>{ const d=parseSqliteUtc(c.created_at)||new Date(c.created_at); return d&&!isNaN(d)?d.getTime():0; };
 const lignes=(comments||[]).map((c)=>({t:ts(c),html:financeCommentRowHtml(invoiceId,c)}));
 const lien=financeLiensTrello.get(String(invoiceId));
-for(const c of financeFatima.get(String(invoiceId))||[]){ const t=String(c.texte||'').replace(/@\w+/g,'').replace(/\s+/g,' ').trim(); const pill=c.relance?`<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent-dim);color:var(--accent)">relance${c.canal?' · '+financeEscHtml(c.canal):''}</span>`:''; lignes.push({t:new Date(c.date).getTime()||0,html:`<div class="finance-relance-entry" style="border-left:3px solid #0d9488;padding-left:8px"><div title="Cliquer pour tout lire" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='unset'?'3':'unset'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer">${financeEscHtml(t)}</div><div class="finance-relance-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>Fatima Louzi · Trello · ${new Date(c.date).toLocaleString('fr-FR')}</span>${pill}${lien?`<a href="${financeEscHtml(lien)}" target="_blank" rel="noopener" style="margin-left:auto;font-size:11px">Voir sur Trello ↗</a>`:''}</div></div>`}); }
+for(const c of financeFatima.get(String(invoiceId))||[]){ const t=String(c.texte||'').replace(/@\w+/g,'').replace(/\s+/g,' ').trim(); const pill=c.relance?`<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--accent-dim);color:var(--accent)">relance${c.canal?' · '+financeEscHtml(c.canal):''}</span>`:''; lignes.push({t:new Date(c.date).getTime()||0,html:`<div class="finance-relance-entry" style="border-left:3px solid #0d9488;padding-left:8px"><div title="Cliquer pour tout lire" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='unset'?'3':'unset'" style="display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer">${financeEscHtml(t)}</div><div class="finance-relance-meta" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>${financeEscHtml(c.a||'Fatima Louzi')} · Trello · ${new Date(c.date).toLocaleString('fr-FR')}</span>${pill}${lien?`<a href="${financeEscHtml(lien)}" target="_blank" rel="noopener" style="margin-left:auto;font-size:11px">Voir sur Trello ↗</a>`:''}</div></div>`}); }
 if(!lignes.length)return '<div class="idea-box-empty">Aucun commentaire pour l’instant</div>';
 return lignes.sort((a,b)=>b.t-a.t).map((l)=>l.html).join('');
 }
