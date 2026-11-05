@@ -413,7 +413,7 @@ function setupReports(db) {
       let reste = Number(f.remainingAmountTtc != null ? f.remainingAmountTtc : (f.remainingAmount || 0));
       const d = decisionsMail.get(String(f.id));
       if (d) {
-        if (d.statut === 'solde' || d.statut === 'report_projet' || d.statut === 'litige') statut = d.statut;
+        if (!f.statutManuelLe && (d.statut === 'solde' || d.statut === 'report_projet' || d.statut === 'litige')) statut = d.statut; // statut choisi à la main : il prime (05/11/2026)
         if (d.resteReel != null) reste = Number(d.resteReel);
       }
       if (!(reste > 0.5)) continue;
