@@ -367,7 +367,7 @@ const avant=financeInvoicesCache.length;
 financeInvoicesCache=financeInvoicesCache.filter((inv)=>!financeEstScp(inv));
 if(financeInvoicesCache.length!==avant){ renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache()); }
 }
-financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();
+financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();financeAjouterAVerifierTrello();
 renderFinanceTabs(); renderFinanceInvoices(); renderFinanceKpis(computeFinanceKpisFromCache());
 }catch(e){ /* Trello indisponible : l'onglet reste vide */ }
 }
@@ -514,7 +514,7 @@ fetch(`${API}/finance/kpis`,{headers:financeHeaders()}).then(r=>r.json()),
 fetch(`${API}/finance/invoices`,{headers:financeHeaders()}).then(r=>r.json()),
 ]);
 financeInvoicesCache=(Array.isArray(invoices)?invoices:[]).filter((inv)=>!financeEstScp(inv)); // SCP retirés (15/10/2026)
-financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();
+financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();financeAjouterAVerifierTrello();
 // La syncOverview (répartition brute Pennylane, tous statuts confondus) est
 // la seule chose qu'on garde du backend telle quelle : c'est un repère de
 // cohérence de synchro globale, jamais borné à une période. Les KPI
@@ -537,7 +537,7 @@ if(!r.ok)return;
 const updated=await r.json();
 const idx=financeInvoicesCache.findIndex(i=>i.id===updated.id);
 if(idx>=0)financeInvoicesCache[idx]=updated; else financeInvoicesCache.push(updated);
-financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();
+financeAppliquerRestesReels();financeAppliquerRetardAcomptes();financeAppliquerStatutRelance();financeAjouterAVerifierTrello();
 renderFinanceTabs();
 renderFinanceInvoices();
 renderFinanceKpis(computeFinanceKpisFromCache());
@@ -1160,6 +1160,24 @@ function financeAppliquerStatutRelance(){
     if(!(Number(inv.remainingAmountTtc)>0.5))continue;
     if(financeRelanceRecente(inv)){ if(st!=='en_cours'){ inv.internalStatus='en_cours'; inv._statutRelanceAuto=true; } }
     else if(st==='en_cours'&&(inv.daysLate||0)>0){ inv.internalStatus='a_relancer'; inv._statutRelanceAuto=true; }
+  }
+}
+// « À vérifier » d'après Trello (05/11/2026, Lina) : Trello a toujours raison ; quand il ne dit rien,
+// on ne devine pas. Facture à recouvrer, en retard de plus de 30 jours, sans étiquette de suivi sur
+// sa carte Trello (ou sans carte) → « À vérifier », à trancher par l'équipe.
+function financeAjouterAVerifierTrello(){
+  if(!financeLiensTrello.size)return; // Trello pas encore chargé : on ne conclut rien
+  for(const inv of financeInvoicesCache){
+    const k=String(inv.id);
+    if(!financeEstARecouvrer(inv))continue;
+    if(!['','a_relancer','en_cours'].includes(inv.internalStatus||''))continue;
+    if(!((inv.daysLate||0)>30))continue;
+    const sansCarte=!financeLiensTrello.has(k);
+    const sansEtiquette=!(financeEtiquettes.get(k)||[]).length;
+    if(!sansCarte&&!sansEtiquette)continue;
+    const l=financeAVerifier.get(k)||[];
+    l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:sansCarte?`Aucune carte Trello trouvée pour cette facture (en retard de ${inv.daysLate} j) : statut à trancher.`:`Aucune étiquette de suivi sur la carte Trello (en retard de ${inv.daysLate} j) : à classer (soldée, report projet, litige, à relancer…).`});
+    financeAVerifier.set(k,l);
   }
 }
 function financeAcomptesAuto(inv){ return (!(inv.installments||[]).length&&inv.echeancesPennylane&&inv.echeancesPennylane.acomptes)||[]; }
