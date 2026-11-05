@@ -1201,19 +1201,7 @@ function financeAjouterAVerifierTrello(){
     l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:`Report projet, mais la carte Trello est dans « ${col} » : la diffusion est faite, le report est-il terminé ?`});
     financeAVerifier.set(k,l);
   }
-  // Étiquette « Soldée » mais relance de l'équipe APRÈS la pose de l'étiquette : on n'est pas sûr → « À vérifier » (05/11/2026).
-  for(const inv of financeInvoicesCache){
-    if(inv.statutManuelLe||inv.internalStatus!=='solde')continue;
-    const k=String(inv.id); const d=financeDecisionsTrello.get(k); if(!d||d.statut!=='solde')continue;
-    const pl=Number(inv._restePennylane)||0; if(pl<=0.5)continue;
-    if(['cancelled','partially_cancelled','archived'].includes(inv.status))continue; // annulée dans Pennylane : réglé
-    const m=String(d.note||'').match(/pos[ée]e le (\d{2})\/(\d{2})\/(\d{4})/); const pose=m?`${m[3]}-${m[2]}-${m[1]}`:String(inv.dateEmission||'');
-    const depuis30=new Date(Date.now()-30*86400000).toISOString().slice(0,10); const rel=financeCommentairesFatima(inv).filter((c)=>c.relance&&String(c.date).slice(0,10)>pose&&String(c.date).slice(0,10)>=depuis30).sort((a,b)=>a.date<b.date?1:-1)[0];
-    if(!rel)continue;
-    const l=financeAVerifier.get(k)||[];
-    l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:`Étiquette Trello « Soldée »${m?' (posée le '+m[1]+'/'+m[2]+')':''} mais relance de ${rel.a||'l’équipe'} le ${formatDateFR(String(rel.date).slice(0,10))} : est-elle vraiment réglée ? Pennylane indique encore ${fmtCA(pl)} dû.`});
-    financeAVerifier.set(k,l);
-  }
+  // 05/11/2026 (Lina) : Trello prime. « Soldée » dans Trello = soldée, même si Pennylane indique encore un reste ou si une relance a suivi : plus de passage en « À vérifier ».
 }
 // « D'après Trello » en pilules (05/11/2026, Lina) : une pilule par information, sans doublon,
 // colorée selon le sens (soldée, report, part payée, litige…) ; le texte complet reste au survol.
