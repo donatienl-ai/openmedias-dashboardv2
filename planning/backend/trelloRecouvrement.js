@@ -683,6 +683,7 @@ function construireRapportComplet(db) {
   // précédente (sauf si la carte cite ce n° de facture) : elle n'est pas appliquée.
   rapport.decisionsTrello = [];
   rapport.commentairesFatima = []; // 05/11/2026 : derniers commentaires de Fatima par facture
+  rapport.liensTrello = []; // 05/11/2026 : lien de la carte Trello de chaque facture (carte ouverte en priorité)
   rapport.etiquettesFactures = []; // étiquettes Trello « recouvrement » de chaque facture, pour l'affichage et la recherche
   const fractionEtiquette = (nom) => {
     const n = String(nom || '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -800,6 +801,7 @@ function construireRapportComplet(db) {
     { const fs = []; const vus = new Set();
       for (const { carte } of entrees) { if (vus.has(carte.id)) continue; vus.add(carte.id); for (const c of (commsFatima.get(carte.id) || [])) fs.push(c); }
       if (fs.length) { fs.sort((a, b) => (a.date < b.date ? 1 : -1)); rapport.commentairesFatima.push({ id: f.id, c: fs.slice(0, 5) }); } }
+    { const e = entrees.find((x) => x.carte && !x.carte.closed) || entrees[0]; if (e && e.carte && e.carte.shortUrl) rapport.liensTrello.push({ id: f.id, u: e.carte.shortUrl }); }
       if (statut || resteReel != null) rapport.decisionsTrello.push({ id: f.id, facture: f.invoice_number, client: f.client, statutActuel: f.internal_status || 'a_relancer', statut, resteReel, restePennylane: reste, note: notes.join(' · '), lien });
   }
 
@@ -983,7 +985,7 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
       // (03/11/2026) Groupe SCP retiré du dashboard : ses avoirs non plus (ex. F7213).
       const pieceScp = new Set(db.prepare("SELECT i.invoice_number AS n FROM pennylane_invoices i LEFT JOIN pennylane_customers c ON c.id = i.customer_id WHERE c.name LIKE '%SCP%'").all().map((x) => String(x.n)));
       const aVerifier = items.filter((x) => x.facture !== 'F5885' && !pieceScp.has(String(x.facture)) && !classees.has(String(x.id)));
-      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, etiquettes: r.etiquettesFactures || [], fatima: r.commentairesFatima || [], avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
+      res.json({ pret: true, genereLe: r.genereLe, items: aVerifier, decisions, etiquettes: r.etiquettesFactures || [], fatima: r.commentairesFatima || [], liens: r.liensTrello || [], avoirs: r.avoirs || [], partiels: (r.partielsTrello || []).map((x) => ({ id: x.id, montant: x.montantTrello, details: x.details })), piecesJointes: { lues: pj.lus, erreurs: pj.erreurs, actif: !!pdfParse }, scp: r.scp.map((x) => x.facture) });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
