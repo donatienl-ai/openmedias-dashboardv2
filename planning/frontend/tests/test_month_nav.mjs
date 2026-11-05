@@ -183,7 +183,10 @@ async function testHorizonNotAppliedToSocial() {
   const blocked = label(win);
   ok("diffusions : l'horizon bloque bien la projection pour un compte communication",
      blocked !== start, `${start} -> ${blocked}`);
-  const monthsMoved = V(win, "currentDate.getMonth()") - new Date().getMonth();
+  // 05/11/2026 : écart en mois en tenant compte de l'année (en novembre, +3 mois = février :
+  // getMonth() seul donnait 1 - 10 = -9 et faisait échouer le test à tort).
+  const maintenant = new Date();
+  const monthsMoved = (V(win, "currentDate.getFullYear()") * 12 + V(win, "currentDate.getMonth()")) - (maintenant.getFullYear() * 12 + maintenant.getMonth());
   ok("diffusions : pas plus de 3 mois d'avance (horizon)",
      Math.abs(monthsMoved) <= 4, `mois parcourus=${monthsMoved}`);
 
