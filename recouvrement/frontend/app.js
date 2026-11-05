@@ -336,6 +336,7 @@ let financeAVerifier=new Map();
 let financeScpNumeros=new Set();
 let financeFatima=new Map(); // commentaires Trello de Fatima Louzi par facture (05/11/2026)
 let financeLiensTrello=new Map(); // lien de la carte Trello de chaque facture (05/11/2026)
+let financeListesTrello=new Map(); // colonne Trello de la carte de chaque facture (05/11/2026)
 function financeEstScp(inv){
 if(!inv)return false;
 if(/groupe\s*scp/i.test(inv.customerName||inv.customer_name||''))return true;
@@ -358,6 +359,7 @@ financeDecisionsTrello=new Map((d.decisions||[]).map((x)=>[String(x.id),x]));
 financeEtiquettes=new Map((d.etiquettes||[]).map((x)=>[String(x.id),x.e||[]]));
 financeFatima=new Map((d.fatima||[]).map((x)=>[String(x.id),x.c||[]]));
 financeLiensTrello=new Map((d.liens||[]).map((x)=>[String(x.id),x.u]));
+financeListesTrello=new Map((d.listes||[]).map((x)=>[String(x.id),x.l]));
 financePartielsTrello=new Map((d.partiels||[]).map((p)=>[String(p.id),p]));
 financeAvoirsParFacture=new Map();financeAvoirsParAvoir=new Map();
 for(const a of (d.avoirs||[])){const kf=String(a.factureId),ka=String(a.avoirId);if(!financeAvoirsParFacture.has(kf))financeAvoirsParFacture.set(kf,[]);financeAvoirsParFacture.get(kf).push(a);if(!financeAvoirsParAvoir.has(ka))financeAvoirsParAvoir.set(ka,[]);financeAvoirsParAvoir.get(ka).push(a);}
@@ -573,7 +575,7 @@ return `<span class="finance-hors-encours-badge" title="Reste-dû Pennylane non 
 // cours ou une promesse de paiement obtenue n'attend pas une relance du jour.
 // 'douteux' ajouté le 24/09/2026 (demande Lina) — même liste que côté back
 // (financeRoutes.js), à garder synchronisée.
-const FINANCE_STATUTS_NON_ACTIONABLES=['litige','promesse_paiement','solde','douteux']; // report projet compté dans « À relancer » (02/11/2026)
+const FINANCE_STATUTS_NON_ACTIONABLES=['litige','solde','douteux']; // promesse de paiement : traitée comme une relance (05/11/2026) // report projet compté dans « À relancer » (02/11/2026)
 // Recalcule les KPI de recouvrement (encours, montant actionable, taux de
 // retard, aging, répartition par statut, DSO) côté front, à partir du cache
 // local déjà filtré par la période ET les chips de filtre actifs — reproduit
@@ -611,7 +613,7 @@ const parStatut={}; const retardParStatut={}; // vue "pipeline" : répartition d
 for(const inv of unpaid){
 const remaining=inv.remainingAmountTtc!=null?inv.remainingAmountTtc:(inv.remainingAmount||0);
 if(vueLitige||(inv.internalStatus||'')!=='litige'){ totalEncours+=remaining; nbHorsLitige++; } else { montantLitige+=remaining; nbLitige++; }
-const statut=(inv.internalStatus==='en_cours'?'a_relancer':inv.internalStatus)||'a_relancer'; // « Relancé » (en_cours) compté avec « À relancer » (05/11/2026)
+const statut=(['en_cours','promesse_paiement'].includes(inv.internalStatus)?'a_relancer':inv.internalStatus)||'a_relancer'; // « Relancé » (en_cours) compté avec « À relancer » (05/11/2026)
 if(!parStatut[statut])parStatut[statut]={count:0,montant:0};
 parStatut[statut].count+=1;
 parStatut[statut].montant+=remaining;
@@ -903,6 +905,10 @@ if(key==='douteux_manuel')return inv.internalStatus==='douteux';
 if(key==='a_verifier')return financeAVerifier.has(String(inv.id));
 if(key==='litige_manuel')return inv.internalStatus==='litige';
 if(key==='report_projet')return inv.internalStatus==='report_projet';
+// En retard / À venir (05/11/2026, Lina) : même règle que le reste du dashboard — échéance calculée avec
+// l'échéancier Pennylane corrigé par Trello (parts payées, acomptes) ; les reports projet ont leur onglet.
+if(key==='late')return financeEnRetardARelancer(inv);
+if(key==='upcoming')return financeEstARecouvrer(inv)&&['','a_relancer','en_cours','promesse_paiement'].includes(inv.internalStatus||'')&&!((inv.daysLate||0)>0);
 if(key==='a_relancer_onglet')return financeEstARelancer(inv); // (05/11/2026)
 if(key==='relancee')return financeEstRelancee(inv); // (05/11/2026)
 if(key==='soldees')return inv.internalStatus==='solde'||inv.status==='paid'; // (04/11/2026)
@@ -1117,17 +1123,18 @@ function financeEscHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,(c)=>
 function financeCommentairesFatima(inv){ return financeFatima.get(String(inv&&inv.id))||[]; }
 function financeDerniereRelance(inv){
   let best=null;
-  for(const c of financeCommentairesFatima(inv)){ if(c.relance&&c.date&&(!best||c.date>best.date))best={date:c.date,canal:c.canal||null,a:c.a||null}; }
+  for(const c of financeCommentairesFatima(inv)){ if((c.relance||c.promesse)&&c.date&&(!best||c.date>best.date))best={date:c.date,canal:c.canal||null,a:c.a||null,promesse:!!c.promesse&&!c.relance,dp:c.dp||null}; }
   if(inv&&inv.lastRelanceAt&&(!best||String(inv.lastRelanceAt)>best.date))best={date:String(inv.lastRelanceAt),canal:null};
   return best;
 }
-function financeRelanceRecente(inv){ const d=financeDerniereRelance(inv); if(!d)return false; const t=new Date(d.date).getTime(); return !isNaN(t)&&(Date.now()-t)<FINANCE_DELAI_RELANCE_JOURS*86400000; }
-function financeEnRetardARelancer(inv){ return financeEstARecouvrer(inv)&&['','a_relancer','en_cours'].includes(inv.internalStatus||'')&&(inv.daysLate||0)>0; }
+// Relance : 7 jours. Promesse (05/11/2026) : jusqu'au lendemain de la date annoncée, sinon 7 jours.
+function financeRelanceRecente(inv){ const d=financeDerniereRelance(inv); if(!d)return false; const t=new Date(d.date).getTime(); if(isNaN(t))return false; const fin=d.promesse&&d.dp?new Date(String(d.dp)+'T23:59:59').getTime()+86400000:t+FINANCE_DELAI_RELANCE_JOURS*86400000; return Date.now()<fin; }
+function financeEnRetardARelancer(inv){ return financeEstARecouvrer(inv)&&['','a_relancer','en_cours','promesse_paiement'].includes(inv.internalStatus||'')&&(inv.daysLate||0)>0; }
 function financeEstARelancer(inv){ return financeEnRetardARelancer(inv)&&!financeRelanceRecente(inv); }
 // Onglet « Relancé » (05/11/2026, Lina) : toute facture à recouvrer relancée il y a moins de 7 jours,
 // quel que soit son statut (report projet, pas encore échue…).
 function financeEstRelancee(inv){ return financeEstARecouvrer(inv)&&financeRelanceRecente(inv); }
-function financeDerniereRelanceHtml(inv){ const d=financeDerniereRelance(inv); if(!d)return ''; return `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Relancé le ${formatDateFR(String(d.date).slice(0,10))}${d.canal?' ('+financeEscHtml(d.canal)+')':''}${d.a?' · '+financeEscHtml(d.a):''}</div>`; }
+function financeDerniereRelanceHtml(inv){ const d=financeDerniereRelance(inv); if(!d)return ''; return `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${d.promesse?'Promesse':'Relancé'} le ${formatDateFR(String(d.date).slice(0,10))}${d.promesse&&d.dp?' (paiement annoncé le '+formatDateFR(String(d.dp))+')':''}${d.canal?' ('+financeEscHtml(d.canal)+')':''}${d.a?' · '+financeEscHtml(d.a):''}</div>`; }
 // Dernier commentaire utile de la carte Trello, avec son auteur (05/11/2026, Lina) — sauf si c'est la relance déjà affichée.
 function financeDernierCommentaireHtml(inv){ const c=financeCommentairesFatima(inv)[0]; if(!c||!c.date)return ''; const d=financeDerniereRelance(inv); if(d&&d.date===c.date)return ''; const t=String(c.texte||''); return `<div title="${financeEscHtml(t)}" style="font-size:11px;color:var(--text-muted);margin-top:2px;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Dernier com. ${formatDateFR(String(c.date).slice(0,10)).slice(0,5)} · ${financeEscHtml(c.a||'Trello')} : ${financeEscHtml(t)}</div>`; }
 function financeFatimaHtml(inv){
@@ -1160,10 +1167,10 @@ function financeAppliquerRetardAcomptes(){
 function financeAppliquerStatutRelance(){
   for(const inv of financeInvoicesCache){
     const st=inv.internalStatus||'';
-    if(st!==''&&st!=='a_relancer'&&st!=='en_cours')continue;
+    if(st!==''&&st!=='a_relancer'&&st!=='en_cours'&&st!=='promesse_paiement')continue;
     if(!(Number(inv.remainingAmountTtc)>0.5))continue;
-    if(financeRelanceRecente(inv)){ if(st!=='en_cours'){ inv.internalStatus='en_cours'; inv._statutRelanceAuto=true; } }
-    else if(st==='en_cours'&&(inv.daysLate||0)>0){ inv.internalStatus='a_relancer'; inv._statutRelanceAuto=true; }
+    if(financeRelanceRecente(inv)){ const d=financeDerniereRelance(inv); const cible=d&&d.promesse?'promesse_paiement':'en_cours'; if(st!==cible){ inv.internalStatus=cible; inv._statutRelanceAuto=true; } }
+    else if((st==='en_cours'||st==='promesse_paiement')&&(inv.daysLate||0)>0){ inv.internalStatus='a_relancer'; inv._statutRelanceAuto=true; }
   }
 }
 // « À vérifier » d'après Trello (05/11/2026, Lina) : Trello a toujours raison ; quand il ne dit rien,
@@ -1181,6 +1188,15 @@ function financeAjouterAVerifierTrello(){
     if(!sansCarte&&!sansEtiquette)continue;
     const l=financeAVerifier.get(k)||[];
     l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:sansCarte?`Aucune carte Trello trouvée pour cette facture (en retard de ${inv.daysLate} j) : statut à trancher.`:`Aucune étiquette de suivi sur la carte Trello (en retard de ${inv.daysLate} j) : à classer (soldée, report projet, litige, à relancer…).`});
+    financeAVerifier.set(k,l);
+  }
+  // Report projet mais carte Trello dans une colonne « diffusion faite » : le report est-il terminé ? (05/11/2026)
+  for(const inv of financeInvoicesCache){
+    if(inv.internalStatus!=='report_projet'||!financeEstARecouvrer(inv))continue;
+    const k=String(inv.id); const col=financeListesTrello.get(k)||'';
+    if(!/^\s*[789]\s*-|termin[ée].*diffus/i.test(col))continue;
+    const l=financeAVerifier.get(k)||[];
+    l.push({id:inv.id,facture:inv.invoiceNumber,calcul:true,lien:financeLiensTrello.get(k)||null,raison:`Report projet, mais la carte Trello est dans « ${col} » : la diffusion est faite, le report est-il terminé ?`});
     financeAVerifier.set(k,l);
   }
   // Étiquette « Soldée » mais relance de l'équipe APRÈS la pose de l'étiquette : on n'est pas sûr → « À vérifier » (05/11/2026).
