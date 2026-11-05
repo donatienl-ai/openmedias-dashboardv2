@@ -13,7 +13,7 @@ const LECTEURS = ['arianesmirnoff', 'comptaopenmedias']; // Ariane + compte Comp
 const ID_FATIMA = '67693c54e36bbceffbcf54d4';
 function analyserCommentaireRelance(texte) {
   const t = String(texte || '');
-  const pasRelance = /facture envoy|mail re[çc]u|re[çc]u ce jour|virement re[çc]u/i.test(t);
+  const pasRelance = /facture envoy|(mail|sms|message|msg|appel|vocal) re[çc]u|re[çc]u ce jour|virement re[çc]u/i.test(t); // un message REÇU du client n'est pas une relance
   const relance = !pasRelance && /relanc|\bNRP\b|mail envoy|e-?mail (fait|envoy)|\bsms\b|whats+a?p+|messagerie|msg laiss|message laiss|appel|mise en demeure|courrier|^\s*bonjour/i.test(t);
   let canal = null;
   if (/mise en demeure|courrier|recommand/i.test(t)) canal = 'courrier';
