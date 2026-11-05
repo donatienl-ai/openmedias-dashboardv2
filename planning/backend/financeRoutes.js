@@ -23,6 +23,9 @@ function echeancesPennylaneDe(r) {
 let listeFacturesExport = null;
 
 module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES, sansModules = false }) {
+  // 05/11/2026 (Lina) : date du dernier changement de statut fait à la main. Un statut choisi par
+  // l'équipe passe avant Trello et les règles automatiques (sinon il était aussitôt écrasé).
+  try { db.prepare('ALTER TABLE pennylane_invoices ADD COLUMN internal_status_manual_at TEXT').run(); } catch (e) { /* colonne déjà là */ }
   function joursDeRetard(deadline) {
     if (!deadline) return null;
     const d = new Date(`${deadline}T00:00:00`);
@@ -181,6 +184,7 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
       status: r.status,
       
       internalStatus: r.internal_status,
+    statutManuelLe: r.internal_status_manual_at || null, // 05/11/2026 : statut choisi à la main
       internal_status: r.internal_status,
       
       daysLate: joursDeRetard(echRef.due),
@@ -420,8 +424,9 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
     let deadlineStatusId = resolveStatusId(req.body.deadlineStatusId);
     if (deadlineStatusId === false) return res.status(400).json({ error: 'Statut d\'échéance introuvable' });
     if (deadlineStatusId === null) deadlineStatusId = defaultInstallmentStatusId();
-    db.prepare('UPDATE pennylane_invoices SET internal_status=?, deadline=?, deadline_manual=?, deadline_status_id=? WHERE id=?')
-      .run(internalStatus, deadline, deadlineManual, deadlineStatusId === undefined ? existing.deadline_status_id : deadlineStatusId, req.params.id);
+    const manuelLe = req.body.internalStatus !== undefined ? new Date().toISOString() : (existing.internal_status_manual_at || null);
+    db.prepare('UPDATE pennylane_invoices SET internal_status=?, deadline=?, deadline_manual=?, deadline_status_id=?, internal_status_manual_at=? WHERE id=?')
+      .run(internalStatus, deadline, deadlineManual, deadlineStatusId === undefined ? existing.deadline_status_id : deadlineStatusId, manuelLe, req.params.id);
     maybeAutoSolde(req.params.id);
     res.json(db.prepare('SELECT * FROM pennylane_invoices WHERE id=?').get(req.params.id));
   });
