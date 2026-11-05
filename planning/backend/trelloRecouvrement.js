@@ -17,7 +17,7 @@ try { echeancesLib = require('./echeancesPennylane'); } catch (e) { /* facultati
 function analyserCommentaireRelance(texte) {
   const t = String(texte || '');
   const pasRelance = /facture envoy|(mail|sms|message|msg|appel|vocal) re[çc]u|re[çc]u ce jour|virement re[çc]u/i.test(t); // un message REÇU du client n'est pas une relance
-  const relance = !pasRelance && /relanc|\bNRP\b|mail envoy|e-?mail (fait|envoy)|\bsms\b|whats+a?p+|messagerie|msg laiss|message laiss|appel|mise en demeure|courrier|^\s*bonjour/i.test(t);
+  const relance = !pasRelance && /relanc|\bNRP\b|mail envoy|e-?mail (fait|envoy)|\bsms\b|whats+a?p+|messagerie|msg laiss|message laiss|appel|app?l[ée]|tent[ée] de (le |la |les )?(joindre|contacter|t[ée]l[ée]phoner)|\beu (au t[ée]l|ce jour|le client|[A-Z][a-z]+ au t[ée]l)|\bj'?ai eu\b|rappel[ée]?|vocal|mise en demeure|courrier|^\s*bonjour/i.test(t); // 05/11/2026 : appels (« appler », « eu au tél », « tenté de joindre »)
   let canal = null;
   if (/mise en demeure|courrier|recommand/i.test(t)) canal = 'courrier';
   else if (/whats+a?p+/i.test(t)) canal = 'WhatsApp';
