@@ -900,7 +900,11 @@ module.exports = function registerTrelloRecouvrement(app, { db, requireFinance }
   if (config()) {
     let occupe = false;
     setInterval(async () => {
-      if (occupe || !etat.board) return;
+      if (occupe) return;
+      // 05/11/2026 : si le chargement initial a échoué (ex. Trello HTTP 503 au
+      // démarrage), on le relance ici au lieu de rester sans Trello jusqu'au
+      // prochain redémarrage.
+      if (!etat.board) { assurerCharge().catch((e) => console.warn('[trello] nouvel essai de chargement :', e.message)); return; }
       occupe = true;
       try {
         await rafraichir(); etat.erreur = null;
