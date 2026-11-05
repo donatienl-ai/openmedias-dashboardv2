@@ -353,11 +353,15 @@ function setupReports(db) {
   // commun pour cette constante — à garder synchronisée si la liste change.
   const REPORTS_PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete', 'paid'];
 
-  function reportRelancesQuotidien({ force = false, tentative = 0, seulementA = null } = {}) {
+  function reportRelancesQuotidien({ force = false, tentative = 0, seulementA = null, photoSeulement = false } = {}) {
+    // 05/11/2026 (Lina) : mail recouvrement à 9 h, du mardi au vendredi (à partir du
+    // 10/11/2026), pour Thomas, Lola, Fatima, Arianne et Lina. Épuré : à relancer,
+    // en retard déjà relancées, à échoir dans les 15 jours depuis le lundi, et
+    // évolution de « à recouvrer » par rapport à la semaine d'avant.
     const fmt = (d) => d.toISOString().slice(0, 10);
     const today = fmt(new Date());
-    // 05/11/2026 : on attend que Trello soit chargé, comme le dashboard. Nouvel
-    // essai toutes les 5 min (6 fois) ; ensuite le mail part avec une mention.
+    // On attend que Trello soit chargé, comme le dashboard. Nouvel essai toutes
+    // les 5 min (6 fois) ; ensuite le mail part avec une mention.
     let rapportTrello = null;
     try {
       const trello = require('./trelloRecouvrement');
@@ -365,45 +369,38 @@ function setupReports(db) {
     } catch (e) { console.warn('[RELANCES] Trello :', e.message); }
     if (!rapportTrello && tentative < 6) {
       console.log('[RELANCES] Trello pas encore chargé — nouvel essai dans 5 min');
-      setTimeout(() => reportRelancesQuotidien({ force, tentative: tentative + 1, seulementA }), 5 * 60 * 1000).unref();
+      setTimeout(() => reportRelancesQuotidien({ force, tentative: tentative + 1, seulementA, photoSeulement }), 5 * 60 * 1000).unref();
       return;
     }
     const sansTrello = !rapportTrello;
     if (!rapportTrello) rapportTrello = {};
     let facturesDashboard = [];
     try { facturesDashboard = require('./financeRoutes').listeFacturesDashboard() || []; } catch (e) { console.warn('[RELANCES] factures :', e.message); }
-    if (!force && !claimReportOnce(`relances_${today}`)) {
+    if (!photoSeulement && !force && !claimReportOnce(`relances_${today}`)) {
       console.log(`[RELANCES] ${today} déjà envoyé — doublon ignoré`);
       return;
     }
-    // Alignée le 23/09/2026 (demande Lina) sur les mêmes exclusions que le
-    // dashboard Recouvrement : les factures émises avant le 01/01/2025 sont
-    // abandonnées (décision d'équipe, cf. statut-implementation-recouvrement.md)
-    // et ne doivent donc plus jamais réapparaître dans ce mail non plus ; et
-    // les statuts Pennylane hors recouvrement (notamment "paid", qui peut
-    // garder un remaining_amount résiduel par bug Pennylane) sont exclus pour
-    // ne pas relancer un client qui a déjà payé. "douteux" ajouté le
-    // 24/09/2026 (demande Lina, même logique que litige/promesse/soldée :
-    // déjà suivie autrement, pas besoin d'une relance automatique).
-    // 05/11/2026 (Lina) : le mail lit exactement le dashboard Recouvrement —
-    // même liste de factures (mêmes jours de retard), mêmes décisions Trello
-    // (Soldée, Report projet, Litige Forbes, reste dû recalculé), mêmes
-    // exclusions (SCP, F5885, avant 2025, statuts Pennylane hors recouvrement).
-    // « À relancer » = statut à relancer (ou aucun) ET en retard, comme la tuile.
+    // Même calcul que le dashboard Recouvrement (05/11/2026) : mêmes décisions
+    // Trello (Trello prime), mêmes exclusions (SCP, F5885, avant 2025, statuts
+    // Pennylane hors recouvrement), statut choisi à la main prioritaire.
     const decisionsMail = new Map((rapportTrello.decisionsTrello || []).map((d) => [String(d.id), d]));
     const scpMail = new Set((rapportTrello.scp || []).map((x) => String(x.facture)));
-    // Relances (05/11/2026) : dernière relance de Fatima (Trello) par facture.
-    const relancesFatima = new Map();
-    const promessesEnCours = new Set(); const aujourdhuiTxt = new Date().toISOString().slice(0, 10);
+    const relancesEquipe = new Map();
+    const promessesEnCours = new Set(); const aujourdhuiTxt = today;
     for (const x of (rapportTrello.commentairesFatima || [])) {
-      const r = (x.c || []).filter((c) => (c.relance || c.promesse) && c.date).map((c) => c.date).sort().pop(); if (r) relancesFatima.set(String(x.id), r);
-      // Promesse avec une date annoncée encore à venir (05/11/2026) : à part jusqu'au lendemain de cette date.
+      const r = (x.c || []).filter((c) => (c.relance || c.promesse) && c.date).map((c) => c.date).sort().pop(); if (r) relancesEquipe.set(String(x.id), r);
       if ((x.c || []).some((c) => c.promesse && c.dp && c.dp >= aujourdhuiTxt)) promessesEnCours.add(String(x.id));
     }
-    const relanceesRecemment = [];
     const debutJour = new Date(); debutJour.setHours(0, 0, 0, 0);
-    const enRetard = [];
-    const litigesCalcules = [];
+    // Fenêtre « à échoir » : 15 jours à partir du lundi de la semaine en cours,
+    // pour que la liste reste la même toute la semaine.
+    const lundi = new Date(debutJour); lundi.setDate(lundi.getDate() - ((lundi.getDay() + 6) % 7));
+    const finFenetre = new Date(lundi); finFenetre.setDate(finFenetre.getDate() + 14);
+    const finFenetreTxt = `${finFenetre.getFullYear()}-${String(finFenetre.getMonth() + 1).padStart(2, '0')}-${String(finFenetre.getDate()).padStart(2, '0')}`;
+    const dateFr = (iso) => { const s = String(iso || '').slice(0, 10); return s ? `${s.slice(8, 10)}/${s.slice(5, 7)}` : ''; };
+
+    const aRelancer = []; const relancees = []; const aEchoir = []; const litiges = [];
+    let totalAVenir = 0, nbAVenir = 0, totalReport = 0, nbReport = 0;
     for (const f of facturesDashboard) {
       const numero = String(f.invoiceNumber || '');
       if (numero === 'F5885' || scpMail.has(numero) || /groupe\s*scp/i.test(f.customerName || '')) continue;
@@ -413,100 +410,111 @@ function setupReports(db) {
       let reste = Number(f.remainingAmountTtc != null ? f.remainingAmountTtc : (f.remainingAmount || 0));
       const d = decisionsMail.get(String(f.id));
       if (d) {
-        if (!f.statutManuelLe && (d.statut === 'solde' || d.statut === 'report_projet' || d.statut === 'litige')) statut = d.statut; // statut choisi à la main : il prime (05/11/2026)
+        if (!f.statutManuelLe && (d.statut === 'solde' || d.statut === 'report_projet' || d.statut === 'litige')) statut = d.statut;
         if (d.resteReel != null) reste = Number(d.resteReel);
       }
-      if (!(reste > 0.5)) continue;
+      if (statut === 'solde' || !(reste > 0.5)) continue;
       const ligne = { id: f.id, invoice_number: numero, customer_name: f.customerName || '', contact_name: f.contactName || '', contact_email: f.contactEmail || '', contact_phone: f.contactPhone || '', remaining_amount: reste, daysLate: f.daysLate };
-      if (statut === 'litige') { litigesCalcules.push(ligne); continue; }
+      if (statut === 'litige') { litiges.push(ligne); continue; }
+      if (statut === 'report_projet') { totalReport += reste; nbReport++; continue; }
       if (statut && statut !== 'a_relancer' && statut !== 'en_cours' && statut !== 'promesse_paiement') continue;
-      // Acompte échu non payé = retard, comme le dashboard (05/11/2026). Pas quand Trello a
+      // Acompte échu non payé = retard, comme le dashboard. Pas quand Trello a
       // déjà recalculé les parts payées (le dashboard s'appuie alors sur Trello).
       let jours = f.daysLate || 0;
       const ech = (!(d && d.resteReel != null) && !(f.installments || []).length && f.echeancesPennylane && f.echeancesPennylane.acomptes) || [];
-      for (const a of ech) { if (a.etat === 'soldee' || !a.date) continue; const j = Math.floor((debutJour.getTime() - new Date(String(a.date).slice(0, 10) + 'T00:00:00').getTime()) / 86400000); if (j > jours) jours = j; break; }
-      if (!(jours > 0)) continue;
-      ligne.daysLate = jours;
-      // Relancée il y a moins de 7 jours (Fatima dans Trello ou relance saisie) : onglet « Relancé »,
-      // pas dans la liste du jour ; sans paiement, elle y revient après 7 jours.
-      const derniere = [relancesFatima.get(String(f.id)), f.lastRelanceAt].filter(Boolean).map(String).sort().pop();
-      if (promessesEnCours.has(String(f.id)) || (derniere && Date.now() - new Date(derniere).getTime() < 7 * 86400000)) { relanceesRecemment.push(ligne); continue; }
-      enRetard.push(ligne);
-    }
-    enRetard.sort((a, b) => b.daysLate - a.daysLate);
-    litigesCalcules.sort((a, b) => b.remaining_amount - a.remaining_amount);
-
-    const dest = db.prepare(
-      "SELECT email FROM commercial_users WHERE role IN ('finance','admin') AND actif=1"
-    ).all().map((r) => r.email).filter(Boolean).filter((e) => e !== 'paul@openmedias.fr');
-
-    if (!enRetard.length) {
-      console.log('[RELANCES] aucune facture en retard à relancer aujourd\'hui — pas d\'envoi');
-      return;
-    }
-
-    const totalDu = enRetard.reduce((s, r) => s + (r.remaining_amount || 0), 0);
-    let html = `<h2>💶 Relances du jour — ${enRetard.length} facture(s) en retard</h2>
-      <p>${enRetard.length} facture(s) encore dues et en retard, pour un total de ${fmtMoney(totalDu)}. Statuts déjà classés "litige", "promesse de paiement", "douteux" ou "soldée" sont exclus de cette liste.</p>
-      <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px">
-        <tr style="background:#1a1a2e;color:#fff">
-          <th style="padding:8px;text-align:left">Facture</th>
-          <th style="padding:8px;text-align:left">Client</th>
-          <th style="padding:8px;text-align:left">Contact</th>
-          <th style="padding:8px;text-align:right">Retard</th>
-          <th style="padding:8px;text-align:right">Montant dû</th>
-        </tr>`;
-    for (const r of enRetard) {
-      const contact = r.contact_name || r.customer_name || '';
-      const contactDetail = [r.contact_email, r.contact_phone].filter(Boolean).join(' · ');
-      html += `<tr style="border-bottom:1px solid #eee">
-        <td style="padding:6px 8px">${r.invoice_number || r.id}</td>
-        <td style="padding:6px 8px">${r.customer_name || ''}</td>
-        <td style="padding:6px 8px">${contact}${contactDetail ? `<br><span style="color:#888;font-size:11px">${contactDetail}</span>` : ''}</td>
-        <td style="padding:6px 8px;text-align:right">${r.daysLate} j</td>
-        <td style="padding:6px 8px;text-align:right">${fmtMoney(r.remaining_amount)}</td>
-      </tr>`;
-    }
-    html += `</table>`;
-
-    // Section informative séparée — factures en litige (demande Lina 24/09/2026).
-    // Volontairement SANS effet sur enRetard/dest/le déclenchement de l'envoi
-    // ci-dessus : ces factures restent exclues de la vraie liste de relance
-    // (même exclusion qu'avant, i.internal_status NOT IN ('litige', ...)) —
-    // on les ajoute seulement en lecture, à la fin du même mail, pour que
-    // l'équipe garde un œil dessus sans déclencher de relance automatique.
-    // Confirmé par Lina : "Section informative séparée", pas une relance.
-    const litiges = litigesCalcules;
-
-    if (litiges.length) {
-      const totalLitige = litiges.reduce((s, r) => s + (r.remaining_amount || 0), 0);
-      html += `<h2 style="margin-top:24px">⚖️ En litige — suivi à part (${litiges.length} facture(s), ${fmtMoney(totalLitige)})</h2>
-        <p>Informatif uniquement — ces factures ne sont <strong>pas</strong> relancées automatiquement, elles restent en suivi manuel.</p>
-        <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px">
-          <tr style="background:#1a1a2e;color:#fff">
-            <th style="padding:8px;text-align:left">Facture</th>
-            <th style="padding:8px;text-align:left">Client</th>
-            <th style="padding:8px;text-align:left">Contact</th>
-            <th style="padding:8px;text-align:right">Montant dû</th>
-          </tr>`;
-      for (const r of litiges) {
-        const contact = r.contact_name || r.customer_name || '';
-        const contactDetail = [r.contact_email, r.contact_phone].filter(Boolean).join(' · ');
-        html += `<tr style="border-bottom:1px solid #eee">
-          <td style="padding:6px 8px">${r.invoice_number || r.id}</td>
-          <td style="padding:6px 8px">${r.customer_name || ''}</td>
-          <td style="padding:6px 8px">${contact}${contactDetail ? `<br><span style="color:#888;font-size:11px">${contactDetail}</span>` : ''}</td>
-          <td style="padding:6px 8px;text-align:right">${fmtMoney(r.remaining_amount)}</td>
-        </tr>`;
+      let prochaine = null;
+      for (const a of ech) { if (a.etat === 'soldee' || !a.date) continue; prochaine = String(a.date).slice(0, 10); const j = Math.floor((debutJour.getTime() - new Date(prochaine + 'T00:00:00').getTime()) / 86400000); if (j > jours) jours = j; break; }
+      if (!(jours > 0)) {
+        totalAVenir += reste; nbAVenir++;
+        const echeance = prochaine || String(f.deadline || '').slice(0, 10);
+        if (echeance && echeance <= finFenetreTxt) aEchoir.push({ ...ligne, echeance });
+        continue;
       }
-      html += `</table>`;
+      ligne.daysLate = jours;
+      // Relancée il y a moins de 7 jours (Trello ou relance saisie), ou promesse
+      // en cours : « Relancé » ; sans paiement, elle revient après 7 jours.
+      const derniere = [relancesEquipe.get(String(f.id)), f.lastRelanceAt].filter(Boolean).map(String).sort().pop();
+      ligne.derniere = derniere || null; ligne.promesse = promessesEnCours.has(String(f.id)) || statut === 'promesse_paiement';
+      if (promessesEnCours.has(String(f.id)) || (derniere && Date.now() - new Date(derniere).getTime() < 7 * 86400000)) { relancees.push(ligne); continue; }
+      aRelancer.push(ligne);
     }
+    aRelancer.sort((a, b) => b.daysLate - a.daysLate);
+    relancees.sort((a, b) => b.remaining_amount - a.remaining_amount);
+    aEchoir.sort((a, b) => (a.echeance < b.echeance ? -1 : a.echeance > b.echeance ? 1 : b.remaining_amount - a.remaining_amount));
+    const somme = (l) => l.reduce((s, r) => s + (r.remaining_amount || 0), 0);
+    const totalRelancer = somme(aRelancer), totalRelancees = somme(relancees);
+    const nbRetard = aRelancer.length + relancees.length, totalRetard = totalRelancer + totalRelancees;
+    const nbRecouvrer = nbRetard + nbAVenir + nbReport, totalRecouvrer = totalRetard + totalAVenir + totalReport;
 
-    if (relanceesRecemment.length) html += '<p style="color:#555;font-family:Arial,sans-serif;font-size:13px">' + relanceesRecemment.length + ' autre(s) facture(s) en retard relancée(s) ou avec une promesse de paiement récente (onglet « Relancé ») : ' + relanceesRecemment.map((r) => r.invoice_number).join(', ') + '.</p>';
-    if (sansTrello) html += '<p style="color:#b45309;font-family:Arial,sans-serif;font-size:13px">⚠️ Trello n’était pas chargé à l’envoi : les statuts venus de Trello (soldée, report projet, litige) ne sont pas appliqués dans ce mail.</p>';
-    html += empreinteHtml(enRetard.length + ' facture(s)' + (litiges.length ? ` + ${litiges.length} litige(s)` : ''));
-    // seulementA : envoi de test à une seule adresse (05/11/2026, Lina).
-    sendMailOnly(`${seulementA ? '[TEST] ' : ''}💶 Relances du jour — ${enRetard.length} facture(s) en retard (${fmtMoney(totalDu)})`, html, seulementA ? [seulementA] : dest);
+    // Photo du jour (comparaison avec la semaine d'avant).
+    try {
+      db.prepare('CREATE TABLE IF NOT EXISTS recouvrement_photos (jour TEXT PRIMARY KEY, a_recouvrer REAL, nb INTEGER, en_retard REAL, nb_retard INTEGER, a_relancer REAL, nb_relancer INTEGER)').run();
+      if (!sansTrello) db.prepare('INSERT OR REPLACE INTO recouvrement_photos (jour,a_recouvrer,nb,en_retard,nb_retard,a_relancer,nb_relancer) VALUES (?,?,?,?,?,?,?)').run(today, totalRecouvrer, nbRecouvrer, totalRetard, nbRetard, totalRelancer, aRelancer.length);
+    } catch (e) { console.warn('[RELANCES] photo :', e.message); }
+    if (photoSeulement) { console.log(`[RELANCES] photo ${today} : à recouvrer ${Math.round(totalRecouvrer)} €`); return; }
+
+    let avant = null;
+    try {
+      const il7 = new Date(debutJour); il7.setDate(il7.getDate() - 7);
+      const j7 = `${il7.getFullYear()}-${String(il7.getMonth() + 1).padStart(2, '0')}-${String(il7.getDate()).padStart(2, '0')}`;
+      const il10 = new Date(il7); il10.setDate(il10.getDate() - 3);
+      const j10 = `${il10.getFullYear()}-${String(il10.getMonth() + 1).padStart(2, '0')}-${String(il10.getDate()).padStart(2, '0')}`;
+      avant = db.prepare('SELECT * FROM recouvrement_photos WHERE jour <= ? AND jour >= ? ORDER BY jour DESC LIMIT 1').get(j7, j10) || null;
+    } catch (e) { avant = null; }
+    const evol = (maintenant, alors) => {
+      const diff = maintenant - alors; const pct = alors ? (diff / alors) * 100 : 0;
+      const couleur = diff > 0.5 ? '#b91c1c' : (diff < -0.5 ? '#15803d' : '#555');
+      const signe = diff > 0.5 ? '▲ +' : (diff < -0.5 ? '▼ −' : '= ');
+      return `<span style="color:${couleur}">${signe}${fmtMoney(Math.abs(diff))} (${diff >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1).replace('.', ',')} %)</span>`;
+    };
+
+    const td = 'padding:6px 8px;border-bottom:1px solid #eee';
+    const th = 'padding:7px 8px;text-align:left;background:#f3f4f6;color:#374151;font-weight:600';
+    const tableau = (entetes, lignes) => `<table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px;margin-bottom:6px"><tr>${entetes.map(([t, droite]) => `<th style="${th}${droite ? ';text-align:right' : ''}">${t}</th>`).join('')}</tr>${lignes.join('')}</table>`;
+    const contactDe = (r) => { const c = r.contact_name || ''; const det = [r.contact_email, r.contact_phone].filter(Boolean).join(' · '); return `${c}${det ? `${c ? '<br>' : ''}<span style="color:#888;font-size:11px">${det}</span>` : ''}`; };
+
+    let html = `<div style="font-family:Arial,sans-serif;color:#111;max-width:760px">`;
+    html += `<h2 style="margin:0 0 12px">💶 Recouvrement du ${dateFr(today)}</h2>`;
+    html += `<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;margin-bottom:18px">`;
+    html += `<tr><td style="padding:3px 16px 3px 0">À recouvrer</td><td style="padding:3px 16px 3px 0;text-align:right"><strong>${fmtMoney(totalRecouvrer)}</strong></td><td style="padding:3px 0;color:#555">${nbRecouvrer} factures${avant ? ' · ' + evol(totalRecouvrer, avant.a_recouvrer) + ` vs ${dateFr(avant.jour)}` : ''}</td></tr>`;
+    html += `<tr><td style="padding:3px 16px 3px 0">En retard</td><td style="padding:3px 16px 3px 0;text-align:right"><strong>${fmtMoney(totalRetard)}</strong></td><td style="padding:3px 0;color:#555">${nbRetard} factures${avant ? ' · ' + evol(totalRetard, avant.en_retard) + ` vs ${dateFr(avant.jour)}` : ''}</td></tr>`;
+    html += `<tr><td style="padding:3px 16px 3px 0">À relancer aujourd’hui</td><td style="padding:3px 16px 3px 0;text-align:right"><strong>${fmtMoney(totalRelancer)}</strong></td><td style="padding:3px 0;color:#555">${aRelancer.length} factures</td></tr>`;
+    html += `</table>`;
+    if (!avant) html += `<p style="color:#888;font-size:12px;margin:-10px 0 16px">Comparaison avec la semaine d’avant : disponible dès qu’une photo d’il y a 7 jours existe (photos enregistrées depuis le 05/11/2026).</p>`;
+
+    html += `<h3 style="margin:18px 0 6px">1. À relancer aujourd’hui — ${aRelancer.length} (${fmtMoney(totalRelancer)})</h3>`;
+    html += aRelancer.length ? tableau([['Facture'], ['Client'], ['Contact'], ['Retard', 1], ['Dû', 1]], aRelancer.map((r) => `<tr><td style="${td}">${r.invoice_number}</td><td style="${td}">${r.customer_name}</td><td style="${td}">${contactDe(r)}</td><td style="${td};text-align:right">${r.daysLate} j</td><td style="${td};text-align:right">${fmtMoney(r.remaining_amount)}</td></tr>`)) : '<p style="color:#555">Rien à relancer aujourd’hui.</p>';
+
+    html += `<h3 style="margin:18px 0 6px">2. En retard, déjà relancées ou promesse — ${relancees.length} (${fmtMoney(totalRelancees)})</h3>`;
+    html += relancees.length ? tableau([['Facture'], ['Client'], ['Retard', 1], ['Dû', 1], ['Suivi']], relancees.map((r) => `<tr><td style="${td}">${r.invoice_number}</td><td style="${td}">${r.customer_name}</td><td style="${td};text-align:right">${r.daysLate} j</td><td style="${td};text-align:right">${fmtMoney(r.remaining_amount)}</td><td style="${td};color:#555">${r.promesse ? 'Promesse' : 'Relancée'}${r.derniere ? ' le ' + dateFr(r.derniere) : ''}</td></tr>`)) : '<p style="color:#555">Aucune.</p>';
+
+    html += `<h3 style="margin:18px 0 6px">3. À échoir d’ici le ${dateFr(finFenetreTxt)} — ${aEchoir.length} (${fmtMoney(somme(aEchoir))})</h3>`;
+    html += aEchoir.length ? tableau([['Facture'], ['Client'], ['Échéance'], ['Dû', 1]], aEchoir.map((r) => `<tr><td style="${td}">${r.invoice_number}</td><td style="${td}">${r.customer_name}</td><td style="${td}">${dateFr(r.echeance)}</td><td style="${td};text-align:right">${fmtMoney(r.remaining_amount)}</td></tr>`)) : '<p style="color:#555">Aucune échéance d’ici là.</p>';
+
+    if (litiges.length) html += `<p style="color:#555;font-size:12px;margin-top:16px">Hors relance : ${litiges.length} litige(s) (${fmtMoney(somme(litiges))}) et ${nbReport} report(s) projet (${fmtMoney(totalReport)}), suivis à part dans le dashboard.</p>`;
+    if (sansTrello) html += '<p style="color:#b45309;font-size:13px">⚠️ Trello n’était pas chargé à l’envoi : les statuts venus de Trello ne sont pas appliqués dans ce mail.</p>';
+
+    const dest = destinatairesRecouvrement();
+    if (seulementA) html += `<p style="color:#888;font-size:11px;margin-top:16px">[TEST] Destinataires prévus à partir du mardi 10/11 : ${dest.length ? dest.join(', ') : 'aucun trouvé'}.</p>`;
+    html += empreinteHtml(aRelancer.length + ' à relancer · ' + relancees.length + ' relancées · ' + aEchoir.length + ' à échoir') + '</div>';
+    if (!seulementA && !aRelancer.length && !relancees.length && !aEchoir.length) { console.log('[RELANCES] rien à signaler aujourd’hui — pas d’envoi'); return; }
+    sendMailOnly(`${seulementA ? '[TEST] ' : ''}💶 Recouvrement — ${aRelancer.length} à relancer · ${nbRetard} en retard (${fmtMoney(totalRetard)})`, html, seulementA ? [seulementA] : dest);
+  }
+
+  // Destinataires du mail recouvrement (05/11/2026, Lina) : Thomas, Lola, Fatima,
+  // Arianne, Lina. Surchargeable par REPORT_EMAIL_RECOUVREMENT (liste séparée par des virgules).
+  function destinatairesRecouvrement() {
+    const env = (process.env.REPORT_EMAIL_RECOUVREMENT || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (env.length) return env;
+    const prenoms = ['thomas', 'lola', 'fatima', 'arianne', 'ariane', 'lina'];
+    const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    try {
+      return db.prepare('SELECT email, nom FROM commercial_users WHERE actif=1').all().filter((r) => {
+        const p = norm(r.nom).split(/[\s.\-_]+/)[0];
+        const e = norm(r.email).split(/[@.\-_]/)[0];
+        return prenoms.includes(p) || prenoms.includes(e);
+      }).map((r) => r.email).filter(Boolean);
+    } catch (e) { console.warn('[RELANCES] destinataires :', e.message); return []; }
   }
 
   // ── Helpers dates ──
@@ -533,11 +541,19 @@ function setupReports(db) {
   // Tous les lundis à 14h : notif individuelle "à programmer" (Eva, Flavie) + vue C-level
   cron.schedule('0 14 * * 1', () => { reportAProgrammerLundi(); reportAProgrammerClevel(); }, { timezone: 'Europe/Paris' });
 
-  // Du lundi au vendredi à 8h : digest des relances de recouvrement du jour
-  cron.schedule('0 8 * * 1-5', () => reportRelancesQuotidien(), { timezone: 'Europe/Paris' });
+  // Recouvrement (05/11/2026, Lina) : mail à 9 h du mardi au vendredi, à partir du 10/11/2026.
+  // Photo de « à recouvrer » tous les jours à 9 h (lundi et week-end compris) pour la comparaison avec la semaine d'avant.
+  cron.schedule('0 9 * * *', () => {
+    const jour = new Date().getDay();
+    const debut = new Date().toISOString().slice(0, 10) >= '2026-11-10';
+    if (debut && jour >= 2 && jour <= 5) reportRelancesQuotidien();
+    else reportRelancesQuotidien({ photoSeulement: true });
+  }, { timezone: 'Europe/Paris' });
+  // Test unique demandé par Lina le 05/11/2026 : envoyé à elle seule, une seule fois.
+  setTimeout(() => { try { if (claimReportOnce('test_recouvrement_9h_20261105')) reportRelancesQuotidien({ force: true, seulementA: 'lina.e@openmedias.fr' }); } catch (e) { console.warn('[RELANCES] test :', e.message); } }, 60 * 1000).unref();
 
 
-  console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h, relances lun-ven 8h)');
+  console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h, recouvrement mar-ven 9h)');
 
   return { reportMensuel, reportHebdo, reportApercuMoisSuivant, reportKickoffLundi, reportAProgrammerLundi, reportAProgrammerClevel, reportRelancesQuotidien, sendMail, sendMailOnly };
 }
