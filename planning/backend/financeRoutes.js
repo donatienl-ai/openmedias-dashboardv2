@@ -18,6 +18,10 @@ function echeancesPennylaneDe(r) {
   }
 }
 
+// 05/11/2026 : liste des factures telle que le dashboard la reçoit (même requête,
+// mêmes jours de retard), réutilisée par le mail « Relances du jour » de 8h.
+let listeFacturesExport = null;
+
 module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFinance, FINANCE_INTERNAL_STATUSES, sansModules = false }) {
   function joursDeRetard(deadline) {
     if (!deadline) return null;
@@ -198,7 +202,7 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
     };
   }
 
-  app.get('/api/finance/invoices', requireFinance, (req, res) => {
+  function listeFacturesDashboard() {
     const rows = db.prepare(`
       SELECT i.*, 
         c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
@@ -247,10 +251,15 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
       });
     }
 
+    return deduplicatedRows.map((r) => shapeInvoiceRow(r, installmentsByInvoice[r.id] || []));
+  }
+  listeFacturesExport = listeFacturesDashboard;
+
+  app.get('/api/finance/invoices', requireFinance, (req, res) => {
     const { statut, q, retard_only } = req.query;
     const qLower = q ? String(q).trim().toLowerCase() : '';
-    
-    let list = deduplicatedRows.map((r) => shapeInvoiceRow(r, installmentsByInvoice[r.id] || []));
+
+    let list = listeFacturesDashboard();
     
     if (statut) list = list.filter((r) => r.internalStatus === statut);
     if (retard_only === '1') list = list.filter((r) => (r.daysLate || 0) > 0);
@@ -613,3 +622,5 @@ module.exports = function registerFinanceRoutes(app, { db, pennylane, requireFin
   // module manque ou plante, le reste du recouvrement fonctionne normalement.
   try { require('./trelloRecouvrement')(app, { db, requireFinance }); } catch (e) { console.warn('[trello] module indisponible :', e.message); }
 };
+
+module.exports.listeFacturesDashboard = () => (listeFacturesExport ? listeFacturesExport() : null);
