@@ -353,7 +353,7 @@ function setupReports(db) {
   // commun pour cette constante — à garder synchronisée si la liste change.
   const REPORTS_PENNYLANE_HORS_RECOUVREMENT = ['draft', 'credit_note', 'cancelled', 'partially_cancelled', 'archived', 'incomplete', 'paid'];
 
-  function reportRelancesQuotidien({ force = false, tentative = 0 } = {}) {
+  function reportRelancesQuotidien({ force = false, tentative = 0, seulementA = null } = {}) {
     const fmt = (d) => d.toISOString().slice(0, 10);
     const today = fmt(new Date());
     // 05/11/2026 : on attend que Trello soit chargé, comme le dashboard. Nouvel
@@ -365,7 +365,7 @@ function setupReports(db) {
     } catch (e) { console.warn('[RELANCES] Trello :', e.message); }
     if (!rapportTrello && tentative < 6) {
       console.log('[RELANCES] Trello pas encore chargé — nouvel essai dans 5 min');
-      setTimeout(() => reportRelancesQuotidien({ force, tentative: tentative + 1 }), 5 * 60 * 1000).unref();
+      setTimeout(() => reportRelancesQuotidien({ force, tentative: tentative + 1, seulementA }), 5 * 60 * 1000).unref();
       return;
     }
     const sansTrello = !rapportTrello;
@@ -483,7 +483,8 @@ function setupReports(db) {
 
     if (sansTrello) html += '<p style="color:#b45309;font-family:Arial,sans-serif;font-size:13px">⚠️ Trello n’était pas chargé à l’envoi : les statuts venus de Trello (soldée, report projet, litige) ne sont pas appliqués dans ce mail.</p>';
     html += empreinteHtml(enRetard.length + ' facture(s)' + (litiges.length ? ` + ${litiges.length} litige(s)` : ''));
-    sendMailOnly(`💶 Relances du jour — ${enRetard.length} facture(s) en retard (${fmtMoney(totalDu)})`, html, dest);
+    // seulementA : envoi de test à une seule adresse (05/11/2026, Lina).
+    sendMailOnly(`${seulementA ? '[TEST] ' : ''}💶 Relances du jour — ${enRetard.length} facture(s) en retard (${fmtMoney(totalDu)})`, html, seulementA ? [seulementA] : dest);
   }
 
   // ── Helpers dates ──
@@ -512,6 +513,15 @@ function setupReports(db) {
 
   // Du lundi au vendredi à 8h : digest des relances de recouvrement du jour
   cron.schedule('0 8 * * 1-5', () => reportRelancesQuotidien(), { timezone: 'Europe/Paris' });
+
+  // 05/11/2026 (Lina) : mail test UNIQUE du nouveau calcul « Relances du jour »,
+  // envoyé seulement à Lina, 3 min après le démarrage (le temps que Trello se
+  // charge). Une seule fois pour toujours : la clé est enregistrée en base.
+  setTimeout(() => {
+    try {
+      if (claimReportOnce('relances_test_lina_20261105')) reportRelancesQuotidien({ force: true, seulementA: 'lina.e@openmedias.fr' });
+    } catch (e) { console.warn('[RELANCES] test Lina :', e.message); }
+  }, 3 * 60 * 1000).unref();
 
   console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h, relances lun-ven 8h)');
 
