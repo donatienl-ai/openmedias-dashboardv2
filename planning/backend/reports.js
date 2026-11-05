@@ -461,44 +461,47 @@ function setupReports(db) {
       const j10 = `${il10.getFullYear()}-${String(il10.getMonth() + 1).padStart(2, '0')}-${String(il10.getDate()).padStart(2, '0')}`;
       avant = db.prepare('SELECT * FROM recouvrement_photos WHERE jour <= ? AND jour >= ? ORDER BY jour DESC LIMIT 1').get(j7, j10) || null;
     } catch (e) { avant = null; }
-    const evol = (maintenant, alors) => {
+    // Mise en page (05/11/2026, Lina) : courte, en couleurs, lisible sur ordinateur et téléphone
+    // (une seule colonne, 600 px max, lignes en 2 colonnes seulement).
+    const URL_DASH = 'https://openmedias-sales-dashboard.onrender.com/recouvrement/';
+    const MAX = 8;
+    const pill = (maintenant, alors) => {
       const diff = maintenant - alors; const pct = alors ? (diff / alors) * 100 : 0;
-      const couleur = diff > 0.5 ? '#b91c1c' : (diff < -0.5 ? '#15803d' : '#555');
-      const signe = diff > 0.5 ? '▲ +' : (diff < -0.5 ? '▼ −' : '= ');
-      return `<span style="color:${couleur}">${signe}${fmtMoney(Math.abs(diff))} (${diff >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1).replace('.', ',')} %)</span>`;
+      const [fond, texte, signe] = diff > 0.5 ? ['#fee2e2', '#b91c1c', '▲'] : (diff < -0.5 ? ['#dcfce7', '#15803d', '▼'] : ['#f1f5f9', '#475569', '=']);
+      return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${fond};color:${texte};font-size:12px;font-weight:bold">${signe} ${diff >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(1).replace('.', ',')} % <span style="font-weight:normal">vs ${dateFr(avant.jour)}</span></span>`;
     };
+    const kpi = (couleur, label, montant, nb, comparer) => `<tr><td style="padding:0 0 8px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f8fafc;border-left:4px solid ${couleur};border-radius:6px"><tr><td style="padding:10px 12px;font-size:13px;color:#475569">${label}<br><span style="font-size:12px;color:#94a3b8">${nb} facture${nb > 1 ? 's' : ''}</span></td><td style="padding:10px 12px;text-align:right;white-space:nowrap"><span style="font-size:20px;font-weight:bold;color:${couleur}">${fmtMoney(montant)}</span>${comparer != null && avant ? '<br>' + pill(montant, comparer) : ''}</td></tr></table></td></tr>`;
+    const titre = (couleur, texte, nb, montant) => `<tr><td style="padding:18px 0 6px"><span style="display:inline-block;width:10px;height:10px;border-radius:5px;background:${couleur};margin-right:6px"></span><strong style="font-size:15px;color:#0f172a">${texte}</strong> <span style="color:#64748b;font-size:13px">· ${nb} · ${fmtMoney(montant)}</span></td></tr>`;
+    const ligneFacture = (r, detail, couleur) => `<tr><td style="padding:0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-bottom:1px solid #eef2f7"><tr><td style="padding:8px 4px;font-size:14px;color:#0f172a">${r.customer_name || '—'}<br><span style="font-size:12px;color:#64748b">${r.invoice_number} · ${detail}</span></td><td style="padding:8px 4px;text-align:right;white-space:nowrap;font-size:14px;font-weight:bold;color:${couleur}">${fmtMoney(r.remaining_amount)}</td></tr></table></td></tr>`;
+    const reste = (liste, mot) => liste.length > MAX ? `<tr><td style="padding:8px 4px;font-size:12px;color:#64748b">+ ${liste.length - MAX} autre${liste.length - MAX > 1 ? 's' : ''} ${mot} (${fmtMoney(somme(liste.slice(MAX)))}) dans le dashboard</td></tr>` : '';
 
-    const td = 'padding:6px 8px;border-bottom:1px solid #eee';
-    const th = 'padding:7px 8px;text-align:left;background:#f3f4f6;color:#374151;font-weight:600';
-    const tableau = (entetes, lignes) => `<table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:13px;margin-bottom:6px"><tr>${entetes.map(([t, droite]) => `<th style="${th}${droite ? ';text-align:right' : ''}">${t}</th>`).join('')}</tr>${lignes.join('')}</table>`;
-    const contactDe = (r) => { const c = r.contact_name || ''; const det = [r.contact_email, r.contact_phone].filter(Boolean).join(' · '); return `${c}${det ? `${c ? '<br>' : ''}<span style="color:#888;font-size:11px">${det}</span>` : ''}`; };
-
-    let html = `<div style="font-family:Arial,sans-serif;color:#111;max-width:760px">`;
-    html += `<h2 style="margin:0 0 12px">💶 Recouvrement du ${dateFr(today)}</h2>`;
-    html += `<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;margin-bottom:18px">`;
-    html += `<tr><td style="padding:3px 16px 3px 0">À recouvrer</td><td style="padding:3px 16px 3px 0;text-align:right"><strong>${fmtMoney(totalRecouvrer)}</strong></td><td style="padding:3px 0;color:#555">${nbRecouvrer} factures${avant ? ' · ' + evol(totalRecouvrer, avant.a_recouvrer) + ` vs ${dateFr(avant.jour)}` : ''}</td></tr>`;
-    html += `<tr><td style="padding:3px 16px 3px 0">En retard</td><td style="padding:3px 16px 3px 0;text-align:right"><strong>${fmtMoney(totalRetard)}</strong></td><td style="padding:3px 0;color:#555">${nbRetard} factures${avant ? ' · ' + evol(totalRetard, avant.en_retard) + ` vs ${dateFr(avant.jour)}` : ''}</td></tr>`;
-    html += `<tr><td style="padding:3px 16px 3px 0">À relancer aujourd’hui</td><td style="padding:3px 16px 3px 0;text-align:right"><strong>${fmtMoney(totalRelancer)}</strong></td><td style="padding:3px 0;color:#555">${aRelancer.length} factures</td></tr>`;
-    html += `</table>`;
-    if (!avant) html += `<p style="color:#888;font-size:12px;margin:-10px 0 16px">Comparaison avec la semaine d’avant : disponible dès qu’une photo d’il y a 7 jours existe (photos enregistrées depuis le 05/11/2026).</p>`;
-
-    html += `<h3 style="margin:18px 0 6px">1. À relancer aujourd’hui — ${aRelancer.length} (${fmtMoney(totalRelancer)})</h3>`;
-    html += aRelancer.length ? tableau([['Facture'], ['Client'], ['Contact'], ['Retard', 1], ['Dû', 1]], aRelancer.map((r) => `<tr><td style="${td}">${r.invoice_number}</td><td style="${td}">${r.customer_name}</td><td style="${td}">${contactDe(r)}</td><td style="${td};text-align:right">${r.daysLate} j</td><td style="${td};text-align:right">${fmtMoney(r.remaining_amount)}</td></tr>`)) : '<p style="color:#555">Rien à relancer aujourd’hui.</p>';
-
-    html += `<h3 style="margin:18px 0 6px">2. En retard, déjà relancées ou promesse — ${relancees.length} (${fmtMoney(totalRelancees)})</h3>`;
-    html += relancees.length ? tableau([['Facture'], ['Client'], ['Retard', 1], ['Dû', 1], ['Suivi']], relancees.map((r) => `<tr><td style="${td}">${r.invoice_number}</td><td style="${td}">${r.customer_name}</td><td style="${td};text-align:right">${r.daysLate} j</td><td style="${td};text-align:right">${fmtMoney(r.remaining_amount)}</td><td style="${td};color:#555">${r.promesse ? 'Promesse' : 'Relancée'}${r.derniere ? ' le ' + dateFr(r.derniere) : ''}</td></tr>`)) : '<p style="color:#555">Aucune.</p>';
-
-    html += `<h3 style="margin:18px 0 6px">3. À échoir d’ici le ${dateFr(finFenetreTxt)} — ${aEchoir.length} (${fmtMoney(somme(aEchoir))})</h3>`;
-    html += aEchoir.length ? tableau([['Facture'], ['Client'], ['Échéance'], ['Dû', 1]], aEchoir.map((r) => `<tr><td style="${td}">${r.invoice_number}</td><td style="${td}">${r.customer_name}</td><td style="${td}">${dateFr(r.echeance)}</td><td style="${td};text-align:right">${fmtMoney(r.remaining_amount)}</td></tr>`)) : '<p style="color:#555">Aucune échéance d’ici là.</p>';
-
-    if (litiges.length) html += `<p style="color:#555;font-size:12px;margin-top:16px">Hors relance : ${litiges.length} litige(s) (${fmtMoney(somme(litiges))}) et ${nbReport} report(s) projet (${fmtMoney(totalReport)}), suivis à part dans le dashboard.</p>`;
-    if (sansTrello) html += '<p style="color:#b45309;font-size:13px">⚠️ Trello n’était pas chargé à l’envoi : les statuts venus de Trello ne sont pas appliqués dans ce mail.</p>';
-
+    const parMontant = [...aRelancer].sort((a, b) => b.remaining_amount - a.remaining_amount);
+    let html = `<div style="background:#f1f5f9;padding:16px 8px;font-family:Arial,Helvetica,sans-serif">`;
+    html += `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:600px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden">`;
+    html += `<tr><td style="background:#1e293b;padding:16px 18px;color:#ffffff"><span style="font-size:18px;font-weight:bold">💶 Recouvrement</span><br><span style="font-size:13px;color:#cbd5e1">${dateFr(today)} · ce qu’il y a à faire aujourd’hui</span></td></tr>`;
+    html += `<tr><td style="padding:16px 16px 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">`;
+    html += kpi('#1e293b', 'À recouvrer', totalRecouvrer, nbRecouvrer, avant ? avant.a_recouvrer : null);
+    html += kpi('#dc2626', 'En retard', totalRetard, nbRetard, avant ? avant.en_retard : null);
+    html += kpi('#ea580c', 'À relancer aujourd’hui', totalRelancer, aRelancer.length, avant ? avant.a_relancer : null);
+    html += `</table></td></tr>`;
+    html += `<tr><td style="padding:0 16px 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">`;
+    html += titre('#ea580c', 'À relancer', aRelancer.length, totalRelancer);
+    html += aRelancer.length ? parMontant.slice(0, MAX).map((r) => ligneFacture(r, `${r.daysLate} j de retard`, '#ea580c')).join('') + reste(parMontant, 'à relancer') : `<tr><td style="padding:8px 4px;font-size:13px;color:#64748b">Rien à relancer aujourd’hui.</td></tr>`;
+    if (relancees.length) html += `<tr><td style="padding:12px 0 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f8fafc;border-radius:6px"><tr><td style="padding:10px 12px;font-size:13px;color:#475569">✅ <strong style="color:#0f172a">${relancees.length} déjà relancée${relancees.length > 1 ? 's' : ''} ou en promesse</strong> (${fmtMoney(totalRelancees)}) : rien à faire avant 7 jours.</td></tr></table></td></tr>`;
+    html += titre('#2563eb', `À échoir d’ici le ${dateFr(finFenetreTxt)}`, aEchoir.length, somme(aEchoir));
+    html += aEchoir.length ? aEchoir.slice(0, 6).map((r) => ligneFacture(r, `échéance ${dateFr(r.echeance)}`, '#2563eb')).join('') + (aEchoir.length > 6 ? `<tr><td style="padding:8px 4px;font-size:12px;color:#64748b">+ ${aEchoir.length - 6} autre${aEchoir.length - 6 > 1 ? 's' : ''} à échoir (${fmtMoney(somme(aEchoir.slice(6)))}) dans le dashboard</td></tr>` : '') : `<tr><td style="padding:8px 4px;font-size:13px;color:#64748b">Aucune échéance d’ici là.</td></tr>`;
+    html += `<tr><td style="padding:20px 0 4px;text-align:center"><a href="${URL_DASH}" style="display:inline-block;background:#1e293b;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;padding:11px 22px;border-radius:8px">Ouvrir le recouvrement</a></td></tr>`;
+    const notes = [];
+    if (litiges.length || nbReport) notes.push(`Suivis à part : ${litiges.length} litige${litiges.length > 1 ? 's' : ''} (${fmtMoney(somme(litiges))}) · ${nbReport} report${nbReport > 1 ? 's' : ''} projet (${fmtMoney(totalReport)}).`);
+    if (!avant) notes.push('Comparaison avec la semaine d’avant : dès le 12/11.');
+    if (sansTrello) notes.push('⚠️ Trello n’était pas chargé : statuts Trello non appliqués.');
     const dest = destinatairesRecouvrement();
-    if (seulementA) html += `<p style="color:#888;font-size:11px;margin-top:16px">[TEST] Destinataires prévus à partir du mardi 10/11 : ${dest.length ? dest.join(', ') : 'aucun trouvé'}.</p>`;
+    if (seulementA) notes.push(`[TEST] Destinataires à partir du mardi 10/11 : ${dest.length ? dest.join(', ') : 'aucun trouvé'}.`);
+    if (notes.length) html += `<tr><td style="padding:12px 4px 0;font-size:11px;line-height:16px;color:#94a3b8">${notes.join('<br>')}</td></tr>`;
+    html += `</table></td></tr></table>`;
     html += empreinteHtml(aRelancer.length + ' à relancer · ' + relancees.length + ' relancées · ' + aEchoir.length + ' à échoir') + '</div>';
     if (!seulementA && !aRelancer.length && !relancees.length && !aEchoir.length) { console.log('[RELANCES] rien à signaler aujourd’hui — pas d’envoi'); return; }
-    sendMailOnly(`${seulementA ? '[TEST] ' : ''}💶 Recouvrement — ${aRelancer.length} à relancer · ${nbRetard} en retard (${fmtMoney(totalRetard)})`, html, seulementA ? [seulementA] : dest);
+    sendMailOnly(`${seulementA ? '[TEST] ' : ''}💶 Recouvrement ${dateFr(today)} — ${aRelancer.length} à relancer (${fmtMoney(totalRelancer)})`, html, seulementA ? [seulementA] : dest);
   }
 
   // Destinataires du mail recouvrement (05/11/2026, Lina) : Thomas, Lola, Fatima,
@@ -507,7 +510,7 @@ function setupReports(db) {
     const env = (process.env.REPORT_EMAIL_RECOUVREMENT || '').split(',').map((s) => s.trim()).filter(Boolean);
     if (env.length) return env;
     const prenoms = ['thomas', 'lola', 'fatima', 'arianne', 'ariane', 'lina'];
-    const norm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const norm = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     try {
       return db.prepare('SELECT email, nom FROM commercial_users WHERE actif=1').all().filter((r) => {
         const p = norm(r.nom).split(/[\s.\-_]+/)[0];
@@ -550,7 +553,7 @@ function setupReports(db) {
     else reportRelancesQuotidien({ photoSeulement: true });
   }, { timezone: 'Europe/Paris' });
   // Test unique demandé par Lina le 05/11/2026 : envoyé à elle seule, une seule fois.
-  setTimeout(() => { try { if (claimReportOnce('test_recouvrement_9h_20261105')) reportRelancesQuotidien({ force: true, seulementA: 'lina.e@openmedias.fr' }); } catch (e) { console.warn('[RELANCES] test :', e.message); } }, 60 * 1000).unref();
+  setTimeout(() => { try { if (claimReportOnce('test_recouvrement_9h_v2_20261105')) reportRelancesQuotidien({ force: true, seulementA: 'lina.e@openmedias.fr' }); } catch (e) { console.warn('[RELANCES] test :', e.message); } }, 60 * 1000).unref();
 
 
   console.log('📧 Reporting automatique configuré (mensuel, hebdo, aperçu N+1, kick-off lundi, à programmer lundi 14h, C-level lundi 14h, recouvrement mar-ven 9h)');
