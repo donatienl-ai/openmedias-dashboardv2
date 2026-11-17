@@ -211,6 +211,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── EXPORT OPENSTUDIO (lecture seule, clé dédiée) — voir ./openstudioExport.js ───
+require('./openstudioExport').registerOpenstudioExport(app, db);
+
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 app.post('/api/auth', (req, res) => {
   const { pin } = req.body;

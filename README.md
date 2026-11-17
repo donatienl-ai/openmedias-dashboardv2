@@ -184,3 +184,17 @@ Le service `bdc-generator.onrender.com` (version standalone du générateur de B
 - Graphiques d'évolution (CA mensuel, tendance hebdo)
 - Historique et comparaison de périodes
 - Panneau in-app pour gérer les comptes commerciaux / le flag admin (aujourd'hui : PATCH direct sur `/planning/api/admin/commerciaux/:id`)
+
+---
+
+## Export OpenStudio (lecture seule)
+
+`GET /planning/api/openstudio/diffusions` renvoie les diffusions **vidéo** du planning (formats `Plateau TV` et `Immersion` par défaut, modifiables avec `OPENSTUDIO_FORMATS`), avec leur statut et le signataire du bon de commande DocuSign (BDC signé en priorité). OpenStudio s'en sert pour créer les espaces clients, les codes de connexion et le mail du jour de diffusion.
+
+- **Lecture seule** : la route ne fait que des `SELECT`, rien n'est modifié dans le planning.
+- **Accès** : en-tête `X-OpenStudio-Key` égal à la variable `OPENSTUDIO_EXPORT_KEY` (même valeur côté OpenStudio). Sans cette variable, la route répond 503.
+- Paramètres facultatifs : `from=AAAA-MM-JJ` (défaut : il y a 90 jours ; les diffusions « à programmer » sont toujours incluses) et `since=<horodatage>` (seulement les lignes modifiées depuis).
+
+```bash
+curl https://<dashboard>/planning/api/openstudio/diffusions -H "X-OpenStudio-Key: $OPENSTUDIO_EXPORT_KEY"
+```
