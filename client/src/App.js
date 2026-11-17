@@ -1022,6 +1022,17 @@ function NewsletterSection({ nlData, nlLoading, rangeLabel, onOpenCampaigns }) {
 }
 
 
+// Sous-titre de la carte « Propositions suivies » selon le calcul actif côté
+// serveur (PROPALS_MODE) : "historique" = date de passage au statut
+// proposition ; "ancien" = statut actuel + dernière modification.
+function propalsSubLabel(d) {
+  const p = d?.propals?.mode;
+  const c = d?.propalsComptes?.mode;
+  if (p === 'historique' && c === 'historique') return 'passées en proposition sur la période';
+  if (p === 'historique') return 'pistes : passées en proposition · comptes : statut actuel';
+  return 'statuts actuels · modifiées sur la période';
+}
+
 // ---------- DASHBOARD ----------
 // ---------- "MA SEMAINE" — vue perso du commercial connecté ----------
 function MaSemaineModal({ open, onClose, nom, callsTotal, propalsTotal, propalsAmount, upcoming }) {
@@ -1694,7 +1705,7 @@ function Dashboard({ password, onLogout, theme, onToggleTheme }) {
           secondary={{ value: d.errors?.rdvBooked ? '—' : rdvB.r2.total, label: 'pris', dot: '#FBBF24' }}
           delta={dR2}
           clickable onClick={() => openModal('R2 par commercial', rdvT.r2.detail, false, 'c-bluer2', cmp ? cmpDetail(cmp.rdvToday?.r2) : [])} />
-        <Kpi unavailable={!!(d.errors?.propals || d.errors?.propalsComptes)} label="Propositions suivies" value={propals.total + propalsComptes.total} sub="statuts actuels · modifiées sur la période" color="c-orange" dot="#F97316"
+        <Kpi unavailable={!!(d.errors?.propals || d.errors?.propalsComptes)} label="Propositions suivies" value={propals.total + propalsComptes.total} sub={propalsSubLabel(d)} color="c-orange" dot="#F97316"
           secondary={[
             { value: propals.total, label: 'pistes', dot: '#F97316' },
             { value: propalsComptes.total, label: 'comptes', dot: '#FBBF24' },
