@@ -21,6 +21,7 @@ import {
   getPropals,
   getPropalsComptes,
   getCacheStats as getSalesforceCacheStats,
+  diagnosePropals,
 } from './salesforce.js';
 import { resolveRange, comparisonRange, previousQuarterStart } from './dateRange.js';
 import { getBdc, getCacheStats as getDocusignCacheStats } from './docusign.js';
@@ -478,6 +479,20 @@ app.get('/api/admin/cache', requireAdmin, (req, res) => {
     docusign: getDocusignCacheStats(),
     planningDb: { ok: planningDbOk, error: planningDbError },
   });
+});
+
+// Contrôle des propals (lecture seule, admin) : compare fiche par fiche l'ancien
+// calcul (dernière modification) et le nouveau (date de passage au statut,
+// historique Salesforce) sur une période, avant d'activer PROPALS_MODE=historique.
+// Ex. : /api/admin/propals-diagnostic?preset=last_7 ou ?preset=custom&start=2026-11-02&end=2026-11-16
+app.get('/api/admin/propals-diagnostic', requireAdmin, async (req, res) => {
+  try {
+    const preset = req.query.preset || 'last_7';
+    const range = resolveRange(preset, req.query.start, req.query.end);
+    res.json(await diagnosePropals(range));
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 app.post('/api/admin/settings', requireAdmin, (req, res) => {
