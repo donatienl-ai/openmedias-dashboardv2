@@ -151,4 +151,29 @@ async function getOpportunitiesEtape(ids) {
   return out;
 }
 
-module.exports = { getCommerciaux, getOpportunity, getOpportunitiesEtape, getLeadForBdc, extractSalesforceId };
+// Contact client de plusieurs opportunités en une requête par lot de 100 (export OpenStudio) :
+// { [Id]: { nom, email } }. Contact principal en priorité, sinon le premier rôle de contact ayant un e-mail.
+async function getOpportunityContacts(ids) {
+  const propres = [...new Set((ids || []).filter((x) => /^[a-zA-Z0-9]{15,18}$/.test(String(x))))];
+  if (!propres.length) return {};
+  const { accessToken, instanceUrl } = await getAuth();
+  const out = {};
+  for (let i = 0; i < propres.length; i += 100) {
+    const lot = propres.slice(i, i + 100).map((x) => "'" + x + "'").join(',');
+    const soql = encodeURIComponent(
+      'SELECT OpportunityId, IsPrimary, Contact.Name, Contact.Email FROM OpportunityContactRole ' +
+      'WHERE OpportunityId IN (' + lot + ') AND Contact.Email != null ORDER BY IsPrimary DESC, CreatedDate ASC'
+    );
+    const res = await fetch(`${instanceUrl}/services/data/v59.0/query?q=${soql}`, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const json = await res.json();
+    if (!res.ok) throw new Error(`Requête Salesforce échouée: ${JSON.stringify(json)}`);
+    for (const r of json.records || []) {
+      if (out[r.OpportunityId] || !r.Contact || !r.Contact.Email) continue; // le premier = le principal (tri)
+      const c = { nom: r.Contact.Name || null, email: r.Contact.Email };
+      out[r.OpportunityId] = c; out[String(r.OpportunityId).slice(0, 15)] = c;
+    }
+  }
+  return out;
+}
+
+module.exports = { getCommerciaux, getOpportunity, getOpportunitiesEtape, getOpportunityContacts, getLeadForBdc, extractSalesforceId };

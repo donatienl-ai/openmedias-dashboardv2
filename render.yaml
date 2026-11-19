@@ -95,5 +95,9 @@ services:
         value: donatien.l@openmedias.fr
       - key: SF_WEBHOOK_SECRET
         sync: false
+      # --- Export OpenStudio (lecture seule des diffusions vidéo, voir planning/backend/openstudioExport.js) ---
+      # Même valeur à saisir dans le service OpenStudio (PLANNING_EXPORT_KEY). Vide = route désactivée.
+      - key: OPENSTUDIO_EXPORT_KEY
+        sync: false
       - key: DB_PATH
         value: /var/data/planning.db
