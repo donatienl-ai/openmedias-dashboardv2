@@ -8,8 +8,9 @@
 //   Sans cette variable, la route répond 503 (désactivée).
 // - Toutes les diffusions vidéo sont renvoyées quel que soit leur statut (confirmée, à programmer,
 //   annulée…) : c'est OpenStudio qui décide quoi faire de chaque statut (création, report, annulation).
-// - Contact : le signataire du bon de commande DocuSign rattaché à la diffusion (BDC signé en priorité,
-//   sinon le plus récent).
+// - Contact : le signataire du bon de commande DocuSign envoyé depuis le dashboard (BDC signé en priorité,
+//   sinon le plus récent) ; à défaut, le contact de l'opportunité Salesforce (contact principal en priorité),
+//   lu par l'API Salesforce et gardé en cache quelques heures.
 const crypto = require('crypto');
 
 // Formats qui donnent une vidéo au client. Modifiable sans code : OPENSTUDIO_FORMATS="Plateau TV,Immersion,Spot TV"
@@ -86,13 +87,39 @@ function listDiffusions(db, { from, since, env = process.env, now = new Date() }
   return { formats, from: fromDay, diffusions: rows.map(toDiffusion) };
 }
 
-function registerOpenstudioExport(app, db, env = process.env) {
-  app.get('/api/openstudio/diffusions', (req, res) => {
+// ── Contact Salesforce en secours (diffusions sans BDC envoyé depuis le dashboard) ──
+const SF_CACHE_MS = 6 * 60 * 60 * 1000; // un contact change rarement : relu au plus toutes les 6 h
+function createSalesforceContacts(fetchContacts, { now = () => Date.now() } = {}) {
+  const cache = new Map(); // opportunité → { contact|null, at }
+  return async function complete(diffusions) {
+    const manquants = diffusions.filter((d) => !d.contact && d.sfOpportunityId);
+    const aLire = [...new Set(manquants.map((d) => d.sfOpportunityId))]
+      .filter((id) => { const c = cache.get(id); return !c || now() - c.at > SF_CACHE_MS; });
+    if (aLire.length) {
+      try {
+        const lus = await fetchContacts(aLire);
+        for (const id of aLire) cache.set(id, { contact: lus[id] || lus[String(id).slice(0, 15)] || null, at: now() });
+      } catch (e) {
+        console.warn('[OPENSTUDIO-EXPORT] contacts Salesforce :', e.message); // l'export part quand même, sans ces e-mails
+      }
+    }
+    for (const d of manquants) {
+      const c = cache.get(d.sfOpportunityId);
+      if (c && c.contact) d.contact = { nom: c.contact.nom, email: c.contact.email, source: 'salesforce', bdcSigne: false };
+    }
+    return diffusions;
+  };
+}
+
+function registerOpenstudioExport(app, db, env = process.env, fetchContacts = null) {
+  const sf = createSalesforceContacts(fetchContacts || ((ids) => require('./salesforce').getOpportunityContacts(ids)));
+  app.get('/api/openstudio/diffusions', async (req, res) => {
     const key = env.OPENSTUDIO_EXPORT_KEY;
     if (!key) return res.status(503).json({ error: 'Export OpenStudio désactivé (OPENSTUDIO_EXPORT_KEY non configurée)' });
     if (!keyMatches(key, req.headers['x-openstudio-key'])) return res.status(403).json({ error: 'Unauthorized' });
     try {
       const out = listDiffusions(db, { from: req.query.from, since: req.query.since, env });
+      await sf(out.diffusions);
       res.set('Cache-Control', 'no-store');
       res.json({ generatedAt: new Date().toISOString(), ...out });
     } catch (e) {
@@ -102,4 +129,4 @@ function registerOpenstudioExport(app, db, env = process.env) {
   });
 }
 
-module.exports = { registerOpenstudioExport, listDiffusions, videoFormats, keyMatches, buildQuery };
+module.exports = { registerOpenstudioExport, listDiffusions, videoFormats, keyMatches, buildQuery, createSalesforceContacts };

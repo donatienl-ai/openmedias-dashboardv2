@@ -189,7 +189,7 @@ Le service `bdc-generator.onrender.com` (version standalone du générateur de B
 
 ## Export OpenStudio (lecture seule)
 
-`GET /planning/api/openstudio/diffusions` renvoie les diffusions **vidéo** du planning (formats `Plateau TV` et `Immersion` par défaut, modifiables avec `OPENSTUDIO_FORMATS`), avec leur statut et le signataire du bon de commande DocuSign (BDC signé en priorité). OpenStudio s'en sert pour créer les espaces clients, les codes de connexion et le mail du jour de diffusion.
+`GET /planning/api/openstudio/diffusions` renvoie les diffusions **vidéo** du planning (formats `Plateau TV` et `Immersion` par défaut, modifiables avec `OPENSTUDIO_FORMATS`), avec leur statut et l'e-mail du client : le signataire du bon de commande DocuSign envoyé depuis le dashboard (BDC signé en priorité), à défaut le contact de l'opportunité Salesforce (contact principal en priorité, lu par l'API Salesforce, cache de 6 h ; si Salesforce ne répond pas, l'export part sans ces e-mails). OpenStudio s'en sert pour créer les espaces clients, les codes de connexion et le mail du jour de diffusion.
 
 - **Lecture seule** : la route ne fait que des `SELECT`, rien n'est modifié dans le planning.
 - **Accès** : en-tête `X-OpenStudio-Key` égal à la variable `OPENSTUDIO_EXPORT_KEY` (même valeur côté OpenStudio). Sans cette variable, la route répond 503.
