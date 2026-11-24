@@ -393,6 +393,7 @@ const SOUS_MEDIAS_SPECIALISES = {
 "Science & Vie Junior": ["Article digital"],
 "Science & Vie Découvertes": ["Article digital"],
 "Closer": ["Article digital"],
+"Gala": ["Article digital"],
 "Mission Patrimoine": ["Article digital"],
 "Entre Nous": ["Article digital"],
 "Télé Star": ["Article digital"],
